@@ -28,8 +28,65 @@ function generateSeasonalValue(baseValue: number, month: number, growthRate: num
   return Math.round(baseValue * seasonalFactor * yearFactor * randomFactor * 100) / 100;
 }
 
+function normalizeTenantSlug(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (!/^[a-z0-9-]+$/.test(normalized)) return fallback;
+  if (['www', 'api', 'app'].includes(normalized)) return fallback;
+  return normalized;
+}
+
+function getSeedTenantConfig() {
+  const frontendUrl = (process.env.FRONTEND_URL || '').trim();
+  const mainDomain = (process.env.MAIN_DOMAIN || '').trim().toLowerCase();
+
+  const explicitSlug = process.env.SEED_TENANT_SLUG;
+  const explicitName = (process.env.SEED_TENANT_NAME || '').trim();
+  const explicitDomain = (process.env.SEED_TENANT_DOMAIN || '').trim().toLowerCase();
+  const explicitAdminEmail = (process.env.SEED_ADMIN_EMAIL || '').trim().toLowerCase();
+  const explicitAdminPassword = (process.env.SEED_ADMIN_PASSWORD || '').trim();
+
+  let frontendHost = '';
+  try {
+    if (frontendUrl) {
+      frontendHost = new URL(frontendUrl).hostname.toLowerCase();
+    }
+  } catch {
+    frontendHost = '';
+  }
+
+  const tenantDomain = explicitDomain || frontendHost || 'demo.localhost';
+  const hostParts = tenantDomain.split('.').filter(Boolean);
+
+  let derivedSlug = 'demo';
+  if (tenantDomain.endsWith('.localhost') && hostParts.length === 2) {
+    derivedSlug = hostParts[0];
+  } else if (hostParts.length >= 3) {
+    derivedSlug = hostParts[0];
+  } else if (mainDomain && tenantDomain.endsWith(`.${mainDomain}`)) {
+    derivedSlug = tenantDomain.replace(`.${mainDomain}`, '');
+  }
+
+  const tenantSlug = normalizeTenantSlug(explicitSlug, normalizeTenantSlug(derivedSlug, 'demo'));
+  const tenantName = explicitName || `${tenantSlug.charAt(0).toUpperCase()}${tenantSlug.slice(1)} Company`;
+  const adminEmail = explicitAdminEmail || `admin@${tenantDomain}`;
+  const adminPassword = explicitAdminPassword || 'Admin123!';
+
+  return {
+    tenantSlug,
+    tenantName,
+    tenantDomain,
+    adminEmail,
+    adminPassword,
+  };
+}
+
 async function main() {
   console.log('🌱 Starting comprehensive database seeding...\n');
+
+  const seedTenant = getSeedTenantConfig();
+  const isPublicDomain = !seedTenant.tenantDomain.endsWith('.localhost') && seedTenant.tenantDomain !== 'localhost';
+  console.log(`🏢 Seeding tenant context: slug=${seedTenant.tenantSlug}, domain=${seedTenant.tenantDomain}`);
 
   // Clean existing data for fresh seed
   console.log('🧹 Cleaning existing data...');
@@ -68,13 +125,13 @@ async function main() {
   await prisma.customer.deleteMany({});
   await prisma.account.deleteMany({});
   
-  // Create demo tenant
+  // Create primary seeded tenant
   const tenant = await prisma.tenant.upsert({
-    where: { slug: 'demo' },
+    where: { slug: seedTenant.tenantSlug },
     update: {
-      name: 'Demo Company',
-      domain: 'demo.localhost',
-      subdomain: 'demo',
+      name: seedTenant.tenantName,
+      domain: seedTenant.tenantDomain,
+      subdomain: seedTenant.tenantSlug,
       status: 'ACTIVE',
       tier: 'PROFESSIONAL',
       timezone: 'America/New_York',
@@ -91,10 +148,10 @@ async function main() {
       },
     },
     create: {
-      name: 'Demo Company',
-      slug: 'demo',
-      domain: 'demo.localhost',
-      subdomain: 'demo',
+      name: seedTenant.tenantName,
+      slug: seedTenant.tenantSlug,
+      domain: seedTenant.tenantDomain,
+      subdomain: seedTenant.tenantSlug,
       status: 'ACTIVE',
       tier: 'PROFESSIONAL',
       timezone: 'America/New_York',
@@ -114,8 +171,7 @@ async function main() {
   console.log(`✅ Created tenant: ${tenant.name}`);
 
   const domainMappings = [
-    { domain: 'demo.localhost', sslEnabled: false },
-    { domain: 'demo.forecast-saas.com', sslEnabled: true },
+    { domain: seedTenant.tenantDomain, sslEnabled: isPublicDomain },
   ];
 
   for (const mapping of domainMappings) {
@@ -139,13 +195,13 @@ async function main() {
   console.log(`✅ Upserted ${domainMappings.length} tenant domain mappings`);
 
   // Create users
-  const adminPassword = await bcrypt.hash('Admin123!', 12);
+  const adminPassword = await bcrypt.hash(seedTenant.adminPassword, 12);
   const adminUser = await prisma.user.upsert({
-    where: { tenantId_email: { tenantId: tenant.id, email: 'admin@demo.com' } },
+    where: { tenantId_email: { tenantId: tenant.id, email: seedTenant.adminEmail } },
     update: {},
     create: {
       tenantId: tenant.id,
-      email: 'admin@demo.com',
+      email: seedTenant.adminEmail,
       passwordHash: adminPassword,
       firstName: 'Admin',
       lastName: 'User',
@@ -1613,8 +1669,8 @@ async function main() {
   console.log(`   • Inventory Levels:  ${levelCount}`);
   console.log('\n📋 Login Credentials:');
   console.log('━'.repeat(50));
-  console.log('   Email:     admin@demo.com');
-  console.log('   Password:  Admin123!');
+  console.log(`   Email:     ${seedTenant.adminEmail}`);
+  console.log(`   Password:  ${seedTenant.adminPassword}`);
   console.log('━'.repeat(50));
   console.log('\n✨ You can now explore the full application with realistic data!\n');
 }
