@@ -1,0 +1,27 @@
+export { default as BatchManagementPage } from './BatchManagement';
+export { default as BOMPage } from './BOM';
+export { default as CapacityPage } from './Capacity';
+export { default as CapacityPlansPage } from './CapacityPlansPage';
+export { default as FiscalCalendarPage } from './FiscalCalendar';
+export { default as ForecastAccuracyPage } from './ForecastAccuracy';
+export { default as InventoryPage } from './Inventory';
+export { default as LocationHierarchyPage } from './LocationHierarchyPage';
+export { ManufacturingDashboard } from './ManufacturingDashboard';
+export { default as ManufacturingRoutes } from './ManufacturingRoutes';
+export { default as MRPPage } from './MRP';
+export { default as NPIPage } from './NPI';
+export { default as ProductCategoryMasterPage } from './ProductCategoryMaster';
+export { default as ProductCostingPage } from './ProductCosting';
+export { default as ProductionPage } from './Production';
+export { default as PromotionsPage } from './Promotions';
+export { default as PurchaseContractsPage } from './PurchaseContracts';
+export { default as PurchaseOrdersPage } from './PurchaseOrders';
+export { default as QualityInspectionsPage } from './QualityInspections';
+export { default as SOPPage } from './SOP';
+export { default as SOPGapAnalysisPage } from './SOPGapAnalysis';
+export { default as SuppliersPage } from './Suppliers';
+export { default as UomConversionsPage } from './UomConversions';
+export { default as UomMasterPage } from './UomMaster';
+export { default as WorkflowPage } from './Workflow';
+export { default as WorkOrdersPage } from './WorkOrders';
+

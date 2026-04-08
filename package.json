@@ -1,0 +1,16 @@
+{
+  "name": "forecast-saas-orchestration",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Root orchestration scripts for Docker-based UAT deployment",
+  "scripts": {
+    "uat:up": "docker compose --env-file .env.docker up -d --build",
+    "uat:down": "docker compose --env-file .env.docker down",
+    "uat:logs": "docker compose --env-file .env.docker logs -f --tail=200",
+    "uat:ps": "docker compose --env-file .env.docker ps",
+    "uat:seed": "docker compose --env-file .env.docker exec api npm run db:seed",
+    "uat:restart": "docker compose --env-file .env.docker up -d --build",
+    "uat:rebuild": "docker compose --env-file .env.docker build --no-cache",
+    "uat:reset": "docker compose --env-file .env.docker down -v"
+  }
+}
