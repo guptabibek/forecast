@@ -17,6 +17,9 @@ export interface Promotion {
   products?: Array<{ id: string; sku: string; name: string }>;
   locationIds: string[];
   locations?: Array<{ id: string; code: string; name: string }>;
+  customerIds?: string[];
+  customers?: Array<{ id: string; code: string; name: string }>;
+  channelIds?: string[];
   discountPercent?: number;
   discountAmount?: number;
   marketingSpend?: number;
@@ -81,6 +84,7 @@ export const promotionService = {
     endDateTo?: string;
     productId?: string;
     locationId?: string;
+    channelId?: string;
     page?: number;
     pageSize?: number;
   }) {
@@ -102,6 +106,7 @@ export const promotionService = {
     endDate: string;
     productIds?: string[];
     locationIds?: string[];
+    customerIds?: string[];
     discountPercent?: number;
     discountAmount?: number;
     marketingSpend?: number;
@@ -129,6 +134,7 @@ export const promotionService = {
   async getActivePromotions(params?: {
     productId?: string;
     locationId?: string;
+    channelId?: string;
   }) {
     const response = await apiClient.get('/manufacturing/promotions/active', { params });
     return response.data;
@@ -138,6 +144,7 @@ export const promotionService = {
     days?: number;
     productId?: string;
     locationId?: string;
+    channelId?: string;
   }) {
     const response = await apiClient.get('/manufacturing/promotions/upcoming', { params });
     return response.data;

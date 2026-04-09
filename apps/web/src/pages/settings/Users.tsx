@@ -36,6 +36,11 @@ const roles: { value: UserRole; label: string; description: string }[] = [
     description: 'Create and manage plans and forecasts',
   },
   {
+    value: 'FORECAST_PLANNER',
+    label: 'Forecast Planner',
+    description: 'Planning, forecast, and data access without manufacturing navigation',
+  },
+  {
     value: 'FINANCE',
     label: 'Finance',
     description: 'View reports and approve forecasts',
@@ -45,13 +50,18 @@ const roles: { value: UserRole; label: string; description: string }[] = [
     label: 'Viewer',
     description: 'Read-only access to dashboards and reports',
   },
+  {
+    value: 'FORECAST_VIEWER',
+    label: 'Forecast Viewer',
+    description: 'Forecast-only read access with a reduced navigation footprint',
+  },
 ];
 
 const userSchema = z.object({
   email: z.string().email('Invalid email address'),
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
-  role: z.enum(['ADMIN', 'PLANNER', 'FINANCE', 'VIEWER']),
+  role: z.enum(['ADMIN', 'PLANNER', 'FORECAST_PLANNER', 'FINANCE', 'VIEWER', 'FORECAST_VIEWER']),
 });
 
 type UserFormData = z.infer<typeof userSchema>;
@@ -196,10 +206,14 @@ export default function Users() {
         return 'badge-error';
       case 'PLANNER':
         return 'badge-primary';
+      case 'FORECAST_PLANNER':
+        return 'badge-warning';
       case 'FINANCE':
         return 'badge-success';
       case 'VIEWER':
         return 'badge-secondary';
+      case 'FORECAST_VIEWER':
+        return 'badge-primary';
       default:
         return 'badge-secondary';
     }
@@ -290,7 +304,7 @@ export default function Users() {
                         <span className="text-xs text-secondary-500">(You)</span>
                       )}
                       <span className={clsx('badge', getRoleBadgeColor(user.role))}>
-                        {user.role}
+                        {roles.find((roleOption) => roleOption.value === user.role)?.label || user.role}
                       </span>
                     </div>
                     <div className="flex items-center gap-3 mt-0.5 text-sm text-secondary-500">

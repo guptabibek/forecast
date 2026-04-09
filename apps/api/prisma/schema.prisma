@@ -10,42 +10,45 @@ datasource db {
 }
 
 model Tenant {
-  id                  String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  name                String               @db.VarChar(255)
-  slug                String               @unique @db.VarChar(100)
-  domain              String?              @unique @db.VarChar(255)
-  subdomain           String?              @unique @db.VarChar(100)
-  status              TenantStatus         @default(ACTIVE)
-  tier                TenantTier           @default(STARTER)
-  settings            Json                 @default("{}")
-  logoUrl             String?              @db.VarChar(500)
-  primaryColor        String?              @db.VarChar(7)
-  timezone            String               @default("UTC") @db.VarChar(50)
-  fiscalYearStart     Int                  @default(1)
-  defaultCurrency     String               @default("USD") @db.VarChar(3)
-  dataRetentionDays   Int                  @default(2555)
-  createdAt           DateTime             @default(now()) @map("created_at")
-  updatedAt           DateTime             @updatedAt @map("updated_at")
-  accounts            Account[]
-  actuals             Actual[]
-  assumptions         Assumption[]
-  auditLogs           AuditLog[]
-  costCenters         CostCenter[]
-  customers           Customer[]
-  dataImports         DataImport[]
-  domainMappings      DomainMapping[]
-  forecasts           Forecast[]
-  locations           Location[]
-  mappingTemplates    MappingTemplate[]
-  notifications       Notification[]
-  passwordResetTokens PasswordResetToken[]
-  planVersions        PlanVersion[]
-  products            Product[]
-  reports             Report[]
-  scenarios           Scenario[]
-  users               User[]
-  unitOfMeasures      UnitOfMeasure[]     @relation("TenantUoms")
-  productCategories   ProductCategory[]   @relation("TenantProductCategories")
+  id                   String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                 String               @db.VarChar(255)
+  slug                 String               @unique @db.VarChar(100)
+  domain               String?              @unique @db.VarChar(255)
+  subdomain            String?              @unique @db.VarChar(100)
+  status               TenantStatus         @default(ACTIVE)
+  tier                 TenantTier           @default(STARTER)
+  settings             Json                 @default("{}")
+  logoUrl              String?              @db.VarChar(500)
+  primaryColor         String?              @db.VarChar(7)
+  timezone             String               @default("UTC") @db.VarChar(50)
+  fiscalYearStart      Int                  @default(1)
+  defaultCurrency      String               @default("USD") @db.VarChar(3)
+  dataRetentionDays    Int                  @default(2555)
+  createdAt            DateTime             @default(now()) @map("created_at")
+  updatedAt            DateTime             @updatedAt @map("updated_at")
+  accounts             Account[]
+  actuals              Actual[]
+  assumptions          Assumption[]
+  auditLogs            AuditLog[]
+  costCenters          CostCenter[]
+  customers            Customer[]
+  dataImports          DataImport[]
+  domainMappings       DomainMapping[]
+  forecasts            Forecast[]
+  locations            Location[]
+  mappingTemplates     MappingTemplate[]
+  notifications        Notification[]
+  passwordResetTokens  PasswordResetToken[]
+  planVersions         PlanVersion[]
+  products             Product[]
+  reports              Report[]
+  scenarios            Scenario[]
+  users                User[]
+  unitOfMeasures       UnitOfMeasure[]      @relation("TenantUoms")
+  productCategories    ProductCategory[]    @relation("TenantProductCategories")
+  productBrands        ProductBrand[]       @relation("TenantProductBrands")
+  productSubcategories ProductSubcategory[] @relation("TenantProductSubcategories")
+  channels             Channel[]            @relation("TenantChannels")
 
   @@map("tenants")
 }
@@ -133,6 +136,11 @@ model User {
   ecoRequested                    EngineeringChangeOrder[] @relation("ECORequestedBy")
   ecoApproved                     EngineeringChangeOrder[] @relation("ECOApprovedBy")
   ecoImplemented                  EngineeringChangeOrder[] @relation("ECOImplementedBy")
+  managedCostCenters              CostCenter[]             @relation("CostCenterManager")
+  sopCyclesDemandManaged          SOPCycle[]               @relation("SOPDemandManager")
+  sopCyclesSupplyManaged          SOPCycle[]               @relation("SOPSupplyManager")
+  sopCyclesFinanceManaged         SOPCycle[]               @relation("SOPFinanceManager")
+  sopCyclesExecutiveSponsored     SOPCycle[]               @relation("SOPExecutiveSponsor")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -179,9 +187,13 @@ model Product {
   name                    String                    @db.VarChar(255)
   description             String?
   category                String?                   @db.VarChar(100)
+  categoryId              String?                   @map("category_id") @db.Uuid
   subcategory             String?                   @db.VarChar(100)
+  subcategoryId           String?                   @map("subcategory_id") @db.Uuid
   brand                   String?                   @db.VarChar(100)
+  brandId                 String?                   @map("brand_id") @db.Uuid
   unitOfMeasure           String?                   @map("unit_of_measure") @db.VarChar(20)
+  unitOfMeasureId         String?                   @map("unit_of_measure_id") @db.Uuid
   standardCost            Decimal?                  @map("standard_cost") @db.Decimal(18, 4)
   listPrice               Decimal?                  @map("list_price") @db.Decimal(18, 4)
   status                  DimensionStatus           @default(ACTIVE)
@@ -198,6 +210,10 @@ model Product {
   forecastResults         ForecastResult[]
   forecasts               Forecast[]
   tenant                  Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryRef             ProductCategory?          @relation("ProductCategoryProducts", fields: [categoryId], references: [id])
+  subcategoryRef          ProductSubcategory?       @relation("ProductSubcategoryProducts", fields: [subcategoryId], references: [id])
+  brandRef                ProductBrand?             @relation("ProductBrandProducts", fields: [brandId], references: [id])
+  unitOfMeasureRef        UnitOfMeasure?            @relation("ProductUnitOfMeasure", fields: [unitOfMeasureId], references: [id])
   accuracyMetrics         ForecastAccuracyMetric[]  @relation("ProductAccuracyMetrics")
   inspections             QualityInspection[]       @relation("ProductInspections")
   uomConversions          UnitOfMeasureConversion[] @relation("ProductUomConversions")
@@ -223,60 +239,66 @@ model Product {
   nonConformanceReports   NonConformanceReport[]    @relation("ProductNCRs")
   plannedOrders           PlannedOrder[]            @relation("ProductPlannedOrders")
   mrpRequirements         MRPRequirement[]          @relation("ProductMRPRequirements")
+  promotionTargets        PromotionProductTarget[]  @relation("PromotionProductTargetProduct")
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([tenantId, category])
+  @@index([tenantId, categoryId])
+  @@index([tenantId, subcategoryId])
+  @@index([tenantId, brandId])
+  @@index([tenantId, unitOfMeasureId])
   @@map("products")
 }
 
 model Location {
-  id                      String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId                String                   @map("tenant_id") @db.Uuid
-  code                    String                   @db.VarChar(50)
-  name                    String                   @db.VarChar(255)
-  type                    LocationType             @default(WAREHOUSE)
-  address                 String?                  @db.VarChar(500)
-  city                    String?                  @db.VarChar(100)
-  state                   String?                  @db.VarChar(100)
-  country                 String?                  @db.VarChar(100)
-  postalCode              String?                  @map("postal_code") @db.VarChar(20)
-  region                  String?                  @db.VarChar(100)
-  timezone                String?                  @db.VarChar(50)
-  status                  DimensionStatus          @default(ACTIVE)
-  attributes              Json                     @default("{}")
-  externalId              String?                  @map("external_id") @db.VarChar(100)
-  createdAt               DateTime                 @default(now()) @map("created_at")
-  updatedAt               DateTime                 @updatedAt @map("updated_at")
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId                String                    @map("tenant_id") @db.Uuid
+  code                    String                    @db.VarChar(50)
+  name                    String                    @db.VarChar(255)
+  type                    LocationType              @default(WAREHOUSE)
+  address                 String?                   @db.VarChar(500)
+  city                    String?                   @db.VarChar(100)
+  state                   String?                   @db.VarChar(100)
+  country                 String?                   @db.VarChar(100)
+  postalCode              String?                   @map("postal_code") @db.VarChar(20)
+  region                  String?                   @db.VarChar(100)
+  timezone                String?                   @db.VarChar(50)
+  status                  DimensionStatus           @default(ACTIVE)
+  attributes              Json                      @default("{}")
+  externalId              String?                   @map("external_id") @db.VarChar(100)
+  createdAt               DateTime                  @default(now()) @map("created_at")
+  updatedAt               DateTime                  @updatedAt @map("updated_at")
   actuals                 Actual[]
   assumptions             Assumption[]
   forecastOverrides       ForecastOverride[]
   forecastReconciliations ForecastReconciliation[]
   forecastResults         ForecastResult[]
   forecasts               Forecast[]
-  tenant                  Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  accuracyMetrics         ForecastAccuracyMetric[] @relation("LocationAccuracyMetrics")
-  hierarchyNodes          LocationHierarchy[]      @relation("LocationHierarchyNode")
-  costings                ProductCosting[]         @relation("LocationCostings")
-  workCenters             WorkCenter[]             @relation("LocationWorkCenters")
-  inventoryPolicies       InventoryPolicy[]        @relation("LocationPolicies")
-  inventoryLevels         InventoryLevel[]         @relation("LocationLevels")
-  workOrders              WorkOrder[]              @relation("LocationWorkOrders")
-  purchaseOrders          PurchaseOrder[]          @relation("LocationPurchaseOrders")
-  goodsReceipts           GoodsReceipt[]           @relation("LocationGoodsReceipts")
-  materialIssues          MaterialIssue[]          @relation("LocationMaterialIssues")
-  productionCompletions   ProductionCompletion[]   @relation("LocationCompletions")
-  inventoryTransactions   InventoryTransaction[]   @relation("LocationTransactions")
-  inventoryTransfersTo    InventoryTransaction[]   @relation("TransferToLocation")
-  batches                 Batch[]                  @relation("LocationBatches")
-  inventoryReservations   InventoryReservation[]   @relation("LocationReservations")
-  inventoryHolds          InventoryHold[]          @relation("LocationHolds")
-  inventoryLedgerEntries  InventoryLedger[]        @relation("LocationLedgerEntries")
-  plannedOrders           PlannedOrder[]           @relation("LocationPlannedOrders")
-  plannedOrderSources     PlannedOrder[]           @relation("SourceLocationPlannedOrders")
-  postingProfiles         PostingProfile[]         @relation("PostingProfileLocation")
-  nonConformanceReports   NonConformanceReport[]   @relation("LocationNCRs")
-  qualityInspections      QualityInspection[]      @relation("LocationInspections")
+  tenant                  Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  accuracyMetrics         ForecastAccuracyMetric[]  @relation("LocationAccuracyMetrics")
+  hierarchyNodes          LocationHierarchy[]       @relation("LocationHierarchyNode")
+  costings                ProductCosting[]          @relation("LocationCostings")
+  workCenters             WorkCenter[]              @relation("LocationWorkCenters")
+  inventoryPolicies       InventoryPolicy[]         @relation("LocationPolicies")
+  inventoryLevels         InventoryLevel[]          @relation("LocationLevels")
+  workOrders              WorkOrder[]               @relation("LocationWorkOrders")
+  purchaseOrders          PurchaseOrder[]           @relation("LocationPurchaseOrders")
+  goodsReceipts           GoodsReceipt[]            @relation("LocationGoodsReceipts")
+  materialIssues          MaterialIssue[]           @relation("LocationMaterialIssues")
+  productionCompletions   ProductionCompletion[]    @relation("LocationCompletions")
+  inventoryTransactions   InventoryTransaction[]    @relation("LocationTransactions")
+  inventoryTransfersTo    InventoryTransaction[]    @relation("TransferToLocation")
+  batches                 Batch[]                   @relation("LocationBatches")
+  inventoryReservations   InventoryReservation[]    @relation("LocationReservations")
+  inventoryHolds          InventoryHold[]           @relation("LocationHolds")
+  inventoryLedgerEntries  InventoryLedger[]         @relation("LocationLedgerEntries")
+  plannedOrders           PlannedOrder[]            @relation("LocationPlannedOrders")
+  plannedOrderSources     PlannedOrder[]            @relation("SourceLocationPlannedOrders")
+  postingProfiles         PostingProfile[]          @relation("PostingProfileLocation")
+  nonConformanceReports   NonConformanceReport[]    @relation("LocationNCRs")
+  qualityInspections      QualityInspection[]       @relation("LocationInspections")
+  promotionTargets        PromotionLocationTarget[] @relation("PromotionLocationTargetLocation")
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -285,29 +307,30 @@ model Location {
 }
 
 model Customer {
-  id                      String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId                String                   @map("tenant_id") @db.Uuid
-  code                    String                   @db.VarChar(50)
-  name                    String                   @db.VarChar(255)
-  type                    CustomerType             @default(DIRECT)
-  segment                 String?                  @db.VarChar(100)
-  industry                String?                  @db.VarChar(100)
-  country                 String?                  @db.VarChar(100)
-  region                  String?                  @db.VarChar(100)
-  creditLimit             Decimal?                 @map("credit_limit") @db.Decimal(18, 2)
-  paymentTerms            String?                  @map("payment_terms") @db.VarChar(50)
-  status                  DimensionStatus          @default(ACTIVE)
-  attributes              Json                     @default("{}")
-  externalId              String?                  @map("external_id") @db.VarChar(100)
-  createdAt               DateTime                 @default(now()) @map("created_at")
-  updatedAt               DateTime                 @updatedAt @map("updated_at")
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId                String                    @map("tenant_id") @db.Uuid
+  code                    String                    @db.VarChar(50)
+  name                    String                    @db.VarChar(255)
+  type                    CustomerType              @default(DIRECT)
+  segment                 String?                   @db.VarChar(100)
+  industry                String?                   @db.VarChar(100)
+  country                 String?                   @db.VarChar(100)
+  region                  String?                   @db.VarChar(100)
+  creditLimit             Decimal?                  @map("credit_limit") @db.Decimal(18, 2)
+  paymentTerms            String?                   @map("payment_terms") @db.VarChar(50)
+  status                  DimensionStatus           @default(ACTIVE)
+  attributes              Json                      @default("{}")
+  externalId              String?                   @map("external_id") @db.VarChar(100)
+  createdAt               DateTime                  @default(now()) @map("created_at")
+  updatedAt               DateTime                  @updatedAt @map("updated_at")
   actuals                 Actual[]
   assumptions             Assumption[]
-  tenant                  Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant                  Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   forecastOverrides       ForecastOverride[]
   forecastReconciliations ForecastReconciliation[]
   forecastResults         ForecastResult[]
   forecasts               Forecast[]
+  promotionTargets        PromotionCustomerTarget[] @relation("PromotionCustomerTargetCustomer")
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -354,6 +377,7 @@ model CostCenter {
   name                    String                   @db.VarChar(255)
   department              String?                  @db.VarChar(100)
   manager                 String?                  @db.VarChar(255)
+  managerId               String?                  @map("manager_id") @db.Uuid
   parentId                String?                  @map("parent_id") @db.Uuid
   status                  DimensionStatus          @default(ACTIVE)
   externalId              String?                  @map("external_id") @db.VarChar(100)
@@ -362,6 +386,7 @@ model CostCenter {
   actuals                 Actual[]
   parent                  CostCenter?              @relation("CostCenterHierarchy", fields: [parentId], references: [id])
   children                CostCenter[]             @relation("CostCenterHierarchy")
+  managerUser             User?                    @relation("CostCenterManager", fields: [managerId], references: [id])
   tenant                  Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   forecastOverrides       ForecastOverride[]
   forecastReconciliations ForecastReconciliation[]
@@ -370,6 +395,7 @@ model CostCenter {
 
   @@unique([tenantId, code])
   @@index([tenantId])
+  @@index([tenantId, managerId])
   @@map("cost_centers")
 }
 
@@ -1382,31 +1408,35 @@ model WorkflowAction {
 }
 
 model Promotion {
-  id                String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId          String                @map("tenant_id") @db.Uuid
-  code              String                @db.VarChar(50)
-  name              String                @db.VarChar(255)
+  id                String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId          String                    @map("tenant_id") @db.Uuid
+  code              String                    @db.VarChar(50)
+  name              String                    @db.VarChar(255)
   description       String?
   type              PromotionType
-  status            PromotionStatus       @default(DRAFT)
-  startDate         DateTime              @map("start_date") @db.Date
-  endDate           DateTime              @map("end_date") @db.Date
-  preOrderStartDate DateTime?             @map("pre_order_start_date") @db.Date
-  budget            Decimal?              @db.Decimal(18, 2)
-  actualSpend       Decimal?              @map("actual_spend") @db.Decimal(18, 2)
-  expectedROI       Decimal?              @map("expected_roi") @db.Decimal(8, 2)
-  actualROI         Decimal?              @map("actual_roi") @db.Decimal(8, 2)
-  discountPercent   Decimal?              @map("discount_percent") @db.Decimal(8, 2)
-  discountAmount    Decimal?              @map("discount_amount") @db.Decimal(18, 2)
-  marketingSpend    Decimal?              @map("marketing_spend") @db.Decimal(18, 2)
+  status            PromotionStatus           @default(DRAFT)
+  startDate         DateTime                  @map("start_date") @db.Date
+  endDate           DateTime                  @map("end_date") @db.Date
+  preOrderStartDate DateTime?                 @map("pre_order_start_date") @db.Date
+  budget            Decimal?                  @db.Decimal(18, 2)
+  actualSpend       Decimal?                  @map("actual_spend") @db.Decimal(18, 2)
+  expectedROI       Decimal?                  @map("expected_roi") @db.Decimal(8, 2)
+  actualROI         Decimal?                  @map("actual_roi") @db.Decimal(8, 2)
+  discountPercent   Decimal?                  @map("discount_percent") @db.Decimal(8, 2)
+  discountAmount    Decimal?                  @map("discount_amount") @db.Decimal(18, 2)
+  marketingSpend    Decimal?                  @map("marketing_spend") @db.Decimal(18, 2)
   notes             String?
-  productIds        String[]              @map("product_ids")
-  locationIds       String[]              @map("location_ids")
-  customerIds       String[]              @map("customer_ids")
-  channelIds        String[]              @map("channel_ids")
-  createdAt         DateTime              @default(now()) @map("created_at")
-  updatedAt         DateTime              @updatedAt @map("updated_at")
+  productIds        String[]                  @map("product_ids")
+  locationIds       String[]                  @map("location_ids")
+  customerIds       String[]                  @map("customer_ids")
+  channelIds        String[]                  @map("channel_ids")
+  createdAt         DateTime                  @default(now()) @map("created_at")
+  updatedAt         DateTime                  @updatedAt @map("updated_at")
   liftFactors       PromotionLiftFactor[]
+  productTargets    PromotionProductTarget[]  @relation("PromotionProductTargets")
+  locationTargets   PromotionLocationTarget[] @relation("PromotionLocationTargets")
+  customerTargets   PromotionCustomerTarget[] @relation("PromotionCustomerTargets")
+  channelTargets    PromotionChannelTarget[]  @relation("PromotionChannelTargets")
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -1432,33 +1462,85 @@ model PromotionLiftFactor {
   @@map("promotion_lift_factors")
 }
 
+model PromotionProductTarget {
+  promotionId String    @map("promotion_id") @db.Uuid
+  productId   String    @map("product_id") @db.Uuid
+  promotion   Promotion @relation("PromotionProductTargets", fields: [promotionId], references: [id], onDelete: Cascade)
+  product     Product   @relation("PromotionProductTargetProduct", fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, productId])
+  @@index([productId])
+  @@map("promotion_product_targets")
+}
+
+model PromotionLocationTarget {
+  promotionId String    @map("promotion_id") @db.Uuid
+  locationId  String    @map("location_id") @db.Uuid
+  promotion   Promotion @relation("PromotionLocationTargets", fields: [promotionId], references: [id], onDelete: Cascade)
+  location    Location  @relation("PromotionLocationTargetLocation", fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, locationId])
+  @@index([locationId])
+  @@map("promotion_location_targets")
+}
+
+model PromotionCustomerTarget {
+  promotionId String    @map("promotion_id") @db.Uuid
+  customerId  String    @map("customer_id") @db.Uuid
+  promotion   Promotion @relation("PromotionCustomerTargets", fields: [promotionId], references: [id], onDelete: Cascade)
+  customer    Customer  @relation("PromotionCustomerTargetCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, customerId])
+  @@index([customerId])
+  @@map("promotion_customer_targets")
+}
+
+model PromotionChannelTarget {
+  promotionId String    @map("promotion_id") @db.Uuid
+  channelId   String    @map("channel_id") @db.Uuid
+  promotion   Promotion @relation("PromotionChannelTargets", fields: [promotionId], references: [id], onDelete: Cascade)
+  channel     Channel   @relation("PromotionChannelTargetChannel", fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, channelId])
+  @@index([channelId])
+  @@map("promotion_channel_targets")
+}
+
 model SOPCycle {
-  id               String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId         String           @map("tenant_id") @db.Uuid
-  name             String           @db.VarChar(255)
-  fiscalYear       Int              @map("fiscal_year")
-  fiscalPeriod     Int              @map("fiscal_period")
-  status           SOPStatus        @default(PLANNING)
-  planningStart    DateTime         @map("planning_start") @db.Date
-  demandReviewDate DateTime         @map("demand_review_date") @db.Date
-  supplyReviewDate DateTime         @map("supply_review_date") @db.Date
-  preSopDate       DateTime         @map("pre_sop_date") @db.Date
-  executiveSopDate DateTime         @map("executive_sop_date") @db.Date
-  planningEnd      DateTime         @map("planning_end") @db.Date
-  demandManager    String?          @map("demand_manager") @db.Uuid
-  supplyManager    String?          @map("supply_manager") @db.Uuid
-  financeManager   String?          @map("finance_manager") @db.Uuid
-  executiveSponsor String?          @map("executive_sponsor") @db.Uuid
-  notes            String?
-  decisions        Json?
-  createdAt        DateTime         @default(now()) @map("created_at")
-  updatedAt        DateTime         @updatedAt @map("updated_at")
-  assumptions      SOPAssumption[]
-  forecasts        SOPForecast[]
-  gapAnalyses      SOPGapAnalysis[] @relation("SOPCycleGapAnalysis")
+  id                   String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId             String           @map("tenant_id") @db.Uuid
+  name                 String           @db.VarChar(255)
+  fiscalYear           Int              @map("fiscal_year")
+  fiscalPeriod         Int              @map("fiscal_period")
+  status               SOPStatus        @default(PLANNING)
+  planningStart        DateTime         @map("planning_start") @db.Date
+  demandReviewDate     DateTime         @map("demand_review_date") @db.Date
+  supplyReviewDate     DateTime         @map("supply_review_date") @db.Date
+  preSopDate           DateTime         @map("pre_sop_date") @db.Date
+  executiveSopDate     DateTime         @map("executive_sop_date") @db.Date
+  planningEnd          DateTime         @map("planning_end") @db.Date
+  demandManager        String?          @map("demand_manager") @db.Uuid
+  supplyManager        String?          @map("supply_manager") @db.Uuid
+  financeManager       String?          @map("finance_manager") @db.Uuid
+  executiveSponsor     String?          @map("executive_sponsor") @db.Uuid
+  notes                String?
+  decisions            Json?
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+  assumptions          SOPAssumption[]
+  forecasts            SOPForecast[]
+  gapAnalyses          SOPGapAnalysis[] @relation("SOPCycleGapAnalysis")
+  demandManagerUser    User?            @relation("SOPDemandManager", fields: [demandManager], references: [id])
+  supplyManagerUser    User?            @relation("SOPSupplyManager", fields: [supplyManager], references: [id])
+  financeManagerUser   User?            @relation("SOPFinanceManager", fields: [financeManager], references: [id])
+  executiveSponsorUser User?            @relation("SOPExecutiveSponsor", fields: [executiveSponsor], references: [id])
 
   @@unique([tenantId, fiscalYear, fiscalPeriod])
   @@index([tenantId])
+  @@index([tenantId, demandManager])
+  @@index([tenantId, supplyManager])
+  @@index([tenantId, financeManager])
+  @@index([tenantId, executiveSponsor])
   @@map("sop_cycles")
 }
 
@@ -1921,8 +2003,10 @@ enum TenantTier {
 enum UserRole {
   ADMIN
   PLANNER
+  FORECAST_PLANNER
   FINANCE
   VIEWER
+  FORECAST_VIEWER
 }
 
 enum UserStatus {
@@ -2507,22 +2591,23 @@ model QualityInspection {
 
 // Unit of Measure Master — Defines all valid UOMs per tenant
 model UnitOfMeasure {
-  id                  String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId            String                    @map("tenant_id") @db.Uuid
-  code                String                    @db.VarChar(20)
-  name                String                    @db.VarChar(100)
-  symbol              String?                   @db.VarChar(10)
-  category            UomCategory               @default(OTHER)
-  description         String?                   @db.VarChar(500)
-  decimals            Int                       @default(2)
-  isBase              Boolean                   @default(false) @map("is_base")
-  isActive            Boolean                   @default(true) @map("is_active")
-  sortOrder           Int                       @default(0) @map("sort_order")
-  createdAt           DateTime                  @default(now()) @map("created_at")
-  updatedAt           DateTime                  @updatedAt @map("updated_at")
-  tenant              Tenant                    @relation("TenantUoms", fields: [tenantId], references: [id], onDelete: Cascade)
-  conversionsFrom     UnitOfMeasureConversion[]  @relation("ConversionFromUom")
-  conversionsTo       UnitOfMeasureConversion[]  @relation("ConversionToUom")
+  id              String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String                    @map("tenant_id") @db.Uuid
+  code            String                    @db.VarChar(20)
+  name            String                    @db.VarChar(100)
+  symbol          String?                   @db.VarChar(10)
+  category        UomCategory               @default(OTHER)
+  description     String?                   @db.VarChar(500)
+  decimals        Int                       @default(2)
+  isBase          Boolean                   @default(false) @map("is_base")
+  isActive        Boolean                   @default(true) @map("is_active")
+  sortOrder       Int                       @default(0) @map("sort_order")
+  createdAt       DateTime                  @default(now()) @map("created_at")
+  updatedAt       DateTime                  @updatedAt @map("updated_at")
+  tenant          Tenant                    @relation("TenantUoms", fields: [tenantId], references: [id], onDelete: Cascade)
+  products        Product[]                 @relation("ProductUnitOfMeasure")
+  conversionsFrom UnitOfMeasureConversion[] @relation("ConversionFromUom")
+  conversionsTo   UnitOfMeasureConversion[] @relation("ConversionToUom")
 
   @@unique([tenantId, code])
   @@index([tenantId, category])
@@ -2532,21 +2617,24 @@ model UnitOfMeasure {
 
 // Product Category Master — Defines all valid product categories per tenant
 model ProductCategory {
-  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId    String    @map("tenant_id") @db.Uuid
-  code        String    @db.VarChar(50)
-  name        String    @db.VarChar(100)
-  description String?   @db.VarChar(500)
-  color       String?   @db.VarChar(7)
-  icon        String?   @db.VarChar(50)
-  parentId    String?   @map("parent_id") @db.Uuid
-  sortOrder   Int       @default(0) @map("sort_order")
-  isActive    Boolean   @default(true) @map("is_active")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-  tenant      Tenant    @relation("TenantProductCategories", fields: [tenantId], references: [id], onDelete: Cascade)
-  parent      ProductCategory?  @relation("ProductCategoryHierarchy", fields: [parentId], references: [id])
-  children    ProductCategory[] @relation("ProductCategoryHierarchy")
+  id              String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String               @map("tenant_id") @db.Uuid
+  code            String               @db.VarChar(50)
+  name            String               @db.VarChar(100)
+  description     String?              @db.VarChar(500)
+  color           String?              @db.VarChar(7)
+  icon            String?              @db.VarChar(50)
+  parentId        String?              @map("parent_id") @db.Uuid
+  sortOrder       Int                  @default(0) @map("sort_order")
+  isActive        Boolean              @default(true) @map("is_active")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  tenant          Tenant               @relation("TenantProductCategories", fields: [tenantId], references: [id], onDelete: Cascade)
+  parent          ProductCategory?     @relation("ProductCategoryHierarchy", fields: [parentId], references: [id])
+  children        ProductCategory[]    @relation("ProductCategoryHierarchy")
+  products        Product[]            @relation("ProductCategoryProducts")
+  subcategories   ProductSubcategory[] @relation("ProductSubcategoryCategory")
+  postingProfiles PostingProfile[]     @relation("PostingProfileProductCategory")
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -2554,22 +2642,80 @@ model ProductCategory {
   @@map("product_categories")
 }
 
+model ProductBrand {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  code        String    @db.VarChar(50)
+  name        String    @db.VarChar(100)
+  description String?   @db.VarChar(500)
+  sortOrder   Int       @default(0) @map("sort_order")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  tenant      Tenant    @relation("TenantProductBrands", fields: [tenantId], references: [id], onDelete: Cascade)
+  products    Product[] @relation("ProductBrandProducts")
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("product_brands")
+}
+
+model ProductSubcategory {
+  id          String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String           @map("tenant_id") @db.Uuid
+  code        String           @db.VarChar(50)
+  name        String           @db.VarChar(100)
+  description String?          @db.VarChar(500)
+  categoryId  String?          @map("category_id") @db.Uuid
+  sortOrder   Int              @default(0) @map("sort_order")
+  isActive    Boolean          @default(true) @map("is_active")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  tenant      Tenant           @relation("TenantProductSubcategories", fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryRef ProductCategory? @relation("ProductSubcategoryCategory", fields: [categoryId], references: [id])
+  products    Product[]        @relation("ProductSubcategoryProducts")
+
+  @@unique([tenantId, code])
+  @@index([tenantId, categoryId])
+  @@index([tenantId, isActive])
+  @@map("product_subcategories")
+}
+
+model Channel {
+  id               String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId         String                   @map("tenant_id") @db.Uuid
+  code             String                   @db.VarChar(50)
+  name             String                   @db.VarChar(100)
+  description      String?                  @db.VarChar(500)
+  channelType      String?                  @map("channel_type") @db.VarChar(50)
+  sortOrder        Int                      @default(0) @map("sort_order")
+  isActive         Boolean                  @default(true) @map("is_active")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+  tenant           Tenant                   @relation("TenantChannels", fields: [tenantId], references: [id], onDelete: Cascade)
+  promotionTargets PromotionChannelTarget[] @relation("PromotionChannelTargetChannel")
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("channels")
+}
+
 // Unit of Measure Conversion — Critical for multi-UoM planning
 model UnitOfMeasureConversion {
-  id          String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId    String          @map("tenant_id") @db.Uuid
-  fromUom     String          @map("from_uom") @db.VarChar(20)
-  toUom       String          @map("to_uom") @db.VarChar(20)
-  fromUomId   String?         @map("from_uom_id") @db.Uuid
-  toUomId     String?         @map("to_uom_id") @db.Uuid
-  productId   String?         @map("product_id") @db.Uuid
-  factor      Decimal         @db.Decimal(18, 8)
-  isActive    Boolean         @default(true) @map("is_active")
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
-  product     Product?        @relation("ProductUomConversions", fields: [productId], references: [id])
-  fromUomRef  UnitOfMeasure?  @relation("ConversionFromUom", fields: [fromUomId], references: [id])
-  toUomRef    UnitOfMeasure?  @relation("ConversionToUom", fields: [toUomId], references: [id])
+  id         String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId   String         @map("tenant_id") @db.Uuid
+  fromUom    String         @map("from_uom") @db.VarChar(20)
+  toUom      String         @map("to_uom") @db.VarChar(20)
+  fromUomId  String?        @map("from_uom_id") @db.Uuid
+  toUomId    String?        @map("to_uom_id") @db.Uuid
+  productId  String?        @map("product_id") @db.Uuid
+  factor     Decimal        @db.Decimal(18, 8)
+  isActive   Boolean        @default(true) @map("is_active")
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+  product    Product?       @relation("ProductUomConversions", fields: [productId], references: [id])
+  fromUomRef UnitOfMeasure? @relation("ConversionFromUom", fields: [fromUomId], references: [id])
+  toUomRef   UnitOfMeasure? @relation("ConversionToUom", fields: [toUomId], references: [id])
 
   @@unique([tenantId, fromUom, toUom, productId])
   @@index([tenantId])
@@ -2967,24 +3113,24 @@ enum PostingTransactionType {
 }
 
 model GLAccount {
-  id             String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId       String             @map("tenant_id") @db.Uuid
-  accountNumber  String             @map("account_number") @db.VarChar(20)
-  name           String             @db.VarChar(255)
-  accountType    GLAccountType      @default(ASSET) @map("account_type")
-  parentId       String?            @map("parent_id") @db.Uuid
-  isActive          Boolean            @default(true) @map("is_active")
-  isSystem          Boolean            @default(false) @map("is_system")
-  isInventoryAsset  Boolean            @default(false) @map("is_inventory_asset")
-  normalBalance     NormalBalance      @default(DEBIT) @map("normal_balance")
-  description       String?
-  createdAt         DateTime           @default(now()) @map("created_at")
-  updatedAt         DateTime           @updatedAt @map("updated_at")
-  parent            GLAccount?         @relation("GLAccountHierarchy", fields: [parentId], references: [id])
-  children          GLAccount[]        @relation("GLAccountHierarchy")
-  debitProfiles     PostingProfile[]   @relation("DebitAccount")
-  creditProfiles    PostingProfile[]   @relation("CreditAccount")
-  journalLines      JournalEntryLine[]
+  id               String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId         String             @map("tenant_id") @db.Uuid
+  accountNumber    String             @map("account_number") @db.VarChar(20)
+  name             String             @db.VarChar(255)
+  accountType      GLAccountType      @default(ASSET) @map("account_type")
+  parentId         String?            @map("parent_id") @db.Uuid
+  isActive         Boolean            @default(true) @map("is_active")
+  isSystem         Boolean            @default(false) @map("is_system")
+  isInventoryAsset Boolean            @default(false) @map("is_inventory_asset")
+  normalBalance    NormalBalance      @default(DEBIT) @map("normal_balance")
+  description      String?
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  parent           GLAccount?         @relation("GLAccountHierarchy", fields: [parentId], references: [id])
+  children         GLAccount[]        @relation("GLAccountHierarchy")
+  debitProfiles    PostingProfile[]   @relation("DebitAccount")
+  creditProfiles   PostingProfile[]   @relation("CreditAccount")
+  journalLines     JournalEntryLine[]
 
   @@unique([tenantId, accountNumber])
   @@index([tenantId])
@@ -2994,25 +3140,28 @@ model GLAccount {
 }
 
 model PostingProfile {
-  id              String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId        String                 @map("tenant_id") @db.Uuid
-  profileName     String                 @map("profile_name") @db.VarChar(100)
-  transactionType PostingTransactionType @map("transaction_type")
-  debitAccountId  String                 @map("debit_account_id") @db.Uuid
-  creditAccountId String                 @map("credit_account_id") @db.Uuid
-  productCategory String?                @map("product_category") @db.VarChar(100)
-  locationId      String?                @map("location_id") @db.Uuid
-  isActive        Boolean                @default(true) @map("is_active")
-  priority        Int                    @default(0)
-  description     String?
-  createdAt       DateTime               @default(now()) @map("created_at")
-  updatedAt       DateTime               @updatedAt @map("updated_at")
-  debitAccount    GLAccount              @relation("DebitAccount", fields: [debitAccountId], references: [id])
-  creditAccount   GLAccount              @relation("CreditAccount", fields: [creditAccountId], references: [id])
-  location        Location?              @relation("PostingProfileLocation", fields: [locationId], references: [id])
+  id                 String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId           String                 @map("tenant_id") @db.Uuid
+  profileName        String                 @map("profile_name") @db.VarChar(100)
+  transactionType    PostingTransactionType @map("transaction_type")
+  debitAccountId     String                 @map("debit_account_id") @db.Uuid
+  creditAccountId    String                 @map("credit_account_id") @db.Uuid
+  productCategory    String?                @map("product_category") @db.VarChar(100)
+  productCategoryId  String?                @map("product_category_id") @db.Uuid
+  locationId         String?                @map("location_id") @db.Uuid
+  isActive           Boolean                @default(true) @map("is_active")
+  priority           Int                    @default(0)
+  description        String?
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  debitAccount       GLAccount              @relation("DebitAccount", fields: [debitAccountId], references: [id])
+  creditAccount      GLAccount              @relation("CreditAccount", fields: [creditAccountId], references: [id])
+  productCategoryRef ProductCategory?       @relation("PostingProfileProductCategory", fields: [productCategoryId], references: [id])
+  location           Location?              @relation("PostingProfileLocation", fields: [locationId], references: [id])
 
   @@unique([tenantId, profileName])
   @@index([tenantId])
+  @@index([tenantId, productCategoryId])
   @@index([tenantId, transactionType])
   @@map("posting_profiles")
 }
@@ -3523,29 +3672,29 @@ model ItemCostProfile {
 
 /// Immutable cost layer — one per receipt for FIFO/LIFO; single live row per (product,location) for MOVING_AVERAGE
 model CostLayer {
-  id              String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId        String          @map("tenant_id") @db.Uuid
-  productId       String          @map("product_id") @db.Uuid
-  locationId      String          @map("location_id") @db.Uuid
-  batchId         String?         @map("batch_id") @db.Uuid
-  costingMethod   CostingMethod   @map("costing_method")
-  layerDate       DateTime        @default(now()) @map("layer_date")
-  referenceType   String          @map("reference_type") @db.VarChar(50)
-  referenceId     String          @map("reference_id") @db.Uuid
-  referenceNumber String?         @map("reference_number") @db.VarChar(50)
-  originalQty     Decimal         @map("original_qty") @db.Decimal(18, 4)
-  remainingQty    Decimal         @map("remaining_qty") @db.Decimal(18, 4)
-  unitCost        Decimal         @map("unit_cost") @db.Decimal(18, 4)
-  totalCost       Decimal         @map("total_cost") @db.Decimal(18, 4)
-  landedCost      Decimal         @default(0) @map("landed_cost") @db.Decimal(18, 4)
-  currency        String          @default("USD") @db.VarChar(3)
-  exchangeRate    Decimal         @default(1) @map("exchange_rate") @db.Decimal(18, 8)
-  baseCurrCost    Decimal         @default(0) @map("base_curr_cost") @db.Decimal(18, 4)
-  fiscalPeriodId  String?         @map("fiscal_period_id") @db.Uuid
-  status          CostLayerStatus @default(OPEN)
-  version         Int             @default(1)
-  createdAt       DateTime        @default(now()) @map("created_at")
-  updatedAt       DateTime        @updatedAt @map("updated_at")
+  id              String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String               @map("tenant_id") @db.Uuid
+  productId       String               @map("product_id") @db.Uuid
+  locationId      String               @map("location_id") @db.Uuid
+  batchId         String?              @map("batch_id") @db.Uuid
+  costingMethod   CostingMethod        @map("costing_method")
+  layerDate       DateTime             @default(now()) @map("layer_date")
+  referenceType   String               @map("reference_type") @db.VarChar(50)
+  referenceId     String               @map("reference_id") @db.Uuid
+  referenceNumber String?              @map("reference_number") @db.VarChar(50)
+  originalQty     Decimal              @map("original_qty") @db.Decimal(18, 4)
+  remainingQty    Decimal              @map("remaining_qty") @db.Decimal(18, 4)
+  unitCost        Decimal              @map("unit_cost") @db.Decimal(18, 4)
+  totalCost       Decimal              @map("total_cost") @db.Decimal(18, 4)
+  landedCost      Decimal              @default(0) @map("landed_cost") @db.Decimal(18, 4)
+  currency        String               @default("USD") @db.VarChar(3)
+  exchangeRate    Decimal              @default(1) @map("exchange_rate") @db.Decimal(18, 8)
+  baseCurrCost    Decimal              @default(0) @map("base_curr_cost") @db.Decimal(18, 4)
+  fiscalPeriodId  String?              @map("fiscal_period_id") @db.Uuid
+  status          CostLayerStatus      @default(OPEN)
+  version         Int                  @default(1)
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
   depletions      CostLayerDepletion[] @relation("LayerDepletions")
 
   @@index([tenantId, productId, locationId, status])
@@ -3558,17 +3707,17 @@ model CostLayer {
 
 /// Tracks each consumption from a cost layer (FIFO/LIFO depletion audit trail)
 model CostLayerDepletion {
-  id              String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId        String   @map("tenant_id") @db.Uuid
-  costLayerId     String   @map("cost_layer_id") @db.Uuid
-  depletedQty     Decimal  @map("depleted_qty") @db.Decimal(18, 4)
-  unitCost        Decimal  @map("unit_cost") @db.Decimal(18, 4)
-  totalCost       Decimal  @map("total_cost") @db.Decimal(18, 4)
-  referenceType   String   @map("reference_type") @db.VarChar(50)
-  referenceId     String   @map("reference_id") @db.Uuid
-  referenceNumber String?  @map("reference_number") @db.VarChar(50)
-  depletedAt      DateTime @default(now()) @map("depleted_at")
-  createdAt       DateTime @default(now()) @map("created_at")
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  costLayerId     String    @map("cost_layer_id") @db.Uuid
+  depletedQty     Decimal   @map("depleted_qty") @db.Decimal(18, 4)
+  unitCost        Decimal   @map("unit_cost") @db.Decimal(18, 4)
+  totalCost       Decimal   @map("total_cost") @db.Decimal(18, 4)
+  referenceType   String    @map("reference_type") @db.VarChar(50)
+  referenceId     String    @map("reference_id") @db.Uuid
+  referenceNumber String?   @map("reference_number") @db.VarChar(50)
+  depletedAt      DateTime  @default(now()) @map("depleted_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
   costLayer       CostLayer @relation("LayerDepletions", fields: [costLayerId], references: [id])
 
   @@index([tenantId, costLayerId])
@@ -3578,22 +3727,22 @@ model CostLayerDepletion {
 
 /// Moving average cost tracker per (product, location, site)
 model ItemCost {
-  id                String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  productId         String   @map("product_id") @db.Uuid
-  locationId        String   @map("location_id") @db.Uuid
-  currentUnitCost   Decimal  @default(0) @map("current_unit_cost") @db.Decimal(18, 4)
-  currentTotalQty   Decimal  @default(0) @map("current_total_qty") @db.Decimal(18, 4)
-  currentTotalValue Decimal  @default(0) @map("current_total_value") @db.Decimal(18, 4)
-  standardCost      Decimal  @default(0) @map("standard_cost") @db.Decimal(18, 4)
-  lastReceiptCost   Decimal  @default(0) @map("last_receipt_cost") @db.Decimal(18, 4)
+  id                String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  productId         String    @map("product_id") @db.Uuid
+  locationId        String    @map("location_id") @db.Uuid
+  currentUnitCost   Decimal   @default(0) @map("current_unit_cost") @db.Decimal(18, 4)
+  currentTotalQty   Decimal   @default(0) @map("current_total_qty") @db.Decimal(18, 4)
+  currentTotalValue Decimal   @default(0) @map("current_total_value") @db.Decimal(18, 4)
+  standardCost      Decimal   @default(0) @map("standard_cost") @db.Decimal(18, 4)
+  lastReceiptCost   Decimal   @default(0) @map("last_receipt_cost") @db.Decimal(18, 4)
   lastReceiptDate   DateTime? @map("last_receipt_date")
   lastIssueCost     Decimal?  @map("last_issue_cost") @db.Decimal(18, 4)
   lastIssueDate     DateTime? @map("last_issue_date")
-  currency          String   @default("USD") @db.VarChar(3)
-  version           Int      @default(1)
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  currency          String    @default("USD") @db.VarChar(3)
+  version           Int       @default(1)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@unique([tenantId, productId, locationId])
   @@index([tenantId])
@@ -3603,19 +3752,19 @@ model ItemCost {
 
 /// WIP cost accumulation per work order — breakdown by element
 model WIPCostAccumulation {
-  id                    String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  workOrderId           String   @map("work_order_id") @db.Uuid
-  costElement           String   @map("cost_element") @db.VarChar(30)
-  accumulatedAmount     Decimal  @default(0) @map("accumulated_amount") @db.Decimal(18, 4)
-  absorbedAmount        Decimal  @default(0) @map("absorbed_amount") @db.Decimal(18, 4)
-  varianceAmount        Decimal  @default(0) @map("variance_amount") @db.Decimal(18, 4)
-  standardAmount        Decimal  @default(0) @map("standard_amount") @db.Decimal(18, 4)
-  currency              String   @default("USD") @db.VarChar(3)
-  version               Int      @default(1)
-  lastTransactionDate   DateTime? @map("last_transaction_date")
-  createdAt             DateTime @default(now()) @map("created_at")
-  updatedAt             DateTime @updatedAt @map("updated_at")
+  id                  String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId            String    @map("tenant_id") @db.Uuid
+  workOrderId         String    @map("work_order_id") @db.Uuid
+  costElement         String    @map("cost_element") @db.VarChar(30)
+  accumulatedAmount   Decimal   @default(0) @map("accumulated_amount") @db.Decimal(18, 4)
+  absorbedAmount      Decimal   @default(0) @map("absorbed_amount") @db.Decimal(18, 4)
+  varianceAmount      Decimal   @default(0) @map("variance_amount") @db.Decimal(18, 4)
+  standardAmount      Decimal   @default(0) @map("standard_amount") @db.Decimal(18, 4)
+  currency            String    @default("USD") @db.VarChar(3)
+  version             Int       @default(1)
+  lastTransactionDate DateTime? @map("last_transaction_date")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
   @@unique([tenantId, workOrderId, costElement])
   @@index([tenantId, workOrderId])
@@ -3682,17 +3831,17 @@ model RevaluationHistory {
 
 /// Currency rate snapshot — locked exchange rates for costing transactions
 model CurrencyRateSnapshot {
-  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId     String   @map("tenant_id") @db.Uuid
-  fromCurrency String   @map("from_currency") @db.VarChar(3)
-  toCurrency   String   @map("to_currency") @db.VarChar(3)
-  rate         Decimal  @db.Decimal(18, 8)
-  inverseRate  Decimal  @map("inverse_rate") @db.Decimal(18, 8)
-  rateDate     DateTime @map("rate_date") @db.Date
-  source       String   @default("MANUAL") @db.VarChar(30)
-  referenceType String? @map("reference_type") @db.VarChar(50)
-  referenceId   String? @map("reference_id") @db.Uuid
-  createdAt    DateTime @default(now()) @map("created_at")
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  fromCurrency  String   @map("from_currency") @db.VarChar(3)
+  toCurrency    String   @map("to_currency") @db.VarChar(3)
+  rate          Decimal  @db.Decimal(18, 8)
+  inverseRate   Decimal  @map("inverse_rate") @db.Decimal(18, 8)
+  rateDate      DateTime @map("rate_date") @db.Date
+  source        String   @default("MANUAL") @db.VarChar(30)
+  referenceType String?  @map("reference_type") @db.VarChar(50)
+  referenceId   String?  @map("reference_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@index([tenantId, fromCurrency, toCurrency, rateDate])
   @@index([referenceType, referenceId])
@@ -3701,19 +3850,19 @@ model CurrencyRateSnapshot {
 
 /// Period inventory valuation snapshot — taken at period close
 model PeriodValuationSnapshot {
-  id              String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId        String   @map("tenant_id") @db.Uuid
-  fiscalPeriodId  String   @map("fiscal_period_id") @db.Uuid
-  productId       String   @map("product_id") @db.Uuid
-  locationId      String   @map("location_id") @db.Uuid
-  onHandQty       Decimal  @map("on_hand_qty") @db.Decimal(18, 4)
-  unitCost        Decimal  @map("unit_cost") @db.Decimal(18, 4)
-  totalValue      Decimal  @map("total_value") @db.Decimal(18, 4)
-  costingMethod   CostingMethod @map("costing_method")
-  openLayerCount  Int      @default(0) @map("open_layer_count")
-  currency        String   @default("USD") @db.VarChar(3)
-  snapshotDate    DateTime @default(now()) @map("snapshot_date")
-  createdAt       DateTime @default(now()) @map("created_at")
+  id             String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId       String        @map("tenant_id") @db.Uuid
+  fiscalPeriodId String        @map("fiscal_period_id") @db.Uuid
+  productId      String        @map("product_id") @db.Uuid
+  locationId     String        @map("location_id") @db.Uuid
+  onHandQty      Decimal       @map("on_hand_qty") @db.Decimal(18, 4)
+  unitCost       Decimal       @map("unit_cost") @db.Decimal(18, 4)
+  totalValue     Decimal       @map("total_value") @db.Decimal(18, 4)
+  costingMethod  CostingMethod @map("costing_method")
+  openLayerCount Int           @default(0) @map("open_layer_count")
+  currency       String        @default("USD") @db.VarChar(3)
+  snapshotDate   DateTime      @default(now()) @map("snapshot_date")
+  createdAt      DateTime      @default(now()) @map("created_at")
 
   @@unique([tenantId, fiscalPeriodId, productId, locationId])
   @@index([tenantId, fiscalPeriodId])
@@ -3723,19 +3872,19 @@ model PeriodValuationSnapshot {
 
 /// Landed cost allocation — distributes extra purchase costs across receipt lines
 model LandedCostAllocation {
-  id                String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  goodsReceiptId    String   @map("goods_receipt_id") @db.Uuid
-  goodsReceiptLineId String? @map("goods_receipt_line_id") @db.Uuid
-  costLayerId       String?  @map("cost_layer_id") @db.Uuid
-  costCategory      String   @map("cost_category") @db.VarChar(50)
-  allocationMethod  String   @default("BY_VALUE") @map("allocation_method") @db.VarChar(30)
-  allocatedAmount   Decimal  @map("allocated_amount") @db.Decimal(18, 4)
-  currency          String   @default("USD") @db.VarChar(3)
-  vendorInvoiceRef  String?  @map("vendor_invoice_ref") @db.VarChar(100)
-  journalEntryId    String?  @map("journal_entry_id") @db.Uuid
-  notes             String?
-  createdAt         DateTime @default(now()) @map("created_at")
+  id                 String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  goodsReceiptId     String   @map("goods_receipt_id") @db.Uuid
+  goodsReceiptLineId String?  @map("goods_receipt_line_id") @db.Uuid
+  costLayerId        String?  @map("cost_layer_id") @db.Uuid
+  costCategory       String   @map("cost_category") @db.VarChar(50)
+  allocationMethod   String   @default("BY_VALUE") @map("allocation_method") @db.VarChar(30)
+  allocatedAmount    Decimal  @map("allocated_amount") @db.Decimal(18, 4)
+  currency           String   @default("USD") @db.VarChar(3)
+  vendorInvoiceRef   String?  @map("vendor_invoice_ref") @db.VarChar(100)
+  journalEntryId     String?  @map("journal_entry_id") @db.Uuid
+  notes              String?
+  createdAt          DateTime @default(now()) @map("created_at")
 
   @@index([tenantId, goodsReceiptId])
   @@index([costLayerId])
@@ -3744,21 +3893,21 @@ model LandedCostAllocation {
 
 /// Fiscal period close tracking
 model PeriodCloseCheckpoint {
-  id              String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId        String            @map("tenant_id") @db.Uuid
-  fiscalPeriodId  String            @map("fiscal_period_id") @db.Uuid
-  status          PeriodCloseStatus @default(OPEN)
-  inventoryValuationTotal Decimal   @default(0) @map("inventory_valuation_total") @db.Decimal(18, 4)
-  glInventoryTotal        Decimal   @default(0) @map("gl_inventory_total") @db.Decimal(18, 4)
-  discrepancy             Decimal   @default(0) @db.Decimal(18, 4)
-  varianceSummary         Json?     @map("variance_summary")
-  closedById              String?   @map("closed_by_id") @db.Uuid
-  closedAt                DateTime? @map("closed_at")
-  reopenedById            String?   @map("reopened_by_id") @db.Uuid
-  reopenedAt              DateTime? @map("reopened_at")
-  reopenReason            String?   @map("reopen_reason")
-  createdAt               DateTime  @default(now()) @map("created_at")
-  updatedAt               DateTime  @updatedAt @map("updated_at")
+  id                      String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId                String            @map("tenant_id") @db.Uuid
+  fiscalPeriodId          String            @map("fiscal_period_id") @db.Uuid
+  status                  PeriodCloseStatus @default(OPEN)
+  inventoryValuationTotal Decimal           @default(0) @map("inventory_valuation_total") @db.Decimal(18, 4)
+  glInventoryTotal        Decimal           @default(0) @map("gl_inventory_total") @db.Decimal(18, 4)
+  discrepancy             Decimal           @default(0) @db.Decimal(18, 4)
+  varianceSummary         Json?             @map("variance_summary")
+  closedById              String?           @map("closed_by_id") @db.Uuid
+  closedAt                DateTime?         @map("closed_at")
+  reopenedById            String?           @map("reopened_by_id") @db.Uuid
+  reopenedAt              DateTime?         @map("reopened_at")
+  reopenReason            String?           @map("reopen_reason")
+  createdAt               DateTime          @default(now()) @map("created_at")
+  updatedAt               DateTime          @updatedAt @map("updated_at")
 
   @@unique([tenantId, fiscalPeriodId])
   @@index([tenantId])
@@ -3772,19 +3921,19 @@ model PeriodCloseCheckpoint {
 
 /// Physical production line — an ordered sequence of work centers
 model ProductionLine {
-  id          String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId    String          @map("tenant_id") @db.Uuid
-  code        String          @db.VarChar(50)
-  name        String          @db.VarChar(255)
-  description String?
-  locationId  String?         @map("location_id") @db.Uuid
-  status      DimensionStatus @default(ACTIVE)
-  outputRate  Decimal?        @map("output_rate") @db.Decimal(18, 4)
-  outputUom   String?         @map("output_uom") @db.VarChar(10)
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
-  stations    ProductionLineStation[]
-  downtimeRecords DowntimeRecord[] @relation("LineDowntime")
+  id              String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String                  @map("tenant_id") @db.Uuid
+  code            String                  @db.VarChar(50)
+  name            String                  @db.VarChar(255)
+  description     String?
+  locationId      String?                 @map("location_id") @db.Uuid
+  status          DimensionStatus         @default(ACTIVE)
+  outputRate      Decimal?                @map("output_rate") @db.Decimal(18, 4)
+  outputUom       String?                 @map("output_uom") @db.VarChar(10)
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+  stations        ProductionLineStation[]
+  downtimeRecords DowntimeRecord[]        @relation("LineDowntime")
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -3809,16 +3958,16 @@ model ProductionLineStation {
 
 /// Master list of downtime reason codes
 model DowntimeReason {
-  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId    String   @map("tenant_id") @db.Uuid
-  code        String   @db.VarChar(50)
-  name        String   @db.VarChar(255)
-  category    String   @default("UNPLANNED") @db.VarChar(50)
-  isPlanned   Boolean  @default(false) @map("is_planned")
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  records     DowntimeRecord[]
+  id        String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId  String           @map("tenant_id") @db.Uuid
+  code      String           @db.VarChar(50)
+  name      String           @db.VarChar(255)
+  category  String           @default("UNPLANNED") @db.VarChar(50)
+  isPlanned Boolean          @default(false) @map("is_planned")
+  isActive  Boolean          @default(true) @map("is_active")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+  records   DowntimeRecord[]
 
   @@unique([tenantId, code])
   @@index([tenantId])

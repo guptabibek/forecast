@@ -1156,6 +1156,7 @@ export class ManufacturingController {
     @Query('endDateTo') endDateTo?: string,
     @Query('productId') productId?: string,
     @Query('locationId') locationId?: string,
+    @Query('channelId') channelId?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
@@ -1168,6 +1169,7 @@ export class ManufacturingController {
       endDateTo,
       productId,
       locationId,
+      channelId,
       page: page ? parseInt(page) : undefined,
       pageSize: pageSize ? parseInt(pageSize) : undefined,
     });
@@ -1178,8 +1180,9 @@ export class ManufacturingController {
     @Request() req: any,
     @Query('productId') productId?: string,
     @Query('locationId') locationId?: string,
+    @Query('channelId') channelId?: string,
   ) {
-    return this.manufacturingService.getActivePromotions(req.user.tenantId, { productId, locationId });
+    return this.manufacturingService.getActivePromotions(req.user.tenantId, { productId, locationId, channelId });
   }
 
   @Get('promotions/upcoming')
@@ -1188,11 +1191,13 @@ export class ManufacturingController {
     @Query('days') days?: string,
     @Query('productId') productId?: string,
     @Query('locationId') locationId?: string,
+    @Query('channelId') channelId?: string,
   ) {
     return this.manufacturingService.getUpcomingPromotions(req.user.tenantId, {
       days: days ? parseInt(days) : undefined,
       productId,
       locationId,
+      channelId,
     });
   }
 
@@ -1221,6 +1226,7 @@ export class ManufacturingController {
     @Query('endDate') endDate: string,
     @Query('productId') productId?: string,
     @Query('locationId') locationId?: string,
+    @Query('channelId') channelId?: string,
     @Query('type') type?: string,
     @Query('status') status?: string,
   ) {
@@ -1229,6 +1235,7 @@ export class ManufacturingController {
       endDate,
       productId,
       locationId,
+      channelId,
       type,
       status,
     });

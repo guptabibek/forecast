@@ -295,10 +295,10 @@ export class DataService {
       actuals: {
         columns: [
           { name: 'period_date', required: true, type: 'date', description: 'Period date for the actual', format: 'YYYY-MM-DD' },
-          { name: 'product_code', required: false, type: 'string', description: 'Product code (must exist in Products)' },
-          { name: 'location_code', required: false, type: 'string', description: 'Location code (must exist in Locations)' },
-          { name: 'customer_code', required: false, type: 'string', description: 'Customer code (must exist in Customers)' },
-          { name: 'account_code', required: false, type: 'string', description: 'Account code (must exist in Accounts)' },
+          { name: 'product_code', required: false, type: 'string', description: 'Optional product code. If provided, it must already exist in Products' },
+          { name: 'location_code', required: false, type: 'string', description: 'Optional location code. If provided, it must already exist in Locations' },
+          { name: 'customer_code', required: false, type: 'string', description: 'Optional customer code. If provided, it must already exist in Customers' },
+          { name: 'account_code', required: false, type: 'string', description: 'Optional account code. If provided, it must already exist in Accounts' },
           { name: 'amount', required: true, type: 'number', description: 'Monetary amount' },
           { name: 'quantity', required: false, type: 'number', description: 'Quantity (units sold/purchased)' },
         ],
@@ -460,6 +460,406 @@ export class DataService {
 
   // ==================== DIMENSIONS ====================
 
+  private normalizeOptionalString(value: string | null | undefined): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const normalizedValue = value.trim();
+    return normalizedValue.length > 0 ? normalizedValue : undefined;
+  }
+
+  private looksLikeUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  private async buildUniqueTenantMasterCode(
+    model: { findFirst(args: any): Promise<{ id: string } | null> },
+    tenantId: string,
+    rawValue: string,
+    fallbackPrefix: string,
+  ): Promise<string> {
+    const normalizedBase = rawValue
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40);
+
+    const baseCode = normalizedBase || fallbackPrefix;
+    let candidate = baseCode.slice(0, 50);
+    let suffix = 1;
+
+    while (
+      await model.findFirst({
+        where: { tenantId, code: candidate },
+        select: { id: true },
+      })
+    ) {
+      const suffixToken = `_${suffix}`;
+      candidate = `${baseCode.slice(0, Math.max(1, 50 - suffixToken.length))}${suffixToken}`;
+      suffix += 1;
+    }
+
+    return candidate;
+  }
+
+  private async resolveProductCategory(
+    tenantId: string,
+    categoryId?: string,
+    categoryValue?: string,
+  ): Promise<{ id: string; name: string; code: string } | null> {
+    const normalizedCategoryId = this.normalizeOptionalString(categoryId);
+    const normalizedCategoryValue = this.normalizeOptionalString(categoryValue);
+
+    if (!normalizedCategoryId && !normalizedCategoryValue) {
+      return null;
+    }
+
+    const category = await this.prisma.productCategory.findFirst({
+      where: {
+        tenantId,
+        ...(normalizedCategoryId
+          ? { id: normalizedCategoryId }
+          : {
+              OR: [
+                ...(normalizedCategoryValue && this.looksLikeUuid(normalizedCategoryValue)
+                  ? [{ id: normalizedCategoryValue }]
+                  : []),
+                { code: { equals: normalizedCategoryValue, mode: 'insensitive' } },
+                { name: { equals: normalizedCategoryValue, mode: 'insensitive' } },
+              ],
+            }),
+      },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (!category) {
+      throw new BadRequestException(
+        `Product category ${normalizedCategoryId || `"${normalizedCategoryValue}"`} was not found for this tenant`,
+      );
+    }
+
+    return category;
+  }
+
+  private async resolveUnitOfMeasure(
+    tenantId: string,
+    unitOfMeasureId?: string,
+    unitOfMeasureValue?: string,
+  ): Promise<{ id: string; code: string; name: string } | null> {
+    const normalizedUnitOfMeasureId = this.normalizeOptionalString(unitOfMeasureId);
+    const normalizedUnitOfMeasureValue = this.normalizeOptionalString(unitOfMeasureValue);
+
+    if (!normalizedUnitOfMeasureId && !normalizedUnitOfMeasureValue) {
+      return null;
+    }
+
+    const unitOfMeasure = await this.prisma.unitOfMeasure.findFirst({
+      where: {
+        tenantId,
+        ...(normalizedUnitOfMeasureId
+          ? { id: normalizedUnitOfMeasureId }
+          : {
+              OR: [
+                ...(normalizedUnitOfMeasureValue && this.looksLikeUuid(normalizedUnitOfMeasureValue)
+                  ? [{ id: normalizedUnitOfMeasureValue }]
+                  : []),
+                { code: { equals: normalizedUnitOfMeasureValue, mode: 'insensitive' } },
+                { name: { equals: normalizedUnitOfMeasureValue, mode: 'insensitive' } },
+              ],
+            }),
+      },
+      select: { id: true, code: true, name: true },
+    });
+
+    if (!unitOfMeasure) {
+      throw new BadRequestException(
+        `Unit of measure ${normalizedUnitOfMeasureId || `"${normalizedUnitOfMeasureValue}"`} was not found for this tenant`,
+      );
+    }
+
+    return unitOfMeasure;
+  }
+
+  private async resolveOrCreateProductBrand(
+    tenantId: string,
+    brandId?: string,
+    brandValue?: string,
+  ): Promise<{ id: string; code: string; name: string } | null> {
+    const normalizedBrandId = this.normalizeOptionalString(brandId);
+    const normalizedBrandValue = this.normalizeOptionalString(brandValue);
+
+    if (!normalizedBrandId && !normalizedBrandValue) {
+      return null;
+    }
+
+    const brand = await this.prisma.productBrand.findFirst({
+      where: {
+        tenantId,
+        ...(normalizedBrandId
+          ? { id: normalizedBrandId }
+          : {
+              OR: [
+                ...(normalizedBrandValue && this.looksLikeUuid(normalizedBrandValue)
+                  ? [{ id: normalizedBrandValue }]
+                  : []),
+                { code: { equals: normalizedBrandValue, mode: 'insensitive' } },
+                { name: { equals: normalizedBrandValue, mode: 'insensitive' } },
+              ],
+            }),
+      },
+      select: { id: true, code: true, name: true },
+    });
+
+    if (brand) {
+      return brand;
+    }
+
+    if (normalizedBrandId || (normalizedBrandValue && this.looksLikeUuid(normalizedBrandValue))) {
+      throw new BadRequestException(
+        `Product brand ${normalizedBrandId || `"${normalizedBrandValue}"`} was not found for this tenant`,
+      );
+    }
+
+    const code = await this.buildUniqueTenantMasterCode(
+      this.prisma.productBrand,
+      tenantId,
+      normalizedBrandValue!,
+      'BRAND',
+    );
+
+    return this.prisma.productBrand.create({
+      data: {
+        tenantId,
+        code,
+        name: normalizedBrandValue!,
+      },
+      select: { id: true, code: true, name: true },
+    });
+  }
+
+  private async resolveOrCreateProductSubcategory(
+    tenantId: string,
+    categoryId: string | null | undefined,
+    subcategoryId?: string,
+    subcategoryValue?: string,
+  ): Promise<{ id: string; code: string; name: string; categoryId: string | null } | null> {
+    const normalizedSubcategoryId = this.normalizeOptionalString(subcategoryId);
+    const normalizedSubcategoryValue = this.normalizeOptionalString(subcategoryValue);
+    const normalizedCategoryId = categoryId ?? null;
+
+    if (!normalizedSubcategoryId && !normalizedSubcategoryValue) {
+      return null;
+    }
+
+    const subcategory = await this.prisma.productSubcategory.findFirst({
+      where: {
+        tenantId,
+        ...(normalizedSubcategoryId
+          ? { id: normalizedSubcategoryId }
+          : {
+              categoryId: normalizedCategoryId,
+              OR: [
+                ...(normalizedSubcategoryValue && this.looksLikeUuid(normalizedSubcategoryValue)
+                  ? [{ id: normalizedSubcategoryValue }]
+                  : []),
+                { code: { equals: normalizedSubcategoryValue, mode: 'insensitive' } },
+                { name: { equals: normalizedSubcategoryValue, mode: 'insensitive' } },
+              ],
+            }),
+      },
+      select: { id: true, code: true, name: true, categoryId: true },
+    });
+
+    if (subcategory) {
+      return subcategory;
+    }
+
+    if (
+      normalizedSubcategoryId ||
+      (normalizedSubcategoryValue && this.looksLikeUuid(normalizedSubcategoryValue))
+    ) {
+      throw new BadRequestException(
+        `Product subcategory ${normalizedSubcategoryId || `"${normalizedSubcategoryValue}"`} was not found for this tenant`,
+      );
+    }
+
+    const code = await this.buildUniqueTenantMasterCode(
+      this.prisma.productSubcategory,
+      tenantId,
+      normalizedSubcategoryValue!,
+      'SUBCATEGORY',
+    );
+
+    return this.prisma.productSubcategory.create({
+      data: {
+        tenantId,
+        code,
+        name: normalizedSubcategoryValue!,
+        categoryId: normalizedCategoryId,
+      },
+      select: { id: true, code: true, name: true, categoryId: true },
+    });
+  }
+
+  private async buildProductSpecificData(
+    tenantId: string,
+    dto: Pick<
+      CreateDimensionDto,
+      | 'brand'
+      | 'brandId'
+      | 'category'
+      | 'categoryId'
+      | 'listPrice'
+      | 'standardCost'
+      | 'subcategory'
+      | 'subcategoryId'
+      | 'unitOfMeasure'
+      | 'unitOfMeasureId'
+    >,
+    options?: { currentCategoryId?: string | null },
+  ): Promise<Record<string, any>> {
+    const specificData: Record<string, any> = {};
+    let resolvedCategoryId = options?.currentCategoryId ?? null;
+
+    const categorySelectionProvided = dto.categoryId !== undefined || dto.category !== undefined;
+    if (categorySelectionProvided) {
+      const category = await this.resolveProductCategory(tenantId, dto.categoryId, dto.category);
+      specificData.categoryId = category?.id ?? null;
+      specificData.category = category?.name ?? null;
+      resolvedCategoryId = category?.id ?? null;
+    }
+
+    const unitOfMeasureSelectionProvided = dto.unitOfMeasureId !== undefined || dto.unitOfMeasure !== undefined;
+    if (unitOfMeasureSelectionProvided) {
+      const unitOfMeasure = await this.resolveUnitOfMeasure(
+        tenantId,
+        dto.unitOfMeasureId,
+        dto.unitOfMeasure,
+      );
+      specificData.unitOfMeasureId = unitOfMeasure?.id ?? null;
+      specificData.unitOfMeasure = unitOfMeasure?.code ?? null;
+    }
+
+    const subcategorySelectionProvided = dto.subcategoryId !== undefined || dto.subcategory !== undefined;
+    if (subcategorySelectionProvided) {
+      const subcategory = await this.resolveOrCreateProductSubcategory(
+        tenantId,
+        resolvedCategoryId,
+        dto.subcategoryId,
+        dto.subcategory,
+      );
+      specificData.subcategoryId = subcategory?.id ?? null;
+      specificData.subcategory = subcategory?.name ?? null;
+    } else if (categorySelectionProvided) {
+      specificData.subcategoryId = null;
+      specificData.subcategory = null;
+    }
+
+    const brandSelectionProvided = dto.brandId !== undefined || dto.brand !== undefined;
+    if (brandSelectionProvided) {
+      const brand = await this.resolveOrCreateProductBrand(tenantId, dto.brandId, dto.brand);
+      specificData.brandId = brand?.id ?? null;
+      specificData.brand = brand?.name ?? null;
+    }
+
+    if (dto.standardCost !== undefined) {
+      specificData.standardCost = dto.standardCost;
+    }
+
+    if (dto.listPrice !== undefined) {
+      specificData.listPrice = dto.listPrice;
+    }
+
+    return specificData;
+  }
+
+  private async resolveCostCenterParent(
+    tenantId: string,
+    parentId?: string | null,
+  ): Promise<{ id: string } | null> {
+    const normalizedParentId = this.normalizeOptionalString(parentId);
+
+    if (!normalizedParentId) {
+      return null;
+    }
+
+    const parent = await this.prisma.costCenter.findFirst({
+      where: {
+        tenantId,
+        id: normalizedParentId,
+      },
+      select: { id: true },
+    });
+
+    if (!parent) {
+      throw new BadRequestException(
+        `Cost center parent "${normalizedParentId}" was not found for this tenant`,
+      );
+    }
+
+    return parent;
+  }
+
+  private async buildCostCenterSpecificData(
+    tenantId: string,
+    dto: Pick<CreateDimensionDto, 'parentId' | 'managerId'>,
+    options?: { allowParentDisconnect?: boolean; allowManagerDisconnect?: boolean },
+  ): Promise<Record<string, any>> {
+    const specificData: Record<string, any> = {};
+
+    if (dto.parentId !== undefined) {
+      const parent = await this.resolveCostCenterParent(tenantId, dto.parentId);
+
+      if (parent) {
+        specificData.parent = { connect: { id: parent.id } };
+      } else if (options?.allowParentDisconnect) {
+        specificData.parent = { disconnect: true };
+      }
+    }
+
+    if (dto.managerId !== undefined) {
+      const normalizedManagerId = this.normalizeOptionalString(dto.managerId);
+
+      if (!normalizedManagerId) {
+        specificData.manager = null;
+        if (options?.allowManagerDisconnect) {
+          specificData.managerUser = { disconnect: true };
+        }
+      } else {
+        const manager = await this.prisma.user.findFirst({
+          where: {
+            tenantId,
+            id: normalizedManagerId,
+            status: 'ACTIVE',
+          },
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        });
+
+        if (!manager) {
+          throw new BadRequestException(
+            `Cost center manager "${normalizedManagerId}" was not found for this tenant`,
+          );
+        }
+
+        specificData.managerUser = { connect: { id: manager.id } };
+        specificData.manager = `${manager.firstName} ${manager.lastName}`.trim() || manager.email;
+      }
+    }
+
+    return specificData;
+  }
+
+  private typeSupportsAttributes(type: string): boolean {
+    return type === 'product' || type === 'location' || type === 'customer';
+  }
+
   // Helper to transform dimension record to include isActive
   private transformDimension(record: any) {
     if (!record) return record;
@@ -533,10 +933,13 @@ export class DataService {
       code: createDto.code,
       name: createDto.name,
       tenant: { connect: { id: user.tenantId } },
-      status: 'ACTIVE',
-      attributes: createDto.attributes || {},
+      status: createDto.isActive === false ? 'INACTIVE' : 'ACTIVE',
       externalId: createDto.externalId,
     };
+
+    if (this.typeSupportsAttributes(type)) {
+      baseData.attributes = createDto.attributes || {};
+    }
 
     // Only add description for Product model (only model with description field)
     if (type === 'product' && createDto.description !== undefined) {
@@ -547,14 +950,7 @@ export class DataService {
 
     switch (type) {
       case 'product':
-        specificData = {
-          category: createDto.category,
-          subcategory: createDto.subcategory,
-          brand: createDto.brand,
-          unitOfMeasure: createDto.unitOfMeasure,
-          standardCost: createDto.standardCost,
-          listPrice: createDto.listPrice,
-        };
+        specificData = await this.buildProductSpecificData(user.tenantId, createDto);
         break;
 
       case 'location':
@@ -596,6 +992,10 @@ export class DataService {
           ...(createDto.parentId && { parent: { connect: { id: createDto.parentId } } }),
         };
         break;
+
+      case 'cost_center':
+        specificData = await this.buildCostCenterSpecificData(user.tenantId, createDto);
+        break;
     }
 
     // Remove undefined values
@@ -634,7 +1034,7 @@ export class DataService {
     updateDto: UpdateDimensionDto,
     user: any,
   ) {
-    await this.getDimension(type, id, user);
+    const existingDimension = await this.getDimension(type, id, user);
     const model = this.getDimensionModel(type);
 
     // Build model-specific update data
@@ -654,12 +1054,9 @@ export class DataService {
 
     switch (type) {
       case 'product':
-        if (updateDto.category !== undefined) specificData.category = updateDto.category;
-        if (updateDto.subcategory !== undefined) specificData.subcategory = updateDto.subcategory;
-        if (updateDto.brand !== undefined) specificData.brand = updateDto.brand;
-        if (updateDto.unitOfMeasure !== undefined) specificData.unitOfMeasure = updateDto.unitOfMeasure;
-        if (updateDto.standardCost !== undefined) specificData.standardCost = updateDto.standardCost;
-        if (updateDto.listPrice !== undefined) specificData.listPrice = updateDto.listPrice;
+        specificData = await this.buildProductSpecificData(user.tenantId, updateDto, {
+          currentCategoryId: existingDimension?.categoryId ?? null,
+        });
         break;
 
       case 'location':
@@ -692,6 +1089,13 @@ export class DataService {
         if (updateDto.parentId !== undefined) {
           specificData.parent = updateDto.parentId ? { connect: { id: updateDto.parentId } } : { disconnect: true };
         }
+        break;
+
+      case 'cost_center':
+        specificData = await this.buildCostCenterSpecificData(user.tenantId, updateDto, {
+          allowParentDisconnect: true,
+          allowManagerDisconnect: true,
+        });
         break;
     }
 
@@ -726,6 +1130,7 @@ export class DataService {
       location: this.prisma.location,
       customer: this.prisma.customer,
       account: this.prisma.account,
+      cost_center: this.prisma.costCenter,
     };
 
     const model = models[type];
@@ -746,6 +1151,7 @@ export class DataService {
       location: 'locationId',
       customer: 'customerId',
       account: 'accountId',
+      cost_center: 'costCenterId',
     };
 
     const field = fieldMap[type];

@@ -1,6 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { userService } from '../services/api';
-import type { InviteUserDto, UpdateUserDto, UpdateProfileDto, ChangePasswordDto } from '../services/api/user.service';
+import type { ChangePasswordDto, InviteUserDto, UpdateProfileDto, UpdateUserDto } from '../services/api/user.service';
 
 export const userKeys = {
   all: ['users'] as const,
@@ -127,7 +127,7 @@ export function useUploadAvatar() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (file: File) => userService.uploadAvatar(file),
+    mutationFn: (avatarUrl?: string) => userService.uploadAvatar(avatarUrl),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: userKeys.profile() });
     },

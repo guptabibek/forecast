@@ -1,7 +1,12 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ROLES_KEY } from '../decorators/roles.decorator';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
+import { ROLES_KEY } from '../decorators/roles.decorator';
+
+const IMPLIED_ROLES: Record<string, string[]> = {
+  FORECAST_PLANNER: ['FORECAST_PLANNER', 'PLANNER', 'VIEWER'],
+  FORECAST_VIEWER: ['FORECAST_VIEWER', 'VIEWER'],
+};
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -34,7 +39,8 @@ export class RolesGuard implements CanActivate {
 
     // Check roles
     if (requiredRoles?.length) {
-      const hasRole = requiredRoles.includes(user.role);
+      const effectiveRoles = IMPLIED_ROLES[user.role] || [user.role];
+      const hasRole = requiredRoles.some((role) => effectiveRoles.includes(role));
       if (!hasRole) {
         throw new ForbiddenException(
           `Required role: ${requiredRoles.join(' or ')}`,

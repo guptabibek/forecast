@@ -3,20 +3,29 @@ import {
     ConflictException,
     Injectable,
     NotFoundException,
+    ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma, UserRole, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../core/database/prisma.service';
+import { EmailService } from '../../core/notification/email.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserQueryDto } from './dto/user-query.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+    private readonly configService: ConfigService,
+  ) {}
 
   async invite(createUserDto: CreateUserDto, currentUser: any) {
+    this.ensureInvitationEmailConfigured();
+
     // Check if user already exists in this tenant
     const existingUser = await this.prisma.user.findFirst({
       where: {
@@ -30,34 +39,67 @@ export class UsersService {
     }
 
     // Generate temporary password
-    const tempPassword = randomBytes(16).toString('hex');
+    const tempPassword = this.generateTemporaryPassword();
     const hashedPassword = await bcrypt.hash(tempPassword, 12);
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: createUserDto.email,
-        firstName: createUserDto.firstName,
-        lastName: createUserDto.lastName,
-        passwordHash: hashedPassword,
-        role: createUserDto.role as UserRole,
-        tenant: { connect: { id: currentUser.tenantId } },
-        status: UserStatus.PENDING, // User needs to accept invite
-      },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        status: true,
-        createdAt: true,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.findUnique({
+        where: { id: currentUser.tenantId },
+        select: { id: true, name: true, slug: true, subdomain: true, domain: true },
+      });
+
+      if (!tenant) {
+        throw new NotFoundException('Tenant not found');
+      }
+
+      const user = await tx.user.create({
+        data: {
+          email: createUserDto.email.toLowerCase(),
+          firstName: createUserDto.firstName,
+          lastName: createUserDto.lastName,
+          passwordHash: hashedPassword,
+          role: createUserDto.role as UserRole,
+          tenant: { connect: { id: currentUser.tenantId } },
+          status: UserStatus.PENDING,
+        },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          status: true,
+          createdAt: true,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: currentUser.tenantId,
+          userId: currentUser.id,
+          action: 'CREATE',
+          entityType: 'User',
+          entityId: user.id,
+          metadata: {
+            operation: 'invite-user',
+            targetUserId: user.id,
+            targetEmail: user.email,
+            role: user.role,
+          },
+        },
+      });
+
+      await this.emailService.sendInvitation({
+        to: user.email,
+        firstName: user.firstName,
+        workspaceName: tenant.name,
+        workspaceUrl: this.buildWorkspaceUrl(tenant),
+        temporaryPassword: tempPassword,
+        invitedBy: currentUser.email,
+      });
+
+      return user;
     });
-
-    // TODO: Send invitation email
-    // await this.emailService.sendInvitation(user.email, tempPassword);
-
-    return user;
   }
 
   async findAll(query: UserQueryDto, currentUser: any) {
@@ -223,29 +265,75 @@ export class UsersService {
   }
 
   async resendInvite(id: string, currentUser: any) {
-    const user = await this.findOne(id, currentUser);
-    if (user.status !== UserStatus.PENDING) {
-      throw new BadRequestException('Invitation can only be resent for users in pending status');
-    }
+    this.ensureInvitationEmailConfigured();
 
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId: currentUser.tenantId,
-        userId: currentUser.id,
-        action: 'UPDATE',
-        entityType: 'UserInvitation',
-        entityId: id,
-        changedFields: ['status'],
-        metadata: {
-          operation: 'resend-invite',
-          targetUserId: id,
-          targetEmail: user.email,
-          resentAt: new Date().toISOString(),
+    const tempPassword = this.generateTemporaryPassword();
+    const hashedPassword = await bcrypt.hash(tempPassword, 12);
+
+    return this.prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.findUnique({
+        where: { id: currentUser.tenantId },
+        select: { id: true, name: true, slug: true, subdomain: true, domain: true },
+      });
+
+      if (!tenant) {
+        throw new NotFoundException('Tenant not found');
+      }
+
+      const user = await tx.user.findFirst({
+        where: {
+          id,
+          tenantId: currentUser.tenantId,
         },
-      },
-    });
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          status: true,
+        },
+      });
 
-    return { message: 'Invitation resent successfully', userId: id };
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      if (user.status !== UserStatus.PENDING) {
+        throw new BadRequestException('Invitation can only be resent for users in pending status');
+      }
+
+      await tx.user.update({
+        where: { id },
+        data: { passwordHash: hashedPassword },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: currentUser.tenantId,
+          userId: currentUser.id,
+          action: 'UPDATE',
+          entityType: 'UserInvitation',
+          entityId: id,
+          changedFields: ['passwordHash'],
+          metadata: {
+            operation: 'resend-invite',
+            targetUserId: id,
+            targetEmail: user.email,
+            resentAt: new Date().toISOString(),
+          },
+        },
+      });
+
+      await this.emailService.sendInvitation({
+        to: user.email,
+        firstName: user.firstName,
+        workspaceName: tenant.name,
+        workspaceUrl: this.buildWorkspaceUrl(tenant),
+        temporaryPassword: tempPassword,
+        invitedBy: currentUser.email,
+      });
+
+      return { message: 'Invitation resent successfully', userId: id };
+    });
   }
 
   async getActivity(
@@ -299,6 +387,20 @@ export class UsersService {
   async updateAvatar(userId: string, avatarUrl: string | undefined, currentUser: any) {
     await this.findOne(userId, currentUser);
 
+    if (typeof avatarUrl === 'string' && avatarUrl.trim().length > 0) {
+      const normalizedUrl = avatarUrl.trim();
+      if (!normalizedUrl.startsWith('/')) {
+        try {
+          const parsed = new URL(normalizedUrl);
+          if (!['http:', 'https:'].includes(parsed.protocol)) {
+            throw new BadRequestException('Avatar URL must use http or https');
+          }
+        } catch {
+          throw new BadRequestException('Avatar URL must be a valid absolute URL');
+        }
+      }
+    }
+
     const fallbackAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.firstName || 'U')}+${encodeURIComponent(currentUser.lastName || '')}&background=random`;
     const normalizedAvatarUrl = typeof avatarUrl === 'string' && avatarUrl.trim().length > 0
       ? avatarUrl.trim()
@@ -317,6 +419,59 @@ export class UsersService {
     return this.prisma.user.findFirst({
       where: { email, tenantId },
     });
+  }
+
+  private ensureInvitationEmailConfigured() {
+    if (!this.emailService.isConfigured()) {
+      throw new ServiceUnavailableException(
+        'SMTP is not configured. Configure email delivery before inviting users.',
+      );
+    }
+  }
+
+  private generateTemporaryPassword(): string {
+    return randomBytes(12).toString('hex');
+  }
+
+  private buildWorkspaceUrl(tenant: {
+    slug: string;
+    subdomain?: string | null;
+    domain?: string | null;
+  }): string {
+    const configuredFrontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+
+    try {
+      const parsed = new URL(configuredFrontendUrl);
+      const protocol = parsed.protocol || 'https:';
+      const port = parsed.port ? `:${parsed.port}` : '';
+
+      if (tenant.domain?.trim()) {
+        const host = tenant.domain.trim();
+        const includePort = host === 'localhost' || host.endsWith('.localhost');
+        return `${protocol}//${host}${includePort ? port : ''}`;
+      }
+
+      const workspaceSlug = tenant.subdomain?.trim() || tenant.slug;
+      const configuredMainDomain = (this.configService.get<string>('MAIN_DOMAIN') || '').trim();
+
+      if (configuredMainDomain) {
+        return `${protocol}//${workspaceSlug}.${configuredMainDomain}`;
+      }
+
+      const hostname = parsed.hostname.toLowerCase();
+      if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+        return `${protocol}//${workspaceSlug}.localhost${port}`;
+      }
+
+      const parts = hostname.split('.');
+      if (parts.length >= 3) {
+        return `${protocol}//${workspaceSlug}.${parts.slice(1).join('.')}${port}`;
+      }
+
+      return `${protocol}//${hostname}${port}`;
+    } catch {
+      return configuredFrontendUrl;
+    }
   }
 
   async updateLastLogin(id: string) {

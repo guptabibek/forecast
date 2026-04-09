@@ -1,3 +1,4 @@
+import { getRoleLabel } from '@/permissions';
 import {
     CameraIcon,
     ClockIcon,
@@ -12,7 +13,7 @@ import { useAuthStore } from '@stores/auth.store';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { format } from 'date-fns';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { z } from 'zod';
@@ -86,6 +87,8 @@ export default function Profile() {
   const queryClient = useQueryClient();
   const { user, checkAuth } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'profile' | 'security'>('profile');
+  const [showAvatarEditor, setShowAvatarEditor] = useState(false);
+  const [avatarUrlInput, setAvatarUrlInput] = useState(user?.avatarUrl || '');
 
   const sessionsQuery = useQuery({
     queryKey: ['auth-sessions'],
@@ -132,6 +135,23 @@ export default function Profile() {
     },
     onError: () => {
       toast.error('Failed to update profile');
+    },
+  });
+
+  const updateAvatarMutation = useMutation({
+    mutationFn: (avatarUrl?: string) => userService.uploadAvatar(avatarUrl),
+    onSuccess: async () => {
+      queryClient.invalidateQueries({ queryKey: ['user'] });
+      await checkAuth();
+      setShowAvatarEditor(false);
+      toast.success('Avatar updated successfully');
+    },
+    onError: (error: unknown) => {
+      const message =
+        error && typeof error === 'object'
+          ? (error as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to update avatar'
+          : 'Failed to update avatar';
+      toast.error(message);
     },
   });
 
@@ -201,6 +221,19 @@ export default function Profile() {
     changePasswordMutation.mutate(data);
   };
 
+  useEffect(() => {
+    setAvatarUrlInput(user?.avatarUrl || '');
+  }, [user?.avatarUrl]);
+
+  const handleAvatarSave = () => {
+    updateAvatarMutation.mutate(avatarUrlInput.trim() || undefined);
+  };
+
+  const handleAvatarReset = () => {
+    setAvatarUrlInput('');
+    updateAvatarMutation.mutate(undefined);
+  };
+
   const getDeviceIcon = (device: string) => {
     if (device.toLowerCase().includes('phone') || device.toLowerCase().includes('iphone')) {
       return <DevicePhoneMobileIcon className="w-5 h-5" />;
@@ -252,13 +285,25 @@ export default function Profile() {
           <div className="lg:col-span-1">
             <div className="card p-6 text-center">
               <div className="relative inline-block">
-                <div className="w-32 h-32 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center mx-auto">
-                  <span className="text-4xl font-bold text-primary-600">
-                    {user?.firstName?.[0]}
-                    {user?.lastName?.[0]}
-                  </span>
+                <div className="w-32 h-32 rounded-full overflow-hidden bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center mx-auto">
+                  {user?.avatarUrl ? (
+                    <img
+                      src={user.avatarUrl}
+                      alt={`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'User avatar'}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-4xl font-bold text-primary-600">
+                      {user?.firstName?.[0]}
+                      {user?.lastName?.[0]}
+                    </span>
+                  )}
                 </div>
-                <button className="absolute bottom-0 right-0 p-2 bg-white dark:bg-secondary-700 rounded-full shadow-md hover:shadow-lg transition-shadow">
+                <button
+                  type="button"
+                  onClick={() => setShowAvatarEditor((current) => !current)}
+                  className="absolute bottom-0 right-0 p-2 bg-white dark:bg-secondary-700 rounded-full shadow-md hover:shadow-lg transition-shadow"
+                >
                   <CameraIcon className="w-5 h-5 text-secondary-600" />
                 </button>
               </div>
@@ -266,7 +311,40 @@ export default function Profile() {
                 {user?.firstName} {user?.lastName}
               </h2>
               <p className="text-secondary-500">{user?.email}</p>
-              <span className="badge badge-primary mt-2">{user?.role}</span>
+              <span className="badge badge-primary mt-2">{getRoleLabel(user?.role)}</span>
+              {showAvatarEditor && (
+                <div className="mt-4 text-left space-y-3">
+                  <label className="label">Avatar Image URL</label>
+                  <input
+                    type="url"
+                    value={avatarUrlInput}
+                    onChange={(event) => setAvatarUrlInput(event.target.value)}
+                    className="input w-full"
+                    placeholder="https://example.com/avatar.png"
+                  />
+                  <p className="text-xs text-secondary-500">
+                    Use a secure image URL. Leave empty to fall back to initials.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleAvatarSave}
+                      disabled={updateAvatarMutation.isPending}
+                      className="btn-primary flex-1"
+                    >
+                      {updateAvatarMutation.isPending ? 'Saving...' : 'Save Avatar'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAvatarReset}
+                      disabled={updateAvatarMutation.isPending}
+                      className="btn-secondary"
+                    >
+                      Use Initials
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

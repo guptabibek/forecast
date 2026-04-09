@@ -1,3 +1,4 @@
+import { getFallbackPathForRole, isForecastViewerRole, isManufacturingBlockedRole } from '@/permissions';
 import { ErrorBoundary } from '@components/common/ErrorBoundary';
 import { useAuthStore } from '@stores/auth.store';
 import { lazy, Suspense } from 'react';
@@ -71,6 +72,28 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function RoleAwareRoute({
+  restrictForecastViewer = false,
+  restrictManufacturing = false,
+  children,
+}: {
+  restrictForecastViewer?: boolean;
+  restrictManufacturing?: boolean;
+  children: React.ReactNode;
+}) {
+  const role = useAuthStore((s) => s.user?.role);
+
+  const blocked =
+    (restrictForecastViewer && isForecastViewerRole(role)) ||
+    (restrictManufacturing && isManufacturingBlockedRole(role));
+
+  if (blocked) {
+    return <Navigate to={getFallbackPathForRole(role)} replace />;
+  }
+
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -137,23 +160,23 @@ export default function App() {
         <Route path="/scenarios" element={<Scenarios />} />
 
         {/* Data Management */}
-        <Route path="/data/import" element={<DataImport />} />
-        <Route path="/data/actuals" element={<Actuals />} />
-        <Route path="/data/dimensions" element={<Dimensions />} />
-        <Route path="/data/products" element={<ProductMaster />} />
+        <Route path="/data/import" element={<RoleAwareRoute restrictForecastViewer><DataImport /></RoleAwareRoute>} />
+        <Route path="/data/actuals" element={<RoleAwareRoute restrictForecastViewer><Actuals /></RoleAwareRoute>} />
+        <Route path="/data/dimensions" element={<RoleAwareRoute restrictForecastViewer><Dimensions /></RoleAwareRoute>} />
+        <Route path="/data/products" element={<RoleAwareRoute restrictForecastViewer><ProductMaster /></RoleAwareRoute>} />
 
         {/* Reports */}
         <Route path="/reports" element={<Reports />} />
 
         {/* Settings */}
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/settings/users" element={<Users />} />
+        <Route path="/settings" element={<RoleAwareRoute restrictForecastViewer><Settings /></RoleAwareRoute>} />
+        <Route path="/settings/users" element={<RoleAwareRoute restrictForecastViewer><Users /></RoleAwareRoute>} />
         <Route path="/settings/profile" element={<Profile />} />
-        <Route path="/settings/audit-log" element={<AuditLog />} />
+        <Route path="/settings/audit-log" element={<RoleAwareRoute restrictForecastViewer><AuditLog /></RoleAwareRoute>} />
         <Route path="/notifications" element={<Notifications />} />
 
         {/* Manufacturing */}
-        <Route path="/manufacturing/*" element={<ManufacturingRoutes />} />
+        <Route path="/manufacturing/*" element={<RoleAwareRoute restrictManufacturing><ManufacturingRoutes /></RoleAwareRoute>} />
       </Route>
 
       {/* 404 */}

@@ -1,3 +1,4 @@
+import type { User } from '@/types';
 import { Badge, Button, Card, CardHeader, Column, DataTable, Modal, QueryErrorBanner } from '@components/ui';
 import { EyeIcon, PencilIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { sopService, userService, type SOPAssumption, type SOPCycle, type SOPForecast } from '@services/api';
@@ -15,11 +16,32 @@ const safeFormat = (dateVal: any, fmt: string, fallback = '—') => {
   } catch { return fallback; }
 };
 
-const SOP_STATUSES = ['DRAFT', 'DEMAND_REVIEW', 'SUPPLY_REVIEW', 'EXECUTIVE_REVIEW', 'FINALIZED'];
-const statusVariant: Record<string, any> = { DRAFT: 'secondary', DEMAND_REVIEW: 'primary', SUPPLY_REVIEW: 'warning', EXECUTIVE_REVIEW: 'primary', FINALIZED: 'success' };
+const SOP_STATUSES = ['PLANNING', 'DEMAND_REVIEW', 'SUPPLY_REVIEW', 'PRE_SOP', 'EXECUTIVE_SOP', 'APPROVED', 'CLOSED'];
+const statusVariant: Record<string, any> = {
+  PLANNING: 'secondary',
+  DEMAND_REVIEW: 'primary',
+  SUPPLY_REVIEW: 'warning',
+  PRE_SOP: 'warning',
+  EXECUTIVE_SOP: 'primary',
+  APPROVED: 'success',
+  CLOSED: 'secondary',
+};
 const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
-const emptyCycle = { name: '', year: new Date().getFullYear(), month: new Date().getMonth() + 1, description: '', horizonMonths: 18, demandReviewDate: '', supplyReviewDate: '', executiveMeetingDate: '' };
+const emptyCycle = {
+  name: '',
+  year: new Date().getFullYear(),
+  month: new Date().getMonth() + 1,
+  description: '',
+  horizonMonths: 18,
+  demandReviewDate: '',
+  supplyReviewDate: '',
+  executiveMeetingDate: '',
+  demandManagerId: '',
+  supplyManagerId: '',
+  financeManagerId: '',
+  executiveSponsorId: '',
+};
 const emptyAssumption = { category: '', assumption: '', impactDescription: '', quantitativeImpact: 0, riskLevel: 'MEDIUM', mitigationPlan: '', owner: '', dueDate: '' };
 const ASSUMPTION_CATEGORIES = ['Demand','Supply','Pricing','Capacity','Inventory','Market','Regulatory','Operations','Financial'];
 
@@ -42,10 +64,32 @@ export default function SOPPage() {
 
   const { data: usersData } = useQuery({
     queryKey: ['users'],
-    queryFn: () => userService.getAll(),
+    queryFn: () => userService.getAll({ limit: 200 }),
   });
 
-  const sopUsers: any[] = usersData?.data || [];
+  const sopUsers: User[] = usersData?.data || [];
+
+  const getUserLabel = (user?: { firstName?: string; lastName?: string; email?: string; name?: string } | null) => {
+    if (!user) {
+      return '—';
+    }
+
+    const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
+    return fullName || user.name || user.email || '—';
+  };
+
+  const getUserLabelById = (userId?: string, fallbackUser?: { name?: string; email?: string } | null) => {
+    if (!userId) {
+      return '—';
+    }
+
+    const matchedUser = sopUsers.find((user) => user.id === userId);
+    if (matchedUser) {
+      return getUserLabel(matchedUser);
+    }
+
+    return getUserLabel(fallbackUser || undefined);
+  };
 
   const { data: cycleSummary } = useQuery({
     queryKey: ['manufacturing', 'sop', 'summary', selected?.id],
@@ -82,6 +126,10 @@ export default function SOPPage() {
       description: d.description, horizonMonths: Number(d.horizonMonths),
       demandReviewDate: d.demandReviewDate || undefined, supplyReviewDate: d.supplyReviewDate || undefined,
       executiveMeetingDate: d.executiveMeetingDate || undefined,
+      demandManagerId: d.demandManagerId || undefined,
+      supplyManagerId: d.supplyManagerId || undefined,
+      financeManagerId: d.financeManagerId || undefined,
+      executiveSponsorId: d.executiveSponsorId || undefined,
     }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['manufacturing', 'sop'] }); setShowCreate(false); setForm(emptyCycle); toast.success('S&OP cycle created'); },
     onError: (err: any) => { toast.error(err?.response?.data?.message || 'Failed to create cycle'); },
@@ -138,7 +186,20 @@ export default function SOPPage() {
         <div className="flex gap-1">
           <button onClick={() => { setSelected(r); setShowDetail(true); }} className="p-1 text-blue-600 hover:text-blue-800"><EyeIcon className="h-4 w-4" /></button>
           <button onClick={() => {
-            setSelected(r); setForm({ name: r.name, year: r.year, month: r.month, description: r.description || '', horizonMonths: r.horizonMonths || 18, demandReviewDate: r.demandReviewDate?.split('T')[0] || '', supplyReviewDate: r.supplyReviewDate?.split('T')[0] || '', executiveMeetingDate: r.executiveMeetingDate?.split('T')[0] || '' });
+            setSelected(r); setForm({
+              name: r.name,
+              year: r.year,
+              month: r.month,
+              description: r.description || '',
+              horizonMonths: r.horizonMonths || 18,
+              demandReviewDate: r.demandReviewDate?.split('T')[0] || '',
+              supplyReviewDate: r.supplyReviewDate?.split('T')[0] || '',
+              executiveMeetingDate: r.executiveMeetingDate?.split('T')[0] || '',
+              demandManagerId: r.demandManagerId || '',
+              supplyManagerId: r.supplyManagerId || '',
+              financeManagerId: r.financeManagerId || '',
+              executiveSponsorId: r.executiveSponsorId || '',
+            });
             setShowEdit(true);
           }} className="p-1 text-amber-600 hover:text-amber-800"><PencilIcon className="h-4 w-4" /></button>
           <button onClick={() => { if (confirm('Delete?')) deleteMut.mutate(r.id); }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
@@ -187,6 +248,12 @@ export default function SOPPage() {
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Supply Review</label><input type="date" className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.supplyReviewDate} onChange={(e) => setForm({ ...form, supplyReviewDate: e.target.value })} /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Executive Meeting</label><input type="date" className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.executiveMeetingDate} onChange={(e) => setForm({ ...form, executiveMeetingDate: e.target.value })} /></div>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Demand Manager</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.demandManagerId} onChange={(e) => setForm({ ...form, demandManagerId: e.target.value })}><option value="">Select demand manager...</option>{sopUsers.map((u) => <option key={u.id} value={u.id}>{getUserLabel(u)}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Supply Manager</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.supplyManagerId} onChange={(e) => setForm({ ...form, supplyManagerId: e.target.value })}><option value="">Select supply manager...</option>{sopUsers.map((u) => <option key={u.id} value={u.id}>{getUserLabel(u)}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Finance Manager</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.financeManagerId} onChange={(e) => setForm({ ...form, financeManagerId: e.target.value })}><option value="">Select finance manager...</option>{sopUsers.map((u) => <option key={u.id} value={u.id}>{getUserLabel(u)}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Executive Sponsor</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.executiveSponsorId} onChange={(e) => setForm({ ...form, executiveSponsorId: e.target.value })}><option value="">Select executive sponsor...</option>{sopUsers.map((u) => <option key={u.id} value={u.id}>{getUserLabel(u)}</option>)}</select></div>
+          </div>
           <div className="flex justify-end gap-3 pt-4 border-t">
             <Button variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button onClick={() => createMut.mutate(form)} isLoading={createMut.isPending}>Create Cycle</Button>
@@ -209,6 +276,12 @@ export default function SOPPage() {
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Supply Review</label><input type="date" className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.supplyReviewDate} onChange={(e) => setForm({ ...form, supplyReviewDate: e.target.value })} /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Executive Meeting</label><input type="date" className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.executiveMeetingDate} onChange={(e) => setForm({ ...form, executiveMeetingDate: e.target.value })} /></div>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Demand Manager</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.demandManagerId} onChange={(e) => setForm({ ...form, demandManagerId: e.target.value })}><option value="">Select demand manager...</option>{sopUsers.map((u) => <option key={u.id} value={u.id}>{getUserLabel(u)}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Supply Manager</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.supplyManagerId} onChange={(e) => setForm({ ...form, supplyManagerId: e.target.value })}><option value="">Select supply manager...</option>{sopUsers.map((u) => <option key={u.id} value={u.id}>{getUserLabel(u)}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Finance Manager</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.financeManagerId} onChange={(e) => setForm({ ...form, financeManagerId: e.target.value })}><option value="">Select finance manager...</option>{sopUsers.map((u) => <option key={u.id} value={u.id}>{getUserLabel(u)}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Executive Sponsor</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={form.executiveSponsorId} onChange={(e) => setForm({ ...form, executiveSponsorId: e.target.value })}><option value="">Select executive sponsor...</option>{sopUsers.map((u) => <option key={u.id} value={u.id}>{getUserLabel(u)}</option>)}</select></div>
+          </div>
           {selected && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Status Progression</label>
@@ -221,7 +294,7 @@ export default function SOPPage() {
           )}
           <div className="flex justify-end gap-3 pt-4 border-t">
             <Button variant="secondary" onClick={() => setShowEdit(false)}>Cancel</Button>
-            <Button onClick={() => selected && updateMut.mutate({ id: selected.id, dto: { name: form.name, description: form.description, horizonMonths: Number(form.horizonMonths), demandReviewDate: form.demandReviewDate || undefined, supplyReviewDate: form.supplyReviewDate || undefined, executiveMeetingDate: form.executiveMeetingDate || undefined } as any })} isLoading={updateMut.isPending}>Save</Button>
+            <Button onClick={() => selected && updateMut.mutate({ id: selected.id, dto: { name: form.name, description: form.description, horizonMonths: Number(form.horizonMonths), demandReviewDate: form.demandReviewDate || undefined, supplyReviewDate: form.supplyReviewDate || undefined, executiveMeetingDate: form.executiveMeetingDate || undefined, demandManagerId: form.demandManagerId || undefined, supplyManagerId: form.supplyManagerId || undefined, financeManagerId: form.financeManagerId || undefined, executiveSponsorId: form.executiveSponsorId || undefined } as any })} isLoading={updateMut.isPending}>Save</Button>
           </div>
         </div>
       </Modal>
@@ -233,13 +306,19 @@ export default function SOPPage() {
             <div className="grid grid-cols-4 gap-4 text-sm">
               <div><span className="font-medium text-gray-500">Period:</span> {selected.year}-{String(selected.month).padStart(2, '0')}</div>
               <div><span className="font-medium text-gray-500">Status:</span> <Badge variant={statusVariant[selected.status] || 'secondary'} size="sm">{selected.status?.replace('_', ' ')}</Badge></div>
-              <div><span className="font-medium text-gray-500">Horizon:</span> {selected.horizonMonths ?? '—'} months</div>
+              <div><span className="font-medium text-gray-500">Planning Window:</span> {safeFormat(selected.planningStart, 'MMM d')} to {safeFormat(selected.planningEnd, 'MMM d')}</div>
               <div><span className="font-medium text-gray-500">Created By:</span> {selected.createdBy?.name ?? '—'}</div>
             </div>
             <div className="grid grid-cols-3 gap-4 text-sm">
               <div><span className="font-medium text-gray-500">Demand Review:</span> {safeFormat(selected.demandReviewDate, 'MMM d, yyyy')}</div>
               <div><span className="font-medium text-gray-500">Supply Review:</span> {safeFormat(selected.supplyReviewDate, 'MMM d, yyyy')}</div>
               <div><span className="font-medium text-gray-500">Executive:</span> {safeFormat(selected.executiveMeetingDate, 'MMM d, yyyy')}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div><span className="font-medium text-gray-500">Demand Manager:</span> {getUserLabelById(selected.demandManagerId, selected.demandManagerUser)}</div>
+              <div><span className="font-medium text-gray-500">Supply Manager:</span> {getUserLabelById(selected.supplyManagerId, selected.supplyManagerUser)}</div>
+              <div><span className="font-medium text-gray-500">Finance Manager:</span> {getUserLabelById(selected.financeManagerId, selected.financeManagerUser)}</div>
+              <div><span className="font-medium text-gray-500">Executive Sponsor:</span> {getUserLabelById(selected.executiveSponsorId, selected.executiveSponsorUser)}</div>
             </div>
 
             {/* Actions */}

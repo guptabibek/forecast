@@ -1,24 +1,25 @@
+import { getRoleLabel } from '@/permissions';
 import { Menu, Transition } from '@headlessui/react';
 import {
-  ArrowRightOnRectangleIcon,
-  Bars3Icon,
-  BellIcon,
-  CheckIcon,
-  Cog6ToothIcon,
-  MagnifyingGlassIcon,
-  MoonIcon,
-  SunIcon,
-  UserCircleIcon,
+    ArrowRightOnRectangleIcon,
+    Bars3Icon,
+    BellIcon,
+    CheckIcon,
+    Cog6ToothIcon,
+    MagnifyingGlassIcon,
+    MoonIcon,
+    SunIcon,
+    UserCircleIcon,
 } from '@heroicons/react/24/outline';
 import { useAuthStore } from '@stores/auth.store';
 import clsx from 'clsx';
 import { Fragment, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  useMarkAllNotificationsRead,
-  useMarkNotificationRead,
-  useNotifications,
-  useUnreadCount,
+    useMarkAllNotificationsRead,
+    useMarkNotificationRead,
+    useNotifications,
+    useUnreadCount,
 } from '../../hooks/useAuditNotifications';
 import { useBranding } from '../ThemeProvider';
 
@@ -233,7 +234,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
                 <p className="text-sm font-medium">
                   {user?.firstName} {user?.lastName}
                 </p>
-                <p className="text-xs text-secondary-500">{user?.role}</p>
+                <p className="text-xs text-secondary-500">{getRoleLabel(user?.role)}</p>
               </div>
             </Menu.Button>
             <Transition

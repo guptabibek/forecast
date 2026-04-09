@@ -1,12 +1,12 @@
-import type { Dimension, ProductCategory, UnitOfMeasure } from '@/types';
+import type { Dimension, Product, ProductCategory, UnitOfMeasure } from '@/types';
 import { Badge, Button, Card, CardHeader, Column, DataTable, Modal } from '@components/ui';
 import {
-  ArrowPathIcon,
-  CubeIcon,
-  MagnifyingGlassIcon,
-  PencilIcon,
-  PlusIcon,
-  TrashIcon,
+    ArrowPathIcon,
+    CubeIcon,
+    MagnifyingGlassIcon,
+    PencilIcon,
+    PlusIcon,
+    TrashIcon,
 } from '@heroicons/react/24/outline';
 import { dataService, productCategoryService, uomService } from '@services/api';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -23,29 +23,29 @@ interface ProductForm {
   code: string;
   name: string;
   description: string;
-  category: string;
+  categoryId: string;
   subcategory: string;
   brand: string;
-  unitOfMeasure: string;
+  unitOfMeasureId: string;
   listPrice: string;
   standardCost: string;
   externalId: string;
   isActive: boolean;
 }
 
-const emptyForm: ProductForm = {
+const buildEmptyForm = (defaultUnitOfMeasureId = ''): ProductForm => ({
   code: '',
   name: '',
   description: '',
-  category: '',
+  categoryId: '',
   subcategory: '',
   brand: '',
-  unitOfMeasure: 'EA',
+  unitOfMeasureId: defaultUnitOfMeasureId,
   listPrice: '',
   standardCost: '',
   externalId: '',
   isActive: true,
-};
+});
 
 export default function ProductMaster() {
   const queryClient = useQueryClient();
@@ -55,18 +55,18 @@ export default function ProductMaster() {
   const [showCreate, setShowCreate] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
-  const [selected, setSelected] = useState<any | null>(null);
-  const [form, setForm] = useState<ProductForm>(emptyForm);
+  const [selected, setSelected] = useState<Product | null>(null);
+  const [form, setForm] = useState<ProductForm>(buildEmptyForm());
 
   // Fetch products
-  const { data: products = [], isLoading } = useQuery({
+  const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ['products-master', search, statusFilter],
     queryFn: () =>
       dataService.getDimensions('product', {
         search: search || undefined,
         isActive: statusFilter === 'ACTIVE' ? true : statusFilter === 'INACTIVE' ? false : undefined,
         limit: 500,
-      } as any),
+      } as any) as Promise<Product[]>,
   });
 
   // Fetch UOM Master
@@ -84,17 +84,50 @@ export default function ProductMaster() {
     staleTime: 5 * 60 * 1000,
   });
   const categoryList: ProductCategory[] = categoryResult?.data ?? [];
+  const defaultUnitOfMeasureId = uomList.find((u) => u.code === 'EA')?.id ?? uomList[0]?.id ?? '';
+
+  const getCategoryLabel = (product: Product) => {
+    if (product.category) {
+      return product.category;
+    }
+
+    return categoryList.find((category) => category.id === product.categoryId)?.name || '';
+  };
+
+  const getUnitOfMeasureLabel = (product: Product) => {
+    if (product.unitOfMeasure) {
+      return product.unitOfMeasure;
+    }
+
+    return uomList.find((unitOfMeasure) => unitOfMeasure.id === product.unitOfMeasureId)?.code || '';
+  };
+
+  const resolveCategoryId = (product: Product) =>
+    categoryList.find(
+      (category) =>
+        category.id === product.categoryId ||
+        category.name.toLowerCase() === product.category?.toLowerCase() ||
+        category.code.toLowerCase() === product.category?.toLowerCase(),
+    )?.id || '';
+
+  const resolveUnitOfMeasureId = (product: Product) =>
+    uomList.find(
+      (unitOfMeasure) =>
+        unitOfMeasure.id === product.unitOfMeasureId ||
+        unitOfMeasure.code.toLowerCase() === product.unitOfMeasure?.toLowerCase() ||
+        unitOfMeasure.name.toLowerCase() === product.unitOfMeasure?.toLowerCase(),
+    )?.id || defaultUnitOfMeasureId;
 
   // filtered by category client-side
   const filtered = categoryFilter
-    ? (products as any[]).filter((p) => p.category === categoryFilter)
-    : (products as any[]);
+    ? products.filter((product) => getCategoryLabel(product) === categoryFilter)
+    : products;
 
   // unique categories from data for the filter dropdown (merge master + data-derived)
   const dataCategories = [
     ...new Set([
       ...categoryList.map((c) => c.name),
-      ...(products as any[]).map((p) => p.category).filter(Boolean),
+      ...products.map((product) => getCategoryLabel(product)).filter(Boolean),
     ]),
   ].sort();
 
@@ -109,7 +142,7 @@ export default function ProductMaster() {
       queryClient.invalidateQueries({ queryKey: ['dimensions'] });
       toast.success('Product created');
       setShowCreate(false);
-      setForm(emptyForm);
+      setForm(buildEmptyForm(defaultUnitOfMeasureId));
     },
     onError: (err: any) => toast.error(err?.response?.data?.message || 'Failed to create product'),
   });
@@ -147,10 +180,10 @@ export default function ProductMaster() {
       code: form.code,
       name: form.name,
       description: form.description || undefined,
-      category: form.category || undefined,
+      categoryId: form.categoryId || undefined,
       subcategory: form.subcategory || undefined,
       brand: form.brand || undefined,
-      unitOfMeasure: form.unitOfMeasure || undefined,
+      unitOfMeasureId: form.unitOfMeasureId || undefined,
       listPrice: form.listPrice ? parseFloat(form.listPrice) : undefined,
       standardCost: form.standardCost ? parseFloat(form.standardCost) : undefined,
       externalId: form.externalId || undefined,
@@ -166,10 +199,10 @@ export default function ProductMaster() {
       code: form.code,
       name: form.name,
       description: form.description || undefined,
-      category: form.category || undefined,
+      categoryId: form.categoryId || undefined,
       subcategory: form.subcategory || undefined,
       brand: form.brand || undefined,
-      unitOfMeasure: form.unitOfMeasure || undefined,
+      unitOfMeasureId: form.unitOfMeasureId || undefined,
       listPrice: form.listPrice ? parseFloat(form.listPrice) : undefined,
       standardCost: form.standardCost ? parseFloat(form.standardCost) : undefined,
       externalId: form.externalId || undefined,
@@ -178,16 +211,16 @@ export default function ProductMaster() {
     updateMut.mutate({ id: selected.id, data: payload });
   };
 
-  const openEdit = (p: any) => {
+  const openEdit = (p: Product) => {
     setSelected(p);
     setForm({
       code: p.code || '',
       name: p.name || '',
       description: p.description || '',
-      category: p.category || '',
+      categoryId: resolveCategoryId(p),
       subcategory: p.subcategory || '',
       brand: p.brand || '',
-      unitOfMeasure: p.unitOfMeasure || 'EA',
+      unitOfMeasureId: resolveUnitOfMeasureId(p),
       listPrice: p.listPrice != null ? String(Number(p.listPrice)) : '',
       standardCost: p.standardCost != null ? String(Number(p.standardCost)) : '',
       externalId: p.externalId || '',
@@ -196,31 +229,31 @@ export default function ProductMaster() {
     setShowEdit(true);
   };
 
-  const openDetail = (p: any) => {
+  const openDetail = (p: Product) => {
     setSelected(p);
     setShowDetail(true);
   };
 
   // Table columns
-  const columns: Column<any>[] = [
-    { key: 'code', header: 'Code', accessor: (r: any) => (
+  const columns: Column<Product>[] = [
+    { key: 'code', header: 'Code', accessor: (r: Product) => (
       <span className="font-mono text-sm">{r.code}</span>
     ), sortable: true },
     { key: 'name', header: 'Name', accessor: 'name', sortable: true },
-    { key: 'category', header: 'Category', accessor: (r: any) => r.category || '—' },
-    { key: 'brand', header: 'Brand', accessor: (r: any) => r.brand || '—' },
-    { key: 'uom', header: 'UOM', accessor: (r: any) => r.unitOfMeasure || '—', align: 'center' },
+    { key: 'category', header: 'Category', accessor: (r: Product) => getCategoryLabel(r) || '—' },
+    { key: 'brand', header: 'Brand', accessor: (r: Product) => r.brand || '—' },
+    { key: 'uom', header: 'UOM', accessor: (r: Product) => getUnitOfMeasureLabel(r) || '—', align: 'center' },
     {
       key: 'listPrice', header: 'List Price', align: 'right',
-      accessor: (r: any) => r.listPrice != null ? `$${Number(r.listPrice).toFixed(2)}` : '—',
+      accessor: (r: Product) => r.listPrice != null ? `$${Number(r.listPrice).toFixed(2)}` : '—',
     },
     {
       key: 'stdCost', header: 'Std Cost', align: 'right',
-      accessor: (r: any) => r.standardCost != null ? `$${Number(r.standardCost).toFixed(2)}` : '—',
+      accessor: (r: Product) => r.standardCost != null ? `$${Number(r.standardCost).toFixed(2)}` : '—',
     },
     {
       key: 'margin', header: 'Margin', align: 'right',
-      accessor: (r: any) => {
+      accessor: (r: Product) => {
         const price = Number(r.listPrice);
         const cost = Number(r.standardCost);
         if (!price || !cost) return '—';
@@ -234,14 +267,14 @@ export default function ProductMaster() {
     },
     {
       key: 'status', header: 'Status',
-      accessor: (r: any) => {
+      accessor: (r: Product) => {
         const active = r.isActive ?? (r.status === 'ACTIVE');
         return <Badge variant={active ? 'success' : 'secondary'} size="sm">{active ? 'Active' : 'Inactive'}</Badge>;
       },
     },
     {
       key: 'actions', header: 'Actions',
-      accessor: (r: any) => (
+      accessor: (r: Product) => (
         <div className="flex gap-1">
           <button onClick={() => openDetail(r)} className="p-1 text-blue-600 hover:text-blue-800" title="View Details">
             <CubeIcon className="h-4 w-4" />
@@ -264,9 +297,9 @@ export default function ProductMaster() {
   ];
 
   // Summary stats
-  const activeCount = (products as any[]).filter((p) => p.isActive ?? p.status === 'ACTIVE').length;
-  const avgPrice = (products as any[]).reduce((s, p) => s + (Number(p.listPrice) || 0), 0) / ((products as any[]).length || 1);
-  const avgCost = (products as any[]).reduce((s, p) => s + (Number(p.standardCost) || 0), 0) / ((products as any[]).length || 1);
+  const activeCount = products.filter((product) => product.isActive ?? product.status === 'ACTIVE').length;
+  const avgPrice = products.reduce((sum, product) => sum + (Number(product.listPrice) || 0), 0) / (products.length || 1);
+  const avgCost = products.reduce((sum, product) => sum + (Number(product.standardCost) || 0), 0) / (products.length || 1);
 
   const ProductFormFields = () => (
     <div className="space-y-4">
@@ -310,13 +343,13 @@ export default function ProductMaster() {
         <div>
           <label className="block text-sm font-medium mb-1">Category</label>
           <select
-            value={form.category}
-            onChange={(e) => setForm({ ...form, category: e.target.value })}
+            value={form.categoryId}
+            onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
             className="w-full px-3 py-2 border rounded-md dark:bg-gray-800 dark:border-gray-700"
           >
             <option value="">Select...</option>
             {categoryList.map((c) => (
-              <option key={c.id} value={c.name}>{c.name}</option>
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
         </div>
@@ -344,12 +377,13 @@ export default function ProductMaster() {
         <div>
           <label className="block text-sm font-medium mb-1">Unit of Measure</label>
           <select
-            value={form.unitOfMeasure}
-            onChange={(e) => setForm({ ...form, unitOfMeasure: e.target.value })}
+            value={form.unitOfMeasureId}
+            onChange={(e) => setForm({ ...form, unitOfMeasureId: e.target.value })}
             className="w-full px-3 py-2 border rounded-md dark:bg-gray-800 dark:border-gray-700"
           >
+            <option value="">Select...</option>
             {uomList.map((u) => (
-              <option key={u.id} value={u.code}>{u.code} — {u.name}</option>
+              <option key={u.id} value={u.id}>{u.code} — {u.name}</option>
             ))}
           </select>
         </div>
@@ -421,7 +455,7 @@ export default function ProductMaster() {
           </h1>
           <p className="text-secondary-500 mt-1">Manage product catalog — pricing, cost, classification</p>
         </div>
-        <Button onClick={() => { setForm(emptyForm); setShowCreate(true); }}>
+        <Button onClick={() => { setForm(buildEmptyForm(defaultUnitOfMeasureId)); setShowCreate(true); }}>
           <PlusIcon className="h-4 w-4 mr-1" /> Add Product
         </Button>
       </div>
@@ -431,7 +465,7 @@ export default function ProductMaster() {
         <Card>
           <div className="p-4">
             <div className="text-sm text-secondary-500">Total Products</div>
-            <div className="text-2xl font-bold">{(products as any[]).length}</div>
+            <div className="text-2xl font-bold">{products.length}</div>
           </div>
         </Card>
         <Card>
@@ -513,7 +547,7 @@ export default function ProductMaster() {
         <DataTable
           data={filtered}
           columns={columns}
-          keyExtractor={(r: any) => r.id}
+          keyExtractor={(r: Product) => r.id}
           isLoading={isLoading}
           emptyMessage="No products found. Create your first product to get started."
           onRowClick={openDetail}
@@ -565,7 +599,7 @@ export default function ProductMaster() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
                 <dt className="text-secondary-500">Category</dt>
-                <dd className="font-medium">{selected.category || '—'}</dd>
+                <dd className="font-medium">{getCategoryLabel(selected) || '—'}</dd>
               </div>
               <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
                 <dt className="text-secondary-500">Subcategory</dt>
@@ -577,7 +611,7 @@ export default function ProductMaster() {
               </div>
               <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
                 <dt className="text-secondary-500">Unit of Measure</dt>
-                <dd className="font-medium">{selected.unitOfMeasure || '—'}</dd>
+                <dd className="font-medium">{getUnitOfMeasureLabel(selected) || '—'}</dd>
               </div>
               <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
                 <dt className="text-secondary-500">List Price</dt>

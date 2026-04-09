@@ -74,6 +74,10 @@ export class CreatePostingProfileDto {
 
   @IsOptional()
   @IsUUID()
+  productCategoryId?: string;
+
+  @IsOptional()
+  @IsUUID()
   locationId?: string;
 
   @IsOptional()

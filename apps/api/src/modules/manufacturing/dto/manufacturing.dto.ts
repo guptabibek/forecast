@@ -1118,6 +1118,22 @@ export class CreateSOPCycleDto {
   planningEnd: Date;
 
   @IsOptional()
+  @IsUUID()
+  demandManagerId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  supplyManagerId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  financeManagerId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  executiveSponsorId?: string;
+
+  @IsOptional()
   @IsString()
   notes?: string;
 }
@@ -1174,6 +1190,22 @@ export class CreateSOPCycleV2Dto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsUUID()
+  demandManagerId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  supplyManagerId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  financeManagerId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  executiveSponsorId?: string;
 }
 
 export class UpdateSOPCycleDto {
@@ -1204,6 +1236,22 @@ export class UpdateSOPCycleDto {
   @IsOptional()
   @IsDateString()
   planningEnd?: string;
+
+  @IsOptional()
+  @IsUUID()
+  demandManagerId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  supplyManagerId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  financeManagerId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  executiveSponsorId?: string;
 }
 
 export class UpdateSOPCycleStatusDto {
@@ -1550,6 +1598,16 @@ export class CreatePromotionDto {
   @IsArray()
   @IsUUID(undefined, { each: true })
   locationIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  customerIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  channelIds?: string[];
 }
 
 export class UpdatePromotionDto {
@@ -1602,6 +1660,16 @@ export class UpdatePromotionDto {
   @IsArray()
   @IsUUID(undefined, { each: true })
   locationIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  customerIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  channelIds?: string[];
 }
 
 export class UpdatePromotionStatusDto {

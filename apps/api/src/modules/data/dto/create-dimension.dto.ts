@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsNumber, IsObject, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsNumber, IsObject, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class CreateDimensionDto {
   @ApiProperty({ description: 'Dimension code (unique)' })
@@ -42,6 +42,16 @@ export class CreateDimensionDto {
   @IsOptional()
   category?: string;
 
+  @ApiPropertyOptional({ description: 'Cost center manager user ID' })
+  @IsUUID()
+  @IsOptional()
+  managerId?: string | null;
+
+  @ApiPropertyOptional({ description: 'Product category ID' })
+  @IsUUID()
+  @IsOptional()
+  categoryId?: string;
+
   @ApiPropertyOptional({ description: 'Level in hierarchy' })
   @Type(() => Number)
   @IsNumber()
@@ -65,15 +75,30 @@ export class CreateDimensionDto {
   @IsOptional()
   subcategory?: string;
 
+  @ApiPropertyOptional({ description: 'Product subcategory ID' })
+  @IsUUID()
+  @IsOptional()
+  subcategoryId?: string;
+
   @ApiPropertyOptional({ description: 'Brand' })
   @IsString()
   @IsOptional()
   brand?: string;
 
+  @ApiPropertyOptional({ description: 'Product brand ID' })
+  @IsUUID()
+  @IsOptional()
+  brandId?: string;
+
   @ApiPropertyOptional({ description: 'Unit of measure' })
   @IsString()
   @IsOptional()
   unitOfMeasure?: string;
+
+  @ApiPropertyOptional({ description: 'Unit of measure ID' })
+  @IsUUID()
+  @IsOptional()
+  unitOfMeasureId?: string;
 
   @ApiPropertyOptional({ description: 'Standard cost' })
   @Type(() => Number)

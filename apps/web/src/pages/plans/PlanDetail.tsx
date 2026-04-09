@@ -322,11 +322,11 @@ export default function PlanDetail() {
   const handleExport = useCallback(async () => {
     if (!id) return;
     try {
-      const blob = await planService.export(id, 'excel');
+      const blob = await planService.export(id, 'csv');
       const url = window.URL.createObjectURL(new Blob([blob as unknown as BlobPart]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `plan-${plan?.name || id}.xlsx`);
+      link.setAttribute('download', `plan-${plan?.name || id}.csv`);
       document.body.appendChild(link);
       link.click();
       link.remove();

@@ -58,6 +58,15 @@ services:
       MAIN_DOMAIN: ${MAIN_DOMAIN:-localhost}
       ALLOW_DEMO_TENANT_FALLBACK: ${ALLOW_DEMO_TENANT_FALLBACK:-false}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-false}
+      SMTP_IGNORE_TLS: ${SMTP_IGNORE_TLS:-false}
+      SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-true}
     ports:
       - "${API_EXTERNAL_PORT:-3001}:3000"
     command: sh -c "npx prisma migrate deploy && node dist/main.js"

@@ -1,7 +1,22 @@
 import { AccountType, ActualType, ApproverType, BOMStatus, BOMType, CustomerType, DimensionStatus, ForecastModel, JobStatus, LocationType, LotSizingRule, PeriodType, PlanningMethod, PlanStatus, PlanType, PrismaClient, SafetyStockMethod, ScenarioType, SupplyType, UserRole, WorkCenterType, WorkflowEntityType } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import {
+    DEFAULT_PRODUCT_CATEGORIES,
+    DEFAULT_TENANT_SETTINGS,
+    DEFAULT_TENANT_UOMS,
+} from '../src/modules/auth/tenant-bootstrap.defaults';
 
 const prisma = new PrismaClient();
+
+function toLegacyCategoryCode(name: string): string {
+  const normalizedName = name
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  return (`LEGACY_${normalizedName || 'CATEGORY'}`).slice(0, 50);
+}
 
 // Seeded PRNG for consistent random-like values across seed runs
 // Uses mulberry32 algorithm for deterministic pseudo-random numbers
@@ -137,15 +152,7 @@ async function main() {
       timezone: 'America/New_York',
       fiscalYearStart: 1,
       defaultCurrency: 'USD',
-      settings: {
-        dateFormat: 'MM/DD/YYYY',
-        defaultForecastModel: 'HOLT_WINTERS',
-        features: {
-          aiForecasting: true,
-          advancedReporting: true,
-          scenarioPlanning: true,
-        },
-      },
+      settings: DEFAULT_TENANT_SETTINGS,
     },
     create: {
       name: seedTenant.tenantName,
@@ -157,15 +164,7 @@ async function main() {
       timezone: 'America/New_York',
       fiscalYearStart: 1,
       defaultCurrency: 'USD',
-      settings: {
-        dateFormat: 'MM/DD/YYYY',
-        defaultForecastModel: 'HOLT_WINTERS',
-        features: {
-          aiForecasting: true,
-          advancedReporting: true,
-          scenarioPlanning: true,
-        },
-      },
+      settings: DEFAULT_TENANT_SETTINGS,
     },
   });
   console.log(`✅ Created tenant: ${tenant.name}`);
@@ -214,44 +213,8 @@ async function main() {
   // ============================================
   // UNIT OF MEASURE MASTER — Standard UOMs
   // ============================================
-  const uomData = [
-    // Count
-    { code: 'EA', name: 'Each', symbol: 'ea', category: 'COUNT', decimals: 0, isBase: true, sortOrder: 1 },
-    { code: 'PR', name: 'Pair', symbol: 'pr', category: 'COUNT', decimals: 0, isBase: false, sortOrder: 2 },
-    { code: 'DZ', name: 'Dozen', symbol: 'dz', category: 'COUNT', decimals: 0, isBase: false, sortOrder: 3 },
-    { code: 'PKG', name: 'Package', symbol: 'pkg', category: 'COUNT', decimals: 0, isBase: false, sortOrder: 4 },
-    { code: 'BOX', name: 'Box', symbol: 'box', category: 'COUNT', decimals: 0, isBase: false, sortOrder: 5 },
-    { code: 'CS', name: 'Case', symbol: 'cs', category: 'COUNT', decimals: 0, isBase: false, sortOrder: 6 },
-    { code: 'PLT', name: 'Pallet', symbol: 'plt', category: 'COUNT', decimals: 0, isBase: false, sortOrder: 7 },
-    // Weight
-    { code: 'G', name: 'Gram', symbol: 'g', category: 'WEIGHT', decimals: 2, isBase: false, sortOrder: 1 },
-    { code: 'KG', name: 'Kilogram', symbol: 'kg', category: 'WEIGHT', decimals: 3, isBase: true, sortOrder: 2 },
-    { code: 'MT', name: 'Metric Ton', symbol: 't', category: 'WEIGHT', decimals: 4, isBase: false, sortOrder: 3 },
-    { code: 'OZ', name: 'Ounce', symbol: 'oz', category: 'WEIGHT', decimals: 2, isBase: false, sortOrder: 4 },
-    { code: 'LB', name: 'Pound', symbol: 'lb', category: 'WEIGHT', decimals: 3, isBase: false, sortOrder: 5 },
-    // Length
-    { code: 'MM', name: 'Millimeter', symbol: 'mm', category: 'LENGTH', decimals: 1, isBase: false, sortOrder: 1 },
-    { code: 'CM', name: 'Centimeter', symbol: 'cm', category: 'LENGTH', decimals: 2, isBase: false, sortOrder: 2 },
-    { code: 'M', name: 'Meter', symbol: 'm', category: 'LENGTH', decimals: 3, isBase: true, sortOrder: 3 },
-    { code: 'IN', name: 'Inch', symbol: 'in', category: 'LENGTH', decimals: 2, isBase: false, sortOrder: 4 },
-    { code: 'FT', name: 'Foot', symbol: 'ft', category: 'LENGTH', decimals: 3, isBase: false, sortOrder: 5 },
-    // Volume
-    { code: 'ML', name: 'Milliliter', symbol: 'ml', category: 'VOLUME', decimals: 1, isBase: false, sortOrder: 1 },
-    { code: 'L', name: 'Liter', symbol: 'L', category: 'VOLUME', decimals: 3, isBase: true, sortOrder: 2 },
-    { code: 'GAL', name: 'Gallon', symbol: 'gal', category: 'VOLUME', decimals: 3, isBase: false, sortOrder: 3 },
-    { code: 'FLOZ', name: 'Fluid Ounce', symbol: 'fl oz', category: 'VOLUME', decimals: 2, isBase: false, sortOrder: 4 },
-    // Area
-    { code: 'SQM', name: 'Square Meter', symbol: 'm²', category: 'AREA', decimals: 3, isBase: true, sortOrder: 1 },
-    { code: 'SQFT', name: 'Square Foot', symbol: 'ft²', category: 'AREA', decimals: 3, isBase: false, sortOrder: 2 },
-    // Time
-    { code: 'SEC', name: 'Second', symbol: 's', category: 'TIME', decimals: 0, isBase: false, sortOrder: 1 },
-    { code: 'MIN', name: 'Minute', symbol: 'min', category: 'TIME', decimals: 1, isBase: false, sortOrder: 2 },
-    { code: 'HR', name: 'Hour', symbol: 'hr', category: 'TIME', decimals: 2, isBase: true, sortOrder: 3 },
-    { code: 'DAY', name: 'Day', symbol: 'day', category: 'TIME', decimals: 2, isBase: false, sortOrder: 4 },
-  ];
-
   await prisma.unitOfMeasure.deleteMany({ where: { tenantId: tenant.id } });
-  for (const u of uomData) {
+  for (const u of DEFAULT_TENANT_UOMS) {
     await prisma.unitOfMeasure.create({
       data: {
         tenantId: tenant.id,
@@ -266,26 +229,13 @@ async function main() {
       },
     });
   }
-  console.log(`✅ Created ${uomData.length} units of measure`);
+  console.log(`✅ Created ${DEFAULT_TENANT_UOMS.length} units of measure`);
 
   // ============================================
   // PRODUCT CATEGORIES — Standard categories
   // ============================================
-  const productCategoryData = [
-    { code: 'RAW_MATERIAL', name: 'Raw Material', description: 'Raw materials and basic inputs', color: '#6366F1', sortOrder: 1 },
-    { code: 'COMPONENT', name: 'Component', description: 'Individual components and parts', color: '#8B5CF6', sortOrder: 2 },
-    { code: 'SUB_ASSEMBLY', name: 'Sub-Assembly', description: 'Intermediate assemblies', color: '#A855F7', sortOrder: 3 },
-    { code: 'FINISHED_GOOD', name: 'Finished Good', description: 'Completed products ready for sale', color: '#10B981', sortOrder: 4 },
-    { code: 'PACKAGING', name: 'Packaging', description: 'Packaging materials', color: '#F59E0B', sortOrder: 5 },
-    { code: 'CONSUMABLE', name: 'Consumable', description: 'Consumable supplies', color: '#EF4444', sortOrder: 6 },
-    { code: 'MRO', name: 'MRO', description: 'Maintenance, Repair and Operations', color: '#06B6D4', sortOrder: 7 },
-    { code: 'SERVICE', name: 'Service', description: 'Service and labor items', color: '#84CC16', sortOrder: 8 },
-    { code: 'SPARE_PART', name: 'Spare Part', description: 'Spare parts for equipment maintenance', color: '#F97316', sortOrder: 9 },
-    { code: 'TOOLING', name: 'Tooling', description: 'Tools, jigs, and fixtures', color: '#64748B', sortOrder: 10 },
-  ];
-
   await prisma.productCategory.deleteMany({ where: { tenantId: tenant.id } });
-  for (const c of productCategoryData) {
+  for (const c of DEFAULT_PRODUCT_CATEGORIES) {
     await prisma.productCategory.create({
       data: {
         tenantId: tenant.id,
@@ -298,7 +248,7 @@ async function main() {
       },
     });
   }
-  console.log(`✅ Created ${productCategoryData.length} product categories`);
+  console.log(`✅ Created ${DEFAULT_PRODUCT_CATEGORIES.length} product categories`);
 
   // ============================================
   // PRODUCTS - Comprehensive product catalog
@@ -357,18 +307,56 @@ async function main() {
   ];
 
   const products: any[] = [];
+  const extraProductCategories = [...new Set(productData.map((product) => product.category.trim()))]
+    .filter((categoryName) => !DEFAULT_PRODUCT_CATEGORIES.some((category) => category.name.toLowerCase() === categoryName.toLowerCase()))
+    .map((categoryName, index) => ({
+      tenantId: tenant.id,
+      code: `${toLegacyCategoryCode(categoryName)}_${String(index + 1).padStart(2, '0')}`.slice(0, 50),
+      name: categoryName,
+      description: `Migrated legacy product category for ${categoryName}`,
+      sortOrder: DEFAULT_PRODUCT_CATEGORIES.length + index + 1,
+      isActive: true,
+    }));
+
+  if (extraProductCategories.length > 0) {
+    await prisma.productCategory.createMany({
+      data: extraProductCategories,
+      skipDuplicates: true,
+    });
+  }
+
+  const productCategories = await prisma.productCategory.findMany({
+    where: { tenantId: tenant.id },
+    select: { id: true, name: true },
+  });
+  const productCategoryByName = new Map(
+    productCategories.map((category) => [category.name.toLowerCase(), category]),
+  );
+
+  const eachUom = await prisma.unitOfMeasure.findFirst({
+    where: { tenantId: tenant.id, code: 'EA' },
+    select: { id: true, code: true },
+  });
+
+  if (!eachUom) {
+    throw new Error('Missing default EA unit of measure during seed');
+  }
+
   for (const p of productData) {
+    const category = productCategoryByName.get(p.category.toLowerCase());
     const product = await prisma.product.create({
       data: {
         tenantId: tenant.id,
         code: p.code,
         name: p.name,
-        category: p.category,
+        category: category?.name ?? p.category,
+        categoryId: category?.id,
         subcategory: p.subcategory,
         brand: p.brand,
         listPrice: p.listPrice,
         standardCost: p.standardCost,
-        unitOfMeasure: 'EA',
+        unitOfMeasure: eachUom.code,
+        unitOfMeasureId: eachUom.id,
         status: 'ACTIVE',
       },
     });

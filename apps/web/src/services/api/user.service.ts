@@ -18,7 +18,7 @@ export interface UpdateUserDto {
 export interface UpdateProfileDto {
   firstName?: string;
   lastName?: string;
-  avatar?: string;
+  avatarUrl?: string;
 }
 
 export interface ChangePasswordDto {
@@ -36,7 +36,7 @@ export interface UserActivity {
 }
 
 export const userService = {
-  async getAll(params?: { page?: number; limit?: number; search?: string; role?: string }): Promise<{ data: User[]; total: number }> {
+  async getAll(params?: { page?: number; limit?: number; search?: string; role?: string; status?: string }): Promise<{ data: User[]; total: number }> {
     const { data } = await apiClient.get<{ data: User[]; meta: { total: number } }>('/users', { params });
     return { data: data.data, total: data.meta.total };
   },
@@ -93,11 +93,9 @@ export const userService = {
     return { data: data.data, total: data.meta.total };
   },
 
-  async uploadAvatar(file: File): Promise<{ url: string }> {
-    const formData = new FormData();
-    formData.append('avatar', file);
-    const { data } = await apiClient.post<{ data: { url: string } }>('/users/profile/avatar', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+  async uploadAvatar(avatarUrl?: string): Promise<{ url: string }> {
+    const { data } = await apiClient.post<{ data: { url: string } }>('/users/profile/avatar', {
+      avatarUrl,
     });
     return data.data;
   },

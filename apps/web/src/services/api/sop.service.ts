@@ -1,5 +1,106 @@
 import { apiClient } from './client';
 
+type BackendSOPStatus = 'PLANNING' | 'DEMAND_REVIEW' | 'SUPPLY_REVIEW' | 'PRE_SOP' | 'EXECUTIVE_SOP' | 'APPROVED' | 'CLOSED';
+
+type BackendUserSummary = {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  email: string;
+};
+
+type BackendSOPCycle = {
+  id: string;
+  name: string;
+  fiscalYear?: number;
+  fiscalPeriod?: number;
+  year?: number;
+  month?: number;
+  status: BackendSOPStatus;
+  notes?: string;
+  description?: string;
+  planningStart?: string;
+  planningEnd?: string;
+  demandReviewDate?: string;
+  supplyReviewDate?: string;
+  preSopDate?: string;
+  executiveSopDate?: string;
+  executiveMeetingDate?: string;
+  demandManager?: string | null;
+  supplyManager?: string | null;
+  financeManager?: string | null;
+  executiveSponsor?: string | null;
+  demandManagerUser?: BackendUserSummary | null;
+  supplyManagerUser?: BackendUserSummary | null;
+  financeManagerUser?: BackendUserSummary | null;
+  executiveSponsorUser?: BackendUserSummary | null;
+  createdById?: string;
+  createdBy?: { id: string; name?: string; email: string };
+  _count?: { forecasts?: number; assumptions?: number };
+};
+
+function toUserSummary(user?: BackendUserSummary | null) {
+  if (!user) {
+    return undefined;
+  }
+
+  const name = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
+  return {
+    id: user.id,
+    email: user.email,
+    name: name || user.email,
+  };
+}
+
+function calculateHorizonMonths(startDate?: string, endDate?: string): number | undefined {
+  if (!startDate || !endDate) {
+    return undefined;
+  }
+
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+    return undefined;
+  }
+
+  return Math.max(
+    1,
+    (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1,
+  );
+}
+
+function mapSOPCycle(raw: BackendSOPCycle): SOPCycle {
+  const planningStart = raw.planningStart;
+  const planningEnd = raw.planningEnd;
+
+  return {
+    id: raw.id,
+    name: raw.name,
+    year: raw.year ?? raw.fiscalYear ?? 0,
+    month: raw.month ?? raw.fiscalPeriod ?? 0,
+    description: raw.description ?? raw.notes,
+    status: raw.status,
+    planningStart,
+    planningEnd,
+    horizonMonths: calculateHorizonMonths(planningStart, planningEnd),
+    demandReviewDate: raw.demandReviewDate,
+    supplyReviewDate: raw.supplyReviewDate,
+    preSopDate: raw.preSopDate,
+    executiveMeetingDate: raw.executiveMeetingDate ?? raw.executiveSopDate,
+    demandManagerId: raw.demandManager ?? undefined,
+    supplyManagerId: raw.supplyManager ?? undefined,
+    financeManagerId: raw.financeManager ?? undefined,
+    executiveSponsorId: raw.executiveSponsor ?? undefined,
+    demandManagerUser: toUserSummary(raw.demandManagerUser),
+    supplyManagerUser: toUserSummary(raw.supplyManagerUser),
+    financeManagerUser: toUserSummary(raw.financeManagerUser),
+    executiveSponsorUser: toUserSummary(raw.executiveSponsorUser),
+    createdById: raw.createdById,
+    createdBy: raw.createdBy,
+    _count: raw._count,
+  };
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -10,14 +111,25 @@ export interface SOPCycle {
   year: number;
   month: number;
   description?: string;
-  status: 'DRAFT' | 'DEMAND_REVIEW' | 'SUPPLY_REVIEW' | 'EXECUTIVE_REVIEW' | 'FINALIZED';
+  status: BackendSOPStatus;
+  planningStart?: string;
+  planningEnd?: string;
   horizonMonths?: number;
   demandReviewDate?: string;
   supplyReviewDate?: string;
+  preSopDate?: string;
   executiveMeetingDate?: string;
-  finalizedAt?: string;
-  createdById: string;
-  createdBy?: { id: string; name: string; email: string };
+  demandManagerId?: string;
+  supplyManagerId?: string;
+  financeManagerId?: string;
+  executiveSponsorId?: string;
+  demandManagerUser?: { id: string; name: string; email: string };
+  supplyManagerUser?: { id: string; name: string; email: string };
+  financeManagerUser?: { id: string; name: string; email: string };
+  executiveSponsorUser?: { id: string; name: string; email: string };
+  createdById?: string;
+  createdBy?: { id: string; name?: string; email: string };
+  _count?: { forecasts?: number; assumptions?: number };
 }
 
 export interface SOPForecast {
@@ -66,12 +178,23 @@ export const sopService = {
     pageSize?: number;
   }) {
     const response = await apiClient.get('/manufacturing/sop/cycles', { params });
+    if (Array.isArray(response.data)) {
+      return response.data.map((cycle: BackendSOPCycle) => mapSOPCycle(cycle));
+    }
+
+    if (Array.isArray(response.data?.items)) {
+      return {
+        ...response.data,
+        items: response.data.items.map((cycle: BackendSOPCycle) => mapSOPCycle(cycle)),
+      };
+    }
+
     return response.data;
   },
 
   async getCycle(cycleId: string) {
     const response = await apiClient.get(`/manufacturing/sop/cycles/${cycleId}`);
-    return response.data;
+    return mapSOPCycle(response.data);
   },
 
   async getCycleSummary(cycleId: string) {
@@ -88,14 +211,18 @@ export const sopService = {
     supplyReviewDate?: string;
     executiveMeetingDate?: string;
     horizonMonths?: number;
+    demandManagerId?: string;
+    supplyManagerId?: string;
+    financeManagerId?: string;
+    executiveSponsorId?: string;
   }) {
     const response = await apiClient.post('/manufacturing/sop/cycles', dto);
-    return response.data;
+    return mapSOPCycle(response.data);
   },
 
   async updateCycle(cycleId: string, dto: Partial<SOPCycle>) {
     const response = await apiClient.put(`/manufacturing/sop/cycles/${cycleId}`, dto);
-    return response.data;
+    return mapSOPCycle(response.data);
   },
 
   async updateCycleStatus(cycleId: string, status: string) {

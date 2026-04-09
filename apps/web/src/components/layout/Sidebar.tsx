@@ -1,3 +1,5 @@
+import { canShowSidebarHref } from '@/permissions';
+import { useAuthStore } from '@/stores/auth.store';
 import {
     BeakerIcon,
     BellIcon,
@@ -20,6 +22,7 @@ import {
 import { prefetchRoute } from '@services/route-prefetch';
 import clsx from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useMemo } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useBranding } from '../ThemeProvider';
 
@@ -97,6 +100,7 @@ export default function Sidebar({
   onToggleCollapse,
 }: SidebarProps) {
   const location = useLocation();
+  const role = useAuthStore((s) => s.user?.role);
   const { settings } = useBranding();
 
   const brandName = settings?.name || 'ForecastPro';
@@ -106,6 +110,21 @@ export default function Sidebar({
   const isActiveRoute = (href: string) => {
     return location.pathname === href || location.pathname.startsWith(href + '/');
   };
+
+  const visibleNavigation = useMemo(
+    () =>
+      navigation
+        .map((item) => {
+          if (!('items' in item)) {
+            return canShowSidebarHref(role, item.href) ? item : null;
+          }
+
+          const visibleItems = item.items.filter((navItem) => canShowSidebarHref(role, navItem.href));
+          return visibleItems.length ? { ...item, items: visibleItems } : null;
+        })
+        .filter((item): item is NavigationItem => item !== null),
+    [role],
+  );
 
   const NavItem = ({
     item,
@@ -204,7 +223,7 @@ export default function Sidebar({
               </button>
             </div>
             <nav className="p-4 space-y-4 overflow-y-auto h-[calc(100vh-73px)]">
-              {navigation.map((item) =>
+              {visibleNavigation.map((item) =>
                 'items' in item ? (
                   <NavGroup key={item.name} group={item as NavGroupType} collapsed={false} />
                 ) : (
@@ -277,7 +296,7 @@ export default function Sidebar({
             isCollapsed ? 'h-[calc(100vh-121px)]' : 'h-[calc(100vh-73px)]',
           )}
         >
-          {navigation.map((item) =>
+          {visibleNavigation.map((item) =>
             'items' in item ? (
               <NavGroup key={item.name} group={item as NavGroupType} collapsed={isCollapsed} />
             ) : (

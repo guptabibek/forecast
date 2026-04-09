@@ -351,6 +351,10 @@ export const createSopCycleSchema = z.object({
   demandReviewDate: optionalDateString,
   supplyReviewDate: optionalDateString,
   executiveMeetingDate: optionalDateString,
+  demandManagerId: z.string().uuid().optional(),
+  supplyManagerId: z.string().uuid().optional(),
+  financeManagerId: z.string().uuid().optional(),
+  executiveSponsorId: z.string().uuid().optional(),
 });
 export type CreateSopCycleInput = z.infer<typeof createSopCycleSchema>;
 

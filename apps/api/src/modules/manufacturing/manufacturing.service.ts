@@ -3105,6 +3105,18 @@ export class ManufacturingService {
           _count: {
             select: { forecasts: true, assumptions: true },
           },
+          demandManagerUser: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+          supplyManagerUser: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+          financeManagerUser: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
+          executiveSponsorUser: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
         },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -3122,6 +3134,18 @@ export class ManufacturingService {
       include: {
         forecasts: true,
         assumptions: true,
+        demandManagerUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        supplyManagerUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        financeManagerUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
+        executiveSponsorUser: {
+          select: { id: true, firstName: true, lastName: true, email: true },
+        },
       },
     });
     if (!cycle) {
@@ -3151,6 +3175,10 @@ export class ManufacturingService {
     preSopDate: Date;
     executiveSopDate: Date;
     planningEnd: Date;
+    demandManagerId?: string;
+    supplyManagerId?: string;
+    financeManagerId?: string;
+    executiveSponsorId?: string;
     notes?: string;
   }) {
     // Check for existing cycle
@@ -3160,6 +3188,8 @@ export class ManufacturingService {
     if (existing) {
       throw new BadRequestException(`S&OP cycle for ${dto.fiscalYear}-${dto.fiscalPeriod} already exists`);
     }
+
+    const managerAssignments = await this.resolveSOPManagerAssignments(tenantId, dto);
 
     return this.prisma.sOPCycle.create({
       data: {
@@ -3175,6 +3205,7 @@ export class ManufacturingService {
         executiveSopDate: dto.executiveSopDate,
         planningEnd: dto.planningEnd,
         notes: dto.notes,
+        ...managerAssignments,
       },
     });
   }
@@ -3196,6 +3227,10 @@ export class ManufacturingService {
       preSopDate: dto.preSopDate ? new Date(dto.preSopDate) : start,
       executiveSopDate: dto.executiveMeetingDate ? new Date(dto.executiveMeetingDate) : start,
       planningEnd: end,
+      demandManagerId: dto.demandManagerId,
+      supplyManagerId: dto.supplyManagerId,
+      financeManagerId: dto.financeManagerId,
+      executiveSponsorId: dto.executiveSponsorId,
       notes: dto.description,
     });
   }
@@ -3208,6 +3243,8 @@ export class ManufacturingService {
       throw new NotFoundException('S&OP cycle not found');
     }
 
+    const managerAssignments = await this.resolveSOPManagerAssignments(tenantId, dto);
+
     return this.prisma.sOPCycle.update({
       where: { id: cycleId },
       data: {
@@ -3217,8 +3254,67 @@ export class ManufacturingService {
         ...(dto.supplyReviewDate && { supplyReviewDate: new Date(dto.supplyReviewDate) }),
         ...(dto.executiveMeetingDate && { executiveSopDate: new Date(dto.executiveMeetingDate) }),
         ...(dto.horizonMonths && { planningEnd: new Date(dto.planningEnd ?? cycle.planningEnd) }),
+        ...managerAssignments,
       },
     });
+  }
+
+  private async resolveSOPManagerAssignments(
+    tenantId: string,
+    dto: {
+      demandManagerId?: string | null;
+      supplyManagerId?: string | null;
+      financeManagerId?: string | null;
+      executiveSponsorId?: string | null;
+    },
+  ): Promise<Record<string, string | null>> {
+    const fields = [
+      { dtoField: 'demandManagerId', dbField: 'demandManager', label: 'Demand manager' },
+      { dtoField: 'supplyManagerId', dbField: 'supplyManager', label: 'Supply manager' },
+      { dtoField: 'financeManagerId', dbField: 'financeManager', label: 'Finance manager' },
+      { dtoField: 'executiveSponsorId', dbField: 'executiveSponsor', label: 'Executive sponsor' },
+    ] as const;
+
+    const assignments = fields.map((field) => {
+      const rawValue = dto[field.dtoField];
+      if (rawValue === undefined) {
+        return { ...field, normalizedValue: undefined };
+      }
+
+      const normalizedValue = typeof rawValue === 'string' ? rawValue.trim() : '';
+      return {
+        ...field,
+        normalizedValue: normalizedValue.length > 0 ? normalizedValue : null,
+      };
+    });
+
+    const userIds = [...new Set(assignments.flatMap((assignment) => (assignment.normalizedValue ? [assignment.normalizedValue] : [])))];
+    if (userIds.length > 0) {
+      const users = await this.prisma.user.findMany({
+        where: {
+          tenantId,
+          status: UserStatus.ACTIVE,
+          id: { in: userIds },
+        },
+        select: { id: true },
+      });
+
+      const validUserIds = new Set(users.map((user) => user.id));
+      const missingAssignment = assignments.find(
+        (assignment) => assignment.normalizedValue && !validUserIds.has(assignment.normalizedValue),
+      );
+
+      if (missingAssignment) {
+        throw new BadRequestException(`${missingAssignment.label} user was not found for this tenant`);
+      }
+    }
+
+    return assignments.reduce<Record<string, string | null>>((result, assignment) => {
+      if (assignment.normalizedValue !== undefined) {
+        result[assignment.dbField] = assignment.normalizedValue;
+      }
+      return result;
+    }, {});
   }
 
   async deleteSOPCycle(tenantId: string, cycleId: string) {
@@ -3937,13 +4033,322 @@ export class ManufacturingService {
   // Promotions
   // ============================================================================
 
+  private normalizePromotionTargetValue(value: string | null | undefined): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const trimmedValue = value.trim();
+    return trimmedValue.length > 0 ? trimmedValue : undefined;
+  }
+
+  private looksLikePromotionTargetUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  private async buildUniqueChannelCode(tenantId: string, rawValue: string): Promise<string> {
+    const normalizedBase = rawValue
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40);
+
+    const baseCode = normalizedBase || 'CHANNEL';
+    let candidate = baseCode.slice(0, 50);
+    let suffix = 1;
+
+    while (
+      await this.prisma.channel.findFirst({
+        where: { tenantId, code: candidate },
+        select: { id: true },
+      })
+    ) {
+      const suffixToken = `_${suffix}`;
+      candidate = `${baseCode.slice(0, Math.max(1, 50 - suffixToken.length))}${suffixToken}`;
+      suffix += 1;
+    }
+
+    return candidate;
+  }
+
+  private async resolveOrCreateChannelIds(
+    tenantId: string,
+    ids?: string[] | null,
+  ): Promise<string[] | undefined> {
+    const normalizedInputs = this.normalizePromotionTargetIds(ids);
+
+    if (normalizedInputs === undefined) {
+      return undefined;
+    }
+
+    if (!normalizedInputs.length) {
+      return [];
+    }
+
+    const resolvedIds: string[] = [];
+    const seenIds = new Set<string>();
+
+    for (const input of normalizedInputs) {
+      const normalizedInput = this.normalizePromotionTargetValue(input);
+      if (!normalizedInput) {
+        continue;
+      }
+
+      const channel = await this.prisma.channel.findFirst({
+        where: {
+          tenantId,
+          OR: [
+            ...(this.looksLikePromotionTargetUuid(normalizedInput) ? [{ id: normalizedInput }] : []),
+            { code: { equals: normalizedInput, mode: 'insensitive' } },
+            { name: { equals: normalizedInput, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+      });
+
+      if (channel) {
+        if (!seenIds.has(channel.id)) {
+          resolvedIds.push(channel.id);
+          seenIds.add(channel.id);
+        }
+        continue;
+      }
+
+      if (this.looksLikePromotionTargetUuid(normalizedInput)) {
+        throw new BadRequestException(
+          `Promotion channel targets were not found for this tenant: ${normalizedInput}`,
+        );
+      }
+
+      const createdChannel = await this.prisma.channel.create({
+        data: {
+          tenantId,
+          code: await this.buildUniqueChannelCode(tenantId, normalizedInput),
+          name: normalizedInput,
+        },
+        select: { id: true },
+      });
+
+      resolvedIds.push(createdChannel.id);
+      seenIds.add(createdChannel.id);
+    }
+
+    return resolvedIds;
+  }
+
+  private buildPromotionTargetWhere(params: { productId?: string; locationId?: string; channelId?: string }) {
+    return {
+      ...(params.productId && { productTargets: { some: { productId: params.productId } } }),
+      ...(params.locationId && { locationTargets: { some: { locationId: params.locationId } } }),
+      ...(params.channelId && { channelTargets: { some: { channelId: params.channelId } } }),
+    };
+  }
+
+  private buildPromotionTargetInclude(includeLiftFactors = false): Prisma.PromotionInclude {
+    return {
+      ...(includeLiftFactors ? { liftFactors: true } : {}),
+      productTargets: {
+        select: {
+          productId: true,
+        },
+      },
+      locationTargets: {
+        select: {
+          locationId: true,
+        },
+      },
+      customerTargets: {
+        select: {
+          customerId: true,
+        },
+      },
+      channelTargets: {
+        select: {
+          channelId: true,
+        },
+      },
+    };
+  }
+
+  private serializePromotion<T extends {
+    productIds?: string[];
+    locationIds?: string[];
+    customerIds?: string[];
+    channelIds?: string[];
+    productTargets?: Array<{ productId: string }>;
+    locationTargets?: Array<{ locationId: string }>;
+    customerTargets?: Array<{ customerId: string }>;
+    channelTargets?: Array<{ channelId: string }>;
+  }>(promotion: T) {
+    const { productTargets, locationTargets, customerTargets, channelTargets, ...rest } = promotion;
+
+    return {
+      ...rest,
+      productIds: productTargets ? productTargets.map((target) => target.productId).sort() : (promotion.productIds || []),
+      locationIds: locationTargets ? locationTargets.map((target) => target.locationId).sort() : (promotion.locationIds || []),
+      customerIds: customerTargets ? customerTargets.map((target) => target.customerId).sort() : (promotion.customerIds || []),
+      channelIds: channelTargets ? channelTargets.map((target) => target.channelId).sort() : (promotion.channelIds || []),
+    };
+  }
+
+  private serializePromotions<T extends {
+    productIds?: string[];
+    locationIds?: string[];
+    customerIds?: string[];
+    channelIds?: string[];
+    productTargets?: Array<{ productId: string }>;
+    locationTargets?: Array<{ locationId: string }>;
+    customerTargets?: Array<{ customerId: string }>;
+    channelTargets?: Array<{ channelId: string }>;
+  }>(promotions: T[]) {
+    return promotions.map((promotion) => this.serializePromotion(promotion));
+  }
+
+  private normalizePromotionTargetIds(ids?: string[] | null): string[] | undefined {
+    if (ids === undefined) {
+      return undefined;
+    }
+
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+
+    for (const id of ids || []) {
+      const trimmedId = id?.trim();
+      if (!trimmedId || seen.has(trimmedId)) {
+        continue;
+      }
+
+      seen.add(trimmedId);
+      normalized.push(trimmedId);
+    }
+
+    return normalized;
+  }
+
+  private async ensurePromotionTargetIdsExist(
+    tenantId: string,
+    targetType: 'product' | 'location' | 'customer',
+    ids: string[],
+  ) {
+    if (!ids.length) {
+      return;
+    }
+
+    let existingIds: string[] = [];
+
+    switch (targetType) {
+      case 'product': {
+        const products = await this.prisma.product.findMany({
+          where: { tenantId, id: { in: ids } },
+          select: { id: true },
+        });
+        existingIds = products.map((product) => product.id);
+        break;
+      }
+      case 'location': {
+        const locations = await this.prisma.location.findMany({
+          where: { tenantId, id: { in: ids } },
+          select: { id: true },
+        });
+        existingIds = locations.map((location) => location.id);
+        break;
+      }
+      case 'customer': {
+        const customers = await this.prisma.customer.findMany({
+          where: { tenantId, id: { in: ids } },
+          select: { id: true },
+        });
+        existingIds = customers.map((customer) => customer.id);
+        break;
+      }
+    }
+
+    const existingIdSet = new Set(existingIds);
+    const missingIds = ids.filter((id) => !existingIdSet.has(id));
+
+    if (missingIds.length) {
+      throw new BadRequestException(
+        `Promotion ${targetType} targets were not found for this tenant: ${missingIds.join(', ')}`,
+      );
+    }
+  }
+
+  private async resolvePromotionTargetIds(
+    tenantId: string,
+    dto: { productIds?: string[] | null; locationIds?: string[] | null; customerIds?: string[] | null; channelIds?: string[] | null },
+  ) {
+    const productIds = this.normalizePromotionTargetIds(dto.productIds);
+    const locationIds = this.normalizePromotionTargetIds(dto.locationIds);
+    const customerIds = this.normalizePromotionTargetIds(dto.customerIds);
+    const channelIds = await this.resolveOrCreateChannelIds(tenantId, dto.channelIds);
+
+    await Promise.all([
+      productIds !== undefined ? this.ensurePromotionTargetIdsExist(tenantId, 'product', productIds) : Promise.resolve(),
+      locationIds !== undefined ? this.ensurePromotionTargetIdsExist(tenantId, 'location', locationIds) : Promise.resolve(),
+      customerIds !== undefined ? this.ensurePromotionTargetIdsExist(tenantId, 'customer', customerIds) : Promise.resolve(),
+    ]);
+
+    return {
+      productIds,
+      locationIds,
+      customerIds,
+      channelIds,
+    };
+  }
+
+  private async syncPromotionTargets(
+    tx: Prisma.TransactionClient,
+    promotionId: string,
+    targets: { productIds?: string[]; locationIds?: string[]; customerIds?: string[]; channelIds?: string[] },
+  ) {
+    if (targets.productIds !== undefined) {
+      await tx.promotionProductTarget.deleteMany({ where: { promotionId } });
+      if (targets.productIds.length) {
+        await tx.promotionProductTarget.createMany({
+          data: targets.productIds.map((productId) => ({ promotionId, productId })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
+    if (targets.locationIds !== undefined) {
+      await tx.promotionLocationTarget.deleteMany({ where: { promotionId } });
+      if (targets.locationIds.length) {
+        await tx.promotionLocationTarget.createMany({
+          data: targets.locationIds.map((locationId) => ({ promotionId, locationId })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
+    if (targets.customerIds !== undefined) {
+      await tx.promotionCustomerTarget.deleteMany({ where: { promotionId } });
+      if (targets.customerIds.length) {
+        await tx.promotionCustomerTarget.createMany({
+          data: targets.customerIds.map((customerId) => ({ promotionId, customerId })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
+    if (targets.channelIds !== undefined) {
+      await tx.promotionChannelTarget.deleteMany({ where: { promotionId } });
+      if (targets.channelIds.length) {
+        await tx.promotionChannelTarget.createMany({
+          data: targets.channelIds.map((channelId) => ({ promotionId, channelId })),
+          skipDuplicates: true,
+        });
+      }
+    }
+  }
+
   async getPromotions(tenantId: string, params: any) {
     const where: any = {
       tenantId,
       ...(params.status && { status: params.status }),
       ...(params.type && { type: params.type }),
-      ...(params.productId && { productIds: { has: params.productId } }),
-      ...(params.locationId && { locationIds: { has: params.locationId } }),
+      ...this.buildPromotionTargetWhere(params),
       ...(params.startDateFrom || params.startDateTo ? {
         startDate: {
           ...(params.startDateFrom && { gte: new Date(params.startDateFrom) }),
@@ -3964,6 +4369,7 @@ export class ManufacturingService {
     const [items, total] = await Promise.all([
       this.prisma.promotion.findMany({
         where,
+        include: this.buildPromotionTargetInclude(),
         skip: (page - 1) * pageSize,
         take: pageSize,
         orderBy: { startDate: 'desc' },
@@ -3971,18 +4377,24 @@ export class ManufacturingService {
       this.prisma.promotion.count({ where }),
     ]);
 
-    return { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+    return {
+      items: this.serializePromotions(items),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
   }
 
   async getPromotion(tenantId: string, promotionId: string) {
     const promotion = await this.prisma.promotion.findFirst({
       where: { id: promotionId, tenantId },
-      include: { liftFactors: true },
+      include: this.buildPromotionTargetInclude(true),
     });
     if (!promotion) {
       throw new NotFoundException('Promotion not found');
     }
-    return promotion;
+    return this.serializePromotion(promotion);
   }
 
   async createPromotion(tenantId: string, dto: any) {
@@ -3993,27 +4405,42 @@ export class ManufacturingService {
       code = `PROMO-${String(count + 1).padStart(6, '0')}`;
     }
 
-    return this.prisma.promotion.create({
-      data: {
-        tenantId,
-        code,
-        name: dto.name,
-        description: dto.description,
-        type: dto.type,
-        status: dto.status || 'DRAFT',
-        startDate: new Date(dto.startDate),
-        endDate: new Date(dto.endDate),
-        discountPercent: dto.discountPercent,
-        discountAmount: dto.discountAmount,
-        marketingSpend: dto.marketingSpend,
-        budget: dto.marketingSpend,
-        notes: dto.notes,
-        productIds: dto.productIds || [],
-        locationIds: dto.locationIds || [],
-        customerIds: [],
-        channelIds: [],
-      },
+    const targets = await this.resolvePromotionTargetIds(tenantId, {
+      productIds: dto.productIds ?? [],
+      locationIds: dto.locationIds ?? [],
+      customerIds: dto.customerIds ?? [],
+      channelIds: dto.channelIds ?? [],
     });
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const promotion = await tx.promotion.create({
+        data: {
+          tenantId,
+          code,
+          name: dto.name,
+          description: dto.description,
+          type: dto.type,
+          status: dto.status || 'DRAFT',
+          startDate: new Date(dto.startDate),
+          endDate: new Date(dto.endDate),
+          discountPercent: dto.discountPercent,
+          discountAmount: dto.discountAmount,
+          marketingSpend: dto.marketingSpend,
+          budget: dto.marketingSpend,
+          notes: dto.notes,
+          productIds: targets.productIds || [],
+          locationIds: targets.locationIds || [],
+          customerIds: targets.customerIds || [],
+          channelIds: targets.channelIds || [],
+        },
+      });
+
+      await this.syncPromotionTargets(tx, promotion.id, targets);
+
+      return promotion;
+    });
+
+    return this.getPromotion(tenantId, created.id);
   }
 
   async updatePromotion(tenantId: string, promotionId: string, dto: any) {
@@ -4024,23 +4451,33 @@ export class ManufacturingService {
       throw new NotFoundException('Promotion not found');
     }
 
-    return this.prisma.promotion.update({
-      where: { id: promotionId },
-      data: {
-        ...(dto.code && { code: dto.code }),
-        ...(dto.name && { name: dto.name }),
-        ...(dto.description !== undefined && { description: dto.description }),
-        ...(dto.type && { type: dto.type }),
-        ...(dto.startDate && { startDate: new Date(dto.startDate) }),
-        ...(dto.endDate && { endDate: new Date(dto.endDate) }),
-        ...(dto.discountPercent !== undefined && { discountPercent: dto.discountPercent }),
-        ...(dto.discountAmount !== undefined && { discountAmount: dto.discountAmount }),
-        ...(dto.marketingSpend !== undefined && { marketingSpend: dto.marketingSpend, budget: dto.marketingSpend }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
-        ...(dto.productIds && { productIds: dto.productIds }),
-        ...(dto.locationIds && { locationIds: dto.locationIds }),
-      },
+    const targets = await this.resolvePromotionTargetIds(tenantId, dto);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.promotion.update({
+        where: { id: promotionId },
+        data: {
+          ...(dto.code && { code: dto.code }),
+          ...(dto.name && { name: dto.name }),
+          ...(dto.description !== undefined && { description: dto.description }),
+          ...(dto.type && { type: dto.type }),
+          ...(dto.startDate && { startDate: new Date(dto.startDate) }),
+          ...(dto.endDate && { endDate: new Date(dto.endDate) }),
+          ...(dto.discountPercent !== undefined && { discountPercent: dto.discountPercent }),
+          ...(dto.discountAmount !== undefined && { discountAmount: dto.discountAmount }),
+          ...(dto.marketingSpend !== undefined && { marketingSpend: dto.marketingSpend, budget: dto.marketingSpend }),
+          ...(dto.notes !== undefined && { notes: dto.notes }),
+          ...(targets.productIds !== undefined && { productIds: targets.productIds }),
+          ...(targets.locationIds !== undefined && { locationIds: targets.locationIds }),
+          ...(targets.customerIds !== undefined && { customerIds: targets.customerIds }),
+          ...(targets.channelIds !== undefined && { channelIds: targets.channelIds }),
+        },
+      });
+
+      await this.syncPromotionTargets(tx, promotionId, targets);
     });
+
+    return this.getPromotion(tenantId, promotionId);
   }
 
   async updatePromotionStatus(tenantId: string, promotionId: string, status: string) {
@@ -4065,16 +4502,18 @@ export class ManufacturingService {
 
   async getActivePromotions(tenantId: string, params: any) {
     const today = new Date();
-    return this.prisma.promotion.findMany({
+    const promotions = await this.prisma.promotion.findMany({
       where: {
         tenantId,
         status: 'ACTIVE',
         startDate: { lte: today },
         endDate: { gte: today },
-        ...(params.productId && { productIds: { has: params.productId } }),
-        ...(params.locationId && { locationIds: { has: params.locationId } }),
+        ...this.buildPromotionTargetWhere(params),
       },
+      include: this.buildPromotionTargetInclude(),
     });
+
+    return this.serializePromotions(promotions);
   }
 
   async getUpcomingPromotions(tenantId: string, params: any) {
@@ -4083,14 +4522,16 @@ export class ManufacturingService {
     const upcoming = new Date();
     upcoming.setDate(today.getDate() + days);
 
-    return this.prisma.promotion.findMany({
+    const promotions = await this.prisma.promotion.findMany({
       where: {
         tenantId,
         startDate: { gte: today, lte: upcoming },
-        ...(params.productId && { productIds: { has: params.productId } }),
-        ...(params.locationId && { locationIds: { has: params.locationId } }),
+        ...this.buildPromotionTargetWhere(params),
       },
+      include: this.buildPromotionTargetInclude(),
     });
+
+    return this.serializePromotions(promotions);
   }
 
   async getPromotionLiftFactors(tenantId: string, promotionId: string, params: any) {
@@ -4285,8 +4726,8 @@ export class ManufacturingService {
         tenantId,
         startDate: { lte: endDate },
         endDate: { gte: startDate },
-        productIds: { has: params.productId },
-        ...(params.locationId ? { locationIds: { has: params.locationId } } : {}),
+        productTargets: { some: { productId: params.productId } },
+        ...(params.locationId ? { locationTargets: { some: { locationId: params.locationId } } } : {}),
       },
       include: { liftFactors: true },
     });
@@ -4321,21 +4762,18 @@ export class ManufacturingService {
 
   async copyPromotion(tenantId: string, promotionId: string, dto: any) {
     const promotion = await this.getPromotion(tenantId, promotionId);
-    return this.prisma.promotion.create({
-      data: {
-        tenantId,
-        code: dto.code,
-        name: dto.name,
-        description: promotion.description,
-        type: promotion.type,
-        status: 'DRAFT',
-        startDate: new Date(dto.startDate),
-        endDate: new Date(dto.endDate),
-        productIds: promotion.productIds,
-        locationIds: promotion.locationIds,
-        customerIds: promotion.customerIds,
-        channelIds: promotion.channelIds,
-      },
+    return this.createPromotion(tenantId, {
+      code: dto.code,
+      name: dto.name,
+      description: promotion.description,
+      type: promotion.type,
+      status: 'DRAFT',
+      startDate: dto.startDate,
+      endDate: dto.endDate,
+      productIds: promotion.productIds,
+      locationIds: promotion.locationIds,
+      customerIds: promotion.customerIds,
+      channelIds: promotion.channelIds,
     });
   }
 

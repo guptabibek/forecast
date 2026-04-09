@@ -1,3 +1,4 @@
+import { roleMatches } from '@/permissions';
 import { useAuthStore } from '@/stores/auth.store';
 import type { UserRole } from '@/types';
 import type { ReactNode } from 'react';
@@ -22,7 +23,7 @@ interface RoleGuardProps {
 export function RoleGuard({ roles, children, fallback = null }: RoleGuardProps) {
   const userRole = useAuthStore((s) => s.user?.role);
 
-  if (!userRole || !roles.includes(userRole)) {
+  if (!roleMatches(userRole, ...roles)) {
     return <>{fallback}</>;
   }
 

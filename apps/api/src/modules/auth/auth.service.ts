@@ -1,8 +1,8 @@
 import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  UnauthorizedException,
+    BadRequestException,
+    ConflictException,
+    Injectable,
+    UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -12,13 +12,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { PrismaService } from '../../core/database/prisma.service';
 import { EmailService } from '../../core/notification/email.service';
 import {
-  ForgotPasswordDto,
-  LoginDto,
-  RefreshTokenDto,
-  RegisterDto,
-  ResetPasswordDto,
-  TokenResponse,
+    ForgotPasswordDto,
+    LoginDto,
+    RefreshTokenDto,
+    RegisterDto,
+    ResetPasswordDto,
+    TokenResponse,
 } from './dto/auth.dto';
+import { TenantBootstrapService } from './tenant-bootstrap.service';
 
 @Injectable()
 export class AuthService {
@@ -27,6 +28,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
+    private readonly tenantBootstrapService: TenantBootstrapService,
   ) {}
 
   async register(dto: RegisterDto): Promise<TokenResponse> {
@@ -76,6 +78,8 @@ export class AuthService {
         },
       });
 
+      await this.tenantBootstrapService.bootstrapTenant(createdTenant.id, tx);
+
       return { tenant: createdTenant, user: createdUser };
     });
 
@@ -112,8 +116,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    const isPendingInvitation = user.status === 'PENDING';
+
     // Check account status
-    if (user.status !== 'ACTIVE') {
+    if (user.status !== 'ACTIVE' && !isPendingInvitation) {
       throw new UnauthorizedException('Account is not active');
     }
 
@@ -138,6 +144,7 @@ export class AuthService {
         failedLoginCount: 0,
         lockedUntil: null,
         lastLoginAt: new Date(),
+        ...(isPendingInvitation ? { status: 'ACTIVE' as const } : {}),
       },
     });
 

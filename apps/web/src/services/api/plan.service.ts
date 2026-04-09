@@ -4,7 +4,7 @@ import type {
     PlanVersion,
     QueryParams,
 } from '@/types';
-import { api } from './client';
+import { api, apiClient } from './client';
 
 export const planService = {
   getAll: async (params?: QueryParams): Promise<PaginatedResponse<PlanVersion>> => {
@@ -98,8 +98,18 @@ export const planService = {
     return api.post<PlanVersion>(`/plans/${id}/clone`, { name });
   },
 
-  export: (id: string, format: 'excel' | 'csv'): Promise<Blob> =>
-    api.get(`/plans/${id}/export`, { format }),
+  export: async (id: string, format: 'csv' = 'csv'): Promise<Blob> => {
+    if (!id) {
+      throw new Error('Plan ID is required');
+    }
+
+    const response = await apiClient.get(`/plans/${id}/export`, {
+      params: { format },
+      responseType: 'blob',
+    });
+
+    return response.data;
+  },
 
   lock: async (id: string, reason: string): Promise<PlanVersion> => {
     if (!id) {

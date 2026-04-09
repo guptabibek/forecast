@@ -11,7 +11,7 @@ export interface User {
   createdAt: string;
 }
 
-export type UserRole = 'ADMIN' | 'PLANNER' | 'FINANCE' | 'VIEWER';
+export type UserRole = 'ADMIN' | 'PLANNER' | 'FINANCE' | 'VIEWER' | 'FORECAST_PLANNER' | 'FORECAST_VIEWER';
 
 export interface AuthTokens {
   accessToken: string;
@@ -237,9 +237,13 @@ export interface Product {
   name: string;
   description?: string;
   category?: string;
+  categoryId?: string;
   subcategory?: string;
+  subcategoryId?: string;
   brand?: string;
+  brandId?: string;
   unitOfMeasure?: string;
+  unitOfMeasureId?: string;
   standardCost?: number;
   listPrice?: number;
   /** @deprecated Use standardCost */
@@ -451,9 +455,9 @@ export interface QueryParams {
 }
 
 // ============ Additional Types ============
-export type Role = 'admin' | 'planner' | 'finance' | 'viewer';
+export type Role = 'admin' | 'planner' | 'finance' | 'viewer' | 'forecast_planner' | 'forecast_viewer';
 
-export type DimensionType = 'product' | 'location' | 'customer' | 'account';
+export type DimensionType = 'product' | 'location' | 'customer' | 'account' | 'cost_center';
 
 export interface Dimension {
   id: string;
@@ -461,6 +465,8 @@ export interface Dimension {
   name: string;
   description?: string;
   parentId?: string;
+  manager?: string;
+  managerId?: string | null;
   attributes?: Record<string, unknown>;
   isActive: boolean;
   createdAt: string;

@@ -23,6 +23,59 @@ export class AccountingService {
     private readonly sequence: SequenceService,
   ) {}
 
+  private normalizeOptionalString(value: string | null | undefined): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const normalizedValue = value.trim();
+    return normalizedValue.length > 0 ? normalizedValue : undefined;
+  }
+
+  private looksLikeUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  private async resolvePostingProfileCategory(
+    tenantId: string,
+    productCategoryId?: string,
+    productCategoryValue?: string,
+    options?: { throwIfMissing?: boolean },
+  ): Promise<{ id: string; name: string; code: string } | null> {
+    const normalizedProductCategoryId = this.normalizeOptionalString(productCategoryId);
+    const normalizedProductCategoryValue = this.normalizeOptionalString(productCategoryValue);
+
+    if (!normalizedProductCategoryId && !normalizedProductCategoryValue) {
+      return null;
+    }
+
+    const productCategory = await this.prisma.productCategory.findFirst({
+      where: {
+        tenantId,
+        ...(normalizedProductCategoryId
+          ? { id: normalizedProductCategoryId }
+          : {
+              OR: [
+                ...(normalizedProductCategoryValue && this.looksLikeUuid(normalizedProductCategoryValue)
+                  ? [{ id: normalizedProductCategoryValue }]
+                  : []),
+                { code: { equals: normalizedProductCategoryValue, mode: 'insensitive' } },
+                { name: { equals: normalizedProductCategoryValue, mode: 'insensitive' } },
+              ],
+            }),
+      },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (!productCategory && options?.throwIfMissing) {
+      throw new BadRequestException(
+        `Posting profile product category ${normalizedProductCategoryId || `"${normalizedProductCategoryValue}"`} was not found for this tenant`,
+      );
+    }
+
+    return productCategory;
+  }
+
   // ────────────────────────────────────────────────────────────────────────
   // GL Account Management
   // ────────────────────────────────────────────────────────────────────────
@@ -99,6 +152,7 @@ export class AccountingService {
       debitAccountId: string;
       creditAccountId: string;
       productCategory?: string;
+      productCategoryId?: string;
       locationId?: string;
       priority?: number;
       description?: string;
@@ -113,6 +167,13 @@ export class AccountingService {
     if (!debitAcct) throw new BadRequestException('Debit GL account not found');
     if (!creditAcct) throw new BadRequestException('Credit GL account not found');
 
+    const category = await this.resolvePostingProfileCategory(
+      tenantId,
+      data.productCategoryId,
+      data.productCategory,
+      { throwIfMissing: true },
+    );
+
     return this.prisma.postingProfile.create({
       data: {
         tenantId,
@@ -120,7 +181,8 @@ export class AccountingService {
         transactionType: data.transactionType,
         debitAccountId: data.debitAccountId,
         creditAccountId: data.creditAccountId,
-        productCategory: data.productCategory,
+        productCategoryId: category?.id ?? null,
+        productCategory: category?.name ?? null,
         locationId: data.locationId,
         priority: data.priority ?? 0,
         description: data.description,
@@ -135,7 +197,7 @@ export class AccountingService {
         isActive: true,
         ...(transactionType && { transactionType }),
       },
-      include: { debitAccount: true, creditAccount: true },
+      include: { debitAccount: true, creditAccount: true, productCategoryRef: true, location: true },
       orderBy: { priority: 'desc' },
     });
   }
@@ -150,7 +212,15 @@ export class AccountingService {
     transactionType: PostingTransactionType,
     productCategory?: string,
     locationId?: string,
+    productCategoryId?: string,
   ) {
+    const resolvedCategory = await this.resolvePostingProfileCategory(
+      tenantId,
+      productCategoryId,
+      productCategory,
+    );
+    const normalizedRawCategory = this.normalizeOptionalString(productCategory)?.toLowerCase();
+
     const profiles = await this.prisma.postingProfile.findMany({
       where: {
         tenantId,
@@ -160,19 +230,44 @@ export class AccountingService {
       orderBy: { priority: 'desc' },
     });
 
-    // Find best match: most specific first
-    const match = profiles.find((p) => {
-      const categoryMatch = !p.productCategory || p.productCategory === productCategory;
-      const locationMatch = !p.locationId || p.locationId === locationId;
-      return categoryMatch && locationMatch;
-    });
+    let bestMatch: (typeof profiles)[number] | null = null;
+    let bestSpecificity = -1;
+    let bestPriority = Number.NEGATIVE_INFINITY;
 
-    if (!match) {
+    for (const profile of profiles) {
+      const normalizedProfileCategory = this.normalizeOptionalString(profile.productCategory)?.toLowerCase();
+      const profileHasCategory = !!profile.productCategoryId || !!normalizedProfileCategory;
+      const categoryMatch = !profileHasCategory
+        ? true
+        : !!resolvedCategory && (
+            profile.productCategoryId === resolvedCategory.id ||
+            normalizedProfileCategory === resolvedCategory.name.toLowerCase() ||
+            normalizedProfileCategory === resolvedCategory.code.toLowerCase()
+          )
+            ? true
+            : !!normalizedRawCategory && normalizedProfileCategory === normalizedRawCategory;
+      const locationMatch = !profile.locationId || profile.locationId === locationId;
+
+      if (!categoryMatch || !locationMatch) {
+        continue;
+      }
+
+      const specificity = (profileHasCategory ? 2 : 0) + (profile.locationId ? 1 : 0);
+      const priority = profile.priority ?? 0;
+
+      if (specificity > bestSpecificity || (specificity === bestSpecificity && priority > bestPriority)) {
+        bestMatch = profile;
+        bestSpecificity = specificity;
+        bestPriority = priority;
+      }
+    }
+
+    if (!bestMatch) {
       // Fall back to any profile for this transaction type
       return profiles[0] ?? null;
     }
 
-    return match;
+    return bestMatch;
   }
 
   // ────────────────────────────────────────────────────────────────────────
@@ -312,6 +407,7 @@ export class AccountingService {
       referenceId?: string;
       productId?: string;
       productCategory?: string;
+      productCategoryId?: string;
       locationId?: string;
       costCenterId?: string;
       postedById: string;
@@ -325,6 +421,7 @@ export class AccountingService {
       params.transactionType,
       params.productCategory,
       params.locationId,
+      params.productCategoryId,
     );
 
     if (!profile) {

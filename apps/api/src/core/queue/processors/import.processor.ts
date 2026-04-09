@@ -21,6 +21,12 @@ export interface ImportJobData {
 @Processor(QUEUE_NAMES.IMPORT)
 export class ImportQueueProcessor extends WorkerHost {
   private readonly logger = new Logger(ImportQueueProcessor.name);
+  private readonly actualsDimensionFields = [
+    { codeField: 'productCode', idField: 'productId', label: 'Product' },
+    { codeField: 'locationCode', idField: 'locationId', label: 'Location' },
+    { codeField: 'customerCode', idField: 'customerId', label: 'Customer' },
+    { codeField: 'accountCode', idField: 'accountId', label: 'Account' },
+  ] as const;
 
   constructor(private readonly prisma: PrismaService) {
     super();
@@ -410,8 +416,7 @@ export class ImportQueueProcessor extends WorkerHost {
       } else if (targetField === 'amount' || targetField === 'quantity' || targetField === 'listPrice') {
         value = this.parseNumber(value);
       } else if (targetField.endsWith('Code') && lookups) {
-        // Keep the code for lookup later during insert
-        value = String(value || '').trim();
+        value = this.normalizeCodeValue(value);
       } else if (typeof value === 'string') {
         value = value.trim();
       }
@@ -422,16 +427,16 @@ export class ImportQueueProcessor extends WorkerHost {
     // For actuals, resolve dimension codes to IDs
     if (importType === 'actuals' && lookups) {
       if (transformed.productCode) {
-        transformed.productId = lookups.product[transformed.productCode.toLowerCase()] || null;
+        transformed.productId = lookups.product[this.normalizeLookupKey(transformed.productCode)] || null;
       }
       if (transformed.locationCode) {
-        transformed.locationId = lookups.location[transformed.locationCode.toLowerCase()] || null;
+        transformed.locationId = lookups.location[this.normalizeLookupKey(transformed.locationCode)] || null;
       }
       if (transformed.customerCode) {
-        transformed.customerId = lookups.customer[transformed.customerCode.toLowerCase()] || null;
+        transformed.customerId = lookups.customer[this.normalizeLookupKey(transformed.customerCode)] || null;
       }
       if (transformed.accountCode) {
-        transformed.accountId = lookups.account[transformed.accountCode.toLowerCase()] || null;
+        transformed.accountId = lookups.account[this.normalizeLookupKey(transformed.accountCode)] || null;
       }
     }
 
@@ -460,6 +465,15 @@ export class ImportQueueProcessor extends WorkerHost {
     return isNaN(num) ? null : num;
   }
 
+  private normalizeCodeValue(value: unknown): string | null {
+    const normalizedValue = String(value ?? '').trim();
+    return normalizedValue.length > 0 ? normalizedValue : null;
+  }
+
+  private normalizeLookupKey(value: string): string {
+    return value.trim().toLowerCase();
+  }
+
   private validateRecord(record: any, importType: string): string[] {
     const errors: string[] = [];
 
@@ -470,6 +484,11 @@ export class ImportQueueProcessor extends WorkerHost {
         }
         if (record.amount === null || record.amount === undefined) {
           errors.push('Amount is required');
+        }
+        for (const field of this.actualsDimensionFields) {
+          if (record[field.codeField] && !record[field.idField]) {
+            errors.push(`${field.label} code "${record[field.codeField]}" was not found`);
+          }
         }
         break;
         
@@ -510,10 +529,10 @@ export class ImportQueueProcessor extends WorkerHost {
     ]);
 
     return {
-      product: Object.fromEntries(products.map((p: { id: string; code: string }) => [p.code.toLowerCase(), p.id])),
-      location: Object.fromEntries(locations.map((l: { id: string; code: string }) => [l.code.toLowerCase(), l.id])),
-      customer: Object.fromEntries(customers.map((c: { id: string; code: string }) => [c.code.toLowerCase(), c.id])),
-      account: Object.fromEntries(accounts.map((a: { id: string; code: string }) => [a.code.toLowerCase(), a.id])),
+      product: Object.fromEntries(products.map((p: { id: string; code: string }) => [this.normalizeLookupKey(p.code), p.id])),
+      location: Object.fromEntries(locations.map((l: { id: string; code: string }) => [this.normalizeLookupKey(l.code), l.id])),
+      customer: Object.fromEntries(customers.map((c: { id: string; code: string }) => [this.normalizeLookupKey(c.code), c.id])),
+      account: Object.fromEntries(accounts.map((a: { id: string; code: string }) => [this.normalizeLookupKey(a.code), a.id])),
     };
   }
 

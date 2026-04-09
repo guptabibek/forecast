@@ -1,3 +1,4 @@
+import { isManufacturingBlockedRole, roleMatches } from '@/permissions';
 import { useAuthStore } from '@/stores/auth.store';
 import type { UserRole } from '@/types';
 import { useCallback, useMemo } from 'react';
@@ -14,7 +15,7 @@ export function useAuth() {
   const role = user?.role;
 
   const hasRole = useCallback(
-    (...roles: UserRole[]) => !!role && roles.includes(role),
+    (...roles: UserRole[]) => roleMatches(role, ...roles),
     [role],
   );
 
@@ -29,7 +30,9 @@ export function useAuth() {
       /** Is full administrator */
       isAdmin: hasRole('ADMIN'),
       /** Read-only user */
-      isViewer: role === 'VIEWER',
+      isViewer: hasRole('VIEWER') && role !== 'FORECAST_PLANNER',
+      /** Does not have manufacturing navigation access */
+      canAccessManufacturing: !isManufacturingBlockedRole(role),
       /** Arbitrary role check */
       hasRole,
     }),
