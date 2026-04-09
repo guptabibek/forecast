@@ -1,6 +1,63 @@
 import type { User, UserRole } from '../../types';
 import { apiClient } from './client';
 
+type MaybeWrapped<T> = T | { data: T };
+
+type UserListResponse =
+  | User[]
+  | {
+      data?: User[];
+      total?: number;
+      meta?: {
+        total?: number;
+      };
+    };
+
+type UserActivityResponse =
+  | {
+      data?: UserActivity[];
+      total?: number;
+      meta?: {
+        total?: number;
+      };
+    }
+  | UserActivity[];
+
+function unwrapData<T>(payload: MaybeWrapped<T>): T {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    'data' in payload
+  ) {
+    return payload.data;
+  }
+
+  return payload as T;
+}
+
+function normalizeUserListResponse(payload: UserListResponse): { data: User[]; total: number } {
+  if (Array.isArray(payload)) {
+    return { data: payload, total: payload.length };
+  }
+
+  const data = Array.isArray(payload?.data) ? payload.data : [];
+  const total = payload?.meta?.total ?? payload?.total ?? data.length;
+
+  return { data, total };
+}
+
+function normalizeUserActivityResponse(payload: UserActivityResponse): { data: UserActivity[]; total: number } {
+  if (Array.isArray(payload)) {
+    return { data: payload, total: payload.length };
+  }
+
+  const data = Array.isArray(payload?.data) ? payload.data : [];
+  const total = payload?.meta?.total ?? payload?.total ?? data.length;
+
+  return { data, total };
+}
+
 export interface InviteUserDto {
   email: string;
   role: UserRole;
@@ -37,23 +94,23 @@ export interface UserActivity {
 
 export const userService = {
   async getAll(params?: { page?: number; limit?: number; search?: string; role?: string; status?: string }): Promise<{ data: User[]; total: number }> {
-    const { data } = await apiClient.get<{ data: User[]; meta: { total: number } }>('/users', { params });
-    return { data: data.data, total: data.meta.total };
+    const response = await apiClient.get<UserListResponse>('/users', { params });
+    return normalizeUserListResponse(response.data);
   },
 
   async getById(id: string): Promise<User> {
-    const { data } = await apiClient.get<{ data: User }>(`/users/${id}`);
-    return data.data;
+    const response = await apiClient.get<MaybeWrapped<User>>(`/users/${id}`);
+    return unwrapData(response.data);
   },
 
   async invite(dto: InviteUserDto): Promise<User> {
-    const { data } = await apiClient.post<{ data: User }>('/users/invite', dto);
-    return data.data;
+    const response = await apiClient.post<MaybeWrapped<User>>('/users/invite', dto);
+    return unwrapData(response.data);
   },
 
   async update(id: string, dto: UpdateUserDto): Promise<User> {
-    const { data } = await apiClient.patch<{ data: User }>(`/users/${id}`, dto);
-    return data.data;
+    const response = await apiClient.patch<MaybeWrapped<User>>(`/users/${id}`, dto);
+    return unwrapData(response.data);
   },
 
   async delete(id: string): Promise<void> {
@@ -61,13 +118,13 @@ export const userService = {
   },
 
   async activate(id: string): Promise<User> {
-    const { data } = await apiClient.post<{ data: User }>(`/users/${id}/activate`);
-    return data.data;
+    const response = await apiClient.post<MaybeWrapped<User>>(`/users/${id}/activate`);
+    return unwrapData(response.data);
   },
 
   async deactivate(id: string): Promise<User> {
-    const { data } = await apiClient.post<{ data: User }>(`/users/${id}/deactivate`);
-    return data.data;
+    const response = await apiClient.post<MaybeWrapped<User>>(`/users/${id}/deactivate`);
+    return unwrapData(response.data);
   },
 
   async resendInvite(id: string): Promise<void> {
@@ -75,13 +132,13 @@ export const userService = {
   },
 
   async getProfile(): Promise<User> {
-    const { data } = await apiClient.get<{ data: User }>('/users/me');
-    return data.data;
+    const response = await apiClient.get<MaybeWrapped<User>>('/users/me');
+    return unwrapData(response.data);
   },
 
   async updateProfile(dto: UpdateProfileDto): Promise<User> {
-    const { data } = await apiClient.patch<{ data: User }>('/users/me', dto);
-    return data.data;
+    const response = await apiClient.patch<MaybeWrapped<User>>('/users/me', dto);
+    return unwrapData(response.data);
   },
 
   async changePassword(dto: ChangePasswordDto): Promise<void> {
@@ -89,8 +146,8 @@ export const userService = {
   },
 
   async getActivity(userId: string, params?: { page?: number; limit?: number }): Promise<{ data: UserActivity[]; total: number }> {
-    const { data } = await apiClient.get<{ data: UserActivity[]; meta: { total: number } }>(`/users/${userId}/activity`, { params });
-    return { data: data.data, total: data.meta.total };
+    const response = await apiClient.get<UserActivityResponse>(`/users/${userId}/activity`, { params });
+    return normalizeUserActivityResponse(response.data);
   },
 
   async uploadAvatar(avatarUrl?: string): Promise<{ url: string }> {
@@ -101,7 +158,7 @@ export const userService = {
   },
 
   async searchUsers(params?: { search?: string }): Promise<User[]> {
-    const { data } = await apiClient.get<User[]>('/users', { params });
-    return data;
+    const response = await apiClient.get<UserListResponse>('/users', { params });
+    return normalizeUserListResponse(response.data).data;
   },
 };
