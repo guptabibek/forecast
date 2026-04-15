@@ -63,6 +63,7 @@ const rules: PrefetchRule[] = [
     loaders: [
       () => import('@pages/settings/Settings'),
       () => import('@pages/settings/Users'),
+      () => import('@pages/settings/MargEde'),
       () => import('@pages/settings/Profile'),
       () => import('@pages/settings/AuditLog'),
       () => import('@pages/settings/Notifications'),

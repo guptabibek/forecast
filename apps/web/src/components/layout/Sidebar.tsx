@@ -1,6 +1,7 @@
 import { canShowSidebarHref } from '@/permissions';
 import { useAuthStore } from '@/stores/auth.store';
 import {
+    ArrowPathIcon,
     BeakerIcon,
     BellIcon,
     BuildingOffice2Icon,
@@ -13,6 +14,7 @@ import {
     DocumentChartBarIcon,
     DocumentTextIcon,
     HomeIcon,
+    MapPinIcon,
     ShieldCheckIcon,
     SwatchIcon,
     TableCellsIcon,
@@ -33,27 +35,36 @@ interface SidebarProps {
   onToggleCollapse: () => void;
 }
 
-type NavItemType = { name: string; href: string; icon: React.ElementType };
-type NavGroupType = { name: string; items: NavItemType[] };
+type NavItemType = { name: string; href: string; icon: React.ElementType; module?: string };
+type NavGroupType = { name: string; module?: string; items: NavItemType[] };
 type NavigationItem = NavItemType | NavGroupType;
 
 const navigation: NavigationItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
-  { name: 'Plans', href: '/plans', icon: DocumentTextIcon },
-  { name: 'Forecasts', href: '/forecasts', icon: ChartBarIcon },
-  { name: 'Scenarios', href: '/scenarios', icon: BeakerIcon },
+  {
+    name: 'Planning & Forecasting',
+    module: 'planning',
+    items: [
+      { name: 'Plans', href: '/plans', icon: DocumentTextIcon, module: 'planning' },
+      { name: 'Forecasts', href: '/forecasts', icon: ChartBarIcon, module: 'forecasting' },
+      { name: 'Scenarios', href: '/scenarios', icon: BeakerIcon, module: 'forecasting' },
+    ],
+  },
   {
     name: 'Data',
+    module: 'data',
     items: [
       { name: 'Import Data', href: '/data/import', icon: CloudArrowUpIcon },
       { name: 'Actuals', href: '/data/actuals', icon: TableCellsIcon },
       { name: 'Products', href: '/data/products', icon: CubeIcon },
+      { name: 'Locations', href: '/data/locations', icon: MapPinIcon },
       { name: 'Dimensions', href: '/data/dimensions', icon: CubeIcon },
     ],
   },
-  { name: 'Reports', href: '/reports', icon: DocumentChartBarIcon },
+  { name: 'Reports', href: '/reports', icon: DocumentChartBarIcon, module: 'reports' },
   {
     name: 'Manufacturing',
+    module: 'manufacturing',
     items: [
       { name: 'Overview', href: '/manufacturing', icon: BuildingOffice2Icon },
       { name: 'BOM', href: '/manufacturing/bom', icon: CubeIcon },
@@ -87,6 +98,7 @@ const navigation: NavigationItem[] = [
     items: [
       { name: 'General', href: '/settings', icon: Cog6ToothIcon },
       { name: 'Users', href: '/settings/users', icon: UsersIcon },
+      { name: 'Marg EDE', href: '/settings/marg-ede', icon: ArrowPathIcon },
       { name: 'Audit Log', href: '/settings/audit-log', icon: ShieldCheckIcon },
       { name: 'Notifications', href: '/notifications', icon: BellIcon },
     ],
@@ -107,8 +119,15 @@ export default function Sidebar({
   const brandLogo = settings?.logoUrl;
   const tagline = settings?.brandTagline;
 
+  const enabledModules = settings?.enabledModules;
+
   const isActiveRoute = (href: string) => {
     return location.pathname === href || location.pathname.startsWith(href + '/');
+  };
+
+  const isModuleEnabled = (mod?: string) => {
+    if (!mod || !enabledModules) return true;
+    return enabledModules[mod as keyof typeof enabledModules] !== false;
   };
 
   const visibleNavigation = useMemo(
@@ -116,14 +135,19 @@ export default function Sidebar({
       navigation
         .map((item) => {
           if (!('items' in item)) {
+            if (!isModuleEnabled(item.module)) return null;
             return canShowSidebarHref(role, item.href) ? item : null;
           }
 
-          const visibleItems = item.items.filter((navItem) => canShowSidebarHref(role, navItem.href));
+          if (!isModuleEnabled(item.module)) return null;
+
+          const visibleItems = item.items.filter(
+            (navItem) => canShowSidebarHref(role, navItem.href) && isModuleEnabled(navItem.module),
+          );
           return visibleItems.length ? { ...item, items: visibleItems } : null;
         })
         .filter((item): item is NavigationItem => item !== null),
-    [role],
+    [role, enabledModules],
   );
 
   const NavItem = ({

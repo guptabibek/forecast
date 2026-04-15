@@ -75,7 +75,9 @@ test.describe('Cross-module â€“ Plan appears in Scenarios modal Plan dropdo
 
     // Wait for modal to open (unique name input confirms modal is ready)
     await page.locator('input[placeholder="e.g., Q2 Growth Scenario"]').waitFor({ timeout: 8_000 });
-    const planBtn1 = page.locator('button').filter({ hasText: /select a plan/i }).first();
+    const planBtn1 = page
+      .locator('xpath=//label[contains(normalize-space(.),"Plan")]/following-sibling::div//button')
+      .first();
     let planInOptions1 = false;
     try {
       await planBtn1.waitFor({ timeout: 5_000 });
@@ -316,7 +318,9 @@ test.describe('Cross-module â€“ Complete Planâ†’Scenarioâ†’Foreca
 
     // Wait for modal to open (unique name input confirms modal is ready)
     await page.locator('input[placeholder="e.g., Q2 Growth Scenario"]').waitFor({ timeout: 8_000 });
-    const planBtn = page.locator('button').filter({ hasText: /select a plan/i }).first();
+    const planBtn = page
+      .locator('xpath=//label[contains(normalize-space(.),"Plan")]/following-sibling::div//button')
+      .first();
     let planInOptions = false;
     try {
       await planBtn.waitFor({ timeout: 5_000 });

@@ -1,11 +1,11 @@
-import { Global, Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ForecastEngineModule } from '../../forecast-engine/forecast-engine.module';
+import { DatabaseModule } from '../database/database.module';
 import { ForecastQueueProcessor } from './processors/forecast.processor';
 import { ImportQueueProcessor } from './processors/import.processor';
 import { QUEUE_NAMES } from './queue.constants';
-import { ForecastEngineModule } from '../../forecast-engine/forecast-engine.module';
-import { DatabaseModule } from '../database/database.module';
 
 // Re-export for backward compatibility
 export { QUEUE_NAMES } from './queue.constants';
@@ -44,6 +44,7 @@ export { QUEUE_NAMES } from './queue.constants';
       { name: QUEUE_NAMES.IMPORT },
       { name: QUEUE_NAMES.EXPORT },
       { name: QUEUE_NAMES.NOTIFICATION },
+      { name: QUEUE_NAMES.MARG_SYNC },
     ),
   ],
   providers: [ForecastQueueProcessor, ImportQueueProcessor],

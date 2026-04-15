@@ -41,6 +41,14 @@ export interface TenantSettings {
   compactMode: boolean;
   loginBgUrl: string | null;
   customCss: string | null;
+  // Module feature flags
+  enabledModules?: {
+    planning: boolean;
+    forecasting: boolean;
+    manufacturing: boolean;
+    reports: boolean;
+    data: boolean;
+  };
 }
 
 export interface UpdateSettingsDto {

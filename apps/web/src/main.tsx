@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { ThemeProvider } from './components/ThemeProvider';
+import { GlobalLoadingOverlay } from './components/common/GlobalLoadingOverlay';
 import './index.css';
 import { installGlobalErrorHandlers } from './services/error-reporting';
 
@@ -26,6 +27,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <ThemeProvider>
       <BrowserRouter>
         <App />
+        <GlobalLoadingOverlay />
         <Toaster
           position="top-right"
           toastOptions={{

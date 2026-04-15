@@ -15,6 +15,60 @@ import { expect, test } from './fixtures';
 import { createLogger } from './helpers/logger.js';
 
 const BASE = process.env.E2E_WEB_URL ?? 'http://demo.localhost:3000';
+const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@demo.com';
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'Admin123!';
+
+async function ensureAuthenticated(page: import('@playwright/test').Page) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' });
+
+    // Already authenticated sessions are redirected away from /login by PublicRoute.
+    const dashboardRedirected = await page
+      .waitForURL('**/dashboard', { timeout: 4_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (dashboardRedirected || !page.url().includes('/login')) {
+      return;
+    }
+
+    const emailInput = page.locator('#email');
+    const passwordInput = page.locator('#password');
+    const loginVisible = await emailInput.isVisible({ timeout: 5_000 }).catch(() => false);
+
+    if (!loginVisible) {
+      // The login form can detach while auth bootstraps; retry once.
+      continue;
+    }
+
+    try {
+      await emailInput.fill(ADMIN_EMAIL);
+      await passwordInput.fill(ADMIN_PASSWORD);
+
+      // Prefer click submit; fallback to Enter if the button detaches during redirect.
+      const signInButton = page.getByRole('button', { name: /sign in/i });
+      await signInButton.click().catch(async () => {
+        await passwordInput.press('Enter');
+      });
+
+      await page.waitForURL('**/dashboard', { timeout: 30_000 });
+      return;
+    } catch {
+      if (!page.url().includes('/login')) {
+        return;
+      }
+
+      if (attempt === 1) {
+        throw new Error('Unable to establish authenticated session for settings tests.');
+      }
+    }
+  }
+
+  throw new Error('Unable to establish authenticated session for settings tests.');
+}
+
+test.beforeEach(async ({ page }) => {
+  await ensureAuthenticated(page);
+});
 
 // â”€â”€â”€ General Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 test.describe('Settings â€“ General', () => {

@@ -1142,16 +1142,32 @@ export class CostingEngineService {
           data: { tenantId, productId, locationId, costType: CostType.STANDARD, effectiveFrom: effectDate, ...costingData },
         });
 
-    // Update standard cost in ItemCost
-    await tx.itemCost.upsert({
-      where: { tenantId_productId_locationId: { tenantId, productId, locationId: locationId ?? '' } },
-      create: {
-        tenantId, productId, locationId: locationId ?? '',
-        standardCost: totalCost, currentUnitCost: ZERO,
-        currentTotalQty: ZERO, currentTotalValue: ZERO,
-      },
-      update: { standardCost: totalCost },
+    // Update standard cost in ItemCost using id-based update/create to avoid
+    // depending on composite unique aliases from generated Prisma clients.
+    const itemCostLocationId = locationId ?? '';
+    const existingItemCost = await tx.itemCost.findFirst({
+      where: { tenantId, productId, locationId: itemCostLocationId },
+      select: { id: true },
     });
+
+    if (existingItemCost) {
+      await tx.itemCost.update({
+        where: { id: existingItemCost.id },
+        data: { standardCost: totalCost },
+      });
+    } else {
+      await tx.itemCost.create({
+        data: {
+          tenantId,
+          productId,
+          locationId: itemCostLocationId,
+          standardCost: totalCost,
+          currentUnitCost: ZERO,
+          currentTotalQty: ZERO,
+          currentTotalValue: ZERO,
+        },
+      });
+    }
 
     return {
       costing,
@@ -1788,28 +1804,37 @@ export class CostingEngineService {
       laborRate?: number;
     },
   ) {
-    return this.prisma.itemCostProfile.upsert({
+    const profileLocationId = data.locationId ?? null;
+    const existingProfile = await this.prisma.itemCostProfile.findFirst({
       where: {
-        tenantId_productId_locationId: {
-          tenantId,
-          productId: data.productId,
-          locationId: data.locationId ?? null,
-        },
+        tenantId,
+        productId: data.productId,
+        locationId: profileLocationId,
       },
-      create: {
+      select: { id: true },
+    });
+
+    if (existingProfile) {
+      return this.prisma.itemCostProfile.update({
+        where: { id: existingProfile.id },
+        data: {
+          costingMethod: data.costingMethod as any,
+          standardCostVersion: data.standardCostVersion,
+          enableLandedCost: data.enableLandedCost,
+          overheadRate: data.overheadRate != null ? new Decimal(data.overheadRate) : undefined,
+          laborRate: data.laborRate != null ? new Decimal(data.laborRate) : undefined,
+        },
+      });
+    }
+
+    return this.prisma.itemCostProfile.create({
+      data: {
         tenantId,
         productId: data.productId,
         locationId: data.locationId,
         costingMethod: data.costingMethod as any,
         standardCostVersion: data.standardCostVersion,
         enableLandedCost: data.enableLandedCost ?? false,
-        overheadRate: data.overheadRate != null ? new Decimal(data.overheadRate) : undefined,
-        laborRate: data.laborRate != null ? new Decimal(data.laborRate) : undefined,
-      },
-      update: {
-        costingMethod: data.costingMethod as any,
-        standardCostVersion: data.standardCostVersion,
-        enableLandedCost: data.enableLandedCost,
         overheadRate: data.overheadRate != null ? new Decimal(data.overheadRate) : undefined,
         laborRate: data.laborRate != null ? new Decimal(data.laborRate) : undefined,
       },
@@ -1948,16 +1973,17 @@ export class CostingEngineService {
     let totalValuation = ZERO;
 
     for (const level of levels) {
-      const itemCost = await this.prisma.itemCost.findUnique({
-        where: { tenantId_productId_locationId: { tenantId, productId: level.productId, locationId: level.locationId } },
+      const itemCost = await this.prisma.itemCost.findFirst({
+        where: { tenantId, productId: level.productId, locationId: level.locationId },
       });
 
       const unitCost = itemCost?.currentUnitCost ?? ZERO;
       const value = level.onHandQty.mul(unitCost);
       totalValuation = totalValuation.add(value);
 
-      const profile = await this.prisma.itemCostProfile.findUnique({
-        where: { tenantId_productId_locationId: { tenantId, productId: level.productId, locationId: level.locationId ?? null } },
+      const profile = await this.prisma.itemCostProfile.findFirst({
+        where: { tenantId, productId: level.productId, locationId: level.locationId ?? null },
+        select: { costingMethod: true },
       });
 
       results.push({
@@ -2111,8 +2137,8 @@ export class CostingEngineService {
     workOrderId?: string,
   ): Promise<Decimal> {
     // 1. Item-level overhead rate from cost profile
-    const profile = await tx.itemCostProfile.findUnique({
-      where: { tenantId_productId_locationId: { tenantId, productId, locationId: locationId ?? null } },
+    const profile = await tx.itemCostProfile.findFirst({
+      where: { tenantId, productId, locationId: locationId ?? null },
       select: { overheadRate: true },
     });
     if (profile?.overheadRate && !profile.overheadRate.isZero()) {
@@ -2145,15 +2171,16 @@ export class CostingEngineService {
   }
 
   private async resolveMethod(tx: Tx, tenantId: string, productId: string, locationId: string): Promise<CostingMethod> {
-    const profile = await tx.itemCostProfile.findUnique({
-      where: { tenantId_productId_locationId: { tenantId, productId, locationId: locationId ?? null } },
+    const profile = await tx.itemCostProfile.findFirst({
+      where: { tenantId, productId, locationId: locationId ?? null },
+      select: { costingMethod: true },
     });
     return (profile?.costingMethod as CostingMethod) ?? 'STANDARD';
   }
 
   private async getMovingAverageCost(tx: Tx, tenantId: string, productId: string, locationId: string): Promise<Decimal> {
-    const ic = await tx.itemCost.findUnique({
-      where: { tenantId_productId_locationId: { tenantId, productId, locationId } },
+    const ic = await tx.itemCost.findFirst({
+      where: { tenantId, productId, locationId },
     });
     return ic?.currentUnitCost ?? ZERO;
   }

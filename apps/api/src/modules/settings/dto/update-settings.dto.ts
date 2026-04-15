@@ -172,4 +172,16 @@ export class UpdateSettingsDto {
   @IsString()
   @IsOptional()
   customCss?: string;
+
+  /* ─── Module Feature Flags ─── */
+
+  @ApiPropertyOptional({ description: 'Enabled modules object' })
+  @IsOptional()
+  enabledModules?: {
+    planning?: boolean;
+    forecasting?: boolean;
+    manufacturing?: boolean;
+    reports?: boolean;
+    data?: boolean;
+  };
 }

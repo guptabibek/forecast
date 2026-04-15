@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ClsModule } from 'nestjs-cls';
 import { validateEnv } from './core/config/env.validation';
@@ -22,6 +23,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { DataModule } from './modules/data/data.module';
 import { ForecastsModule } from './modules/forecasts/forecasts.module';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
+import { MargEdeModule } from './modules/marg-ede/marg-ede.module';
 import { NotificationFeatureModule } from './modules/notifications/notification.module';
 import { PlansModule } from './modules/plans/plans.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -76,6 +78,9 @@ import { AppController } from './app.controller';
       },
     }),
 
+    // Scheduler (cron jobs)
+    ScheduleModule.forRoot(),
+
     // Core modules
     DatabaseModule,
     QueueModule,
@@ -100,6 +105,7 @@ import { AppController } from './app.controller';
     ManufacturingModule,
     AuditFeatureModule,
     NotificationFeatureModule,
+    MargEdeModule,
   ],
   controllers: [AppController],
   providers: [

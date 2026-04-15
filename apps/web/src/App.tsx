@@ -19,6 +19,7 @@ const Actuals = lazy(() => import('@pages/data/Actuals'));
 const DataImport = lazy(() => import('@pages/data/DataImport'));
 const Dimensions = lazy(() => import('@pages/data/Dimensions'));
 const ProductMaster = lazy(() => import('@pages/data/ProductMaster'));
+const Locations = lazy(() => import('@pages/data/Locations'));
 const ForecastDashboard = lazy(() => import('@pages/forecasts/ForecastDashboard'));
 const ForecastDetail = lazy(() => import('@pages/forecasts/ForecastDetail'));
 const Forecasts = lazy(() => import('@pages/forecasts/Forecasts'));
@@ -31,6 +32,7 @@ const Scenarios = lazy(() => import('@pages/scenarios/Scenarios'));
 const AuditLog = lazy(() => import('@pages/settings/AuditLog'));
 const Notifications = lazy(() => import('@pages/settings/Notifications'));
 const Profile = lazy(() => import('@pages/settings/Profile'));
+const MargEde = lazy(() => import('@pages/settings/MargEde'));
 const Settings = lazy(() => import('@pages/settings/Settings'));
 const Users = lazy(() => import('@pages/settings/Users'));
 
@@ -164,6 +166,7 @@ export default function App() {
         <Route path="/data/actuals" element={<RoleAwareRoute restrictForecastViewer><Actuals /></RoleAwareRoute>} />
         <Route path="/data/dimensions" element={<RoleAwareRoute restrictForecastViewer><Dimensions /></RoleAwareRoute>} />
         <Route path="/data/products" element={<RoleAwareRoute restrictForecastViewer><ProductMaster /></RoleAwareRoute>} />
+        <Route path="/data/locations" element={<RoleAwareRoute restrictForecastViewer><Locations /></RoleAwareRoute>} />
 
         {/* Reports */}
         <Route path="/reports" element={<Reports />} />
@@ -171,6 +174,7 @@ export default function App() {
         {/* Settings */}
         <Route path="/settings" element={<RoleAwareRoute restrictForecastViewer><Settings /></RoleAwareRoute>} />
         <Route path="/settings/users" element={<RoleAwareRoute restrictForecastViewer><Users /></RoleAwareRoute>} />
+        <Route path="/settings/marg-ede" element={<RoleAwareRoute restrictForecastViewer><MargEde /></RoleAwareRoute>} />
         <Route path="/settings/profile" element={<Profile />} />
         <Route path="/settings/audit-log" element={<RoleAwareRoute restrictForecastViewer><AuditLog /></RoleAwareRoute>} />
         <Route path="/notifications" element={<Notifications />} />

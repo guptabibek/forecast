@@ -10,6 +10,7 @@ export * from './useUsers';
 export * from './useBOM';
 export * from './useCapacity';
 export * from './useInventory';
+export * from './useMargEde';
 export * from './useMRP';
 export * from './useWorkflow';
 

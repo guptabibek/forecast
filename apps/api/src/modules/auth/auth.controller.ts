@@ -43,10 +43,36 @@ const REFRESH_COOKIE_NAME = 'fh_rt';
 export class AuthController {
     constructor(private readonly authService: AuthService) { }
 
+    private isIpv4Host(host: string): boolean {
+        return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host);
+    }
+
     private isDemoTenantFallbackEnabled(): boolean {
         const raw = (process.env.ALLOW_DEMO_TENANT_FALLBACK || '').trim().toLowerCase();
         const enabled = raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
         return process.env.NODE_ENV !== 'production' && enabled;
+    }
+
+    private resolveTenantSlugFromFrontendUrl(): string | undefined {
+        const frontendUrl = (process.env.FRONTEND_URL || '').trim();
+        if (!frontendUrl) return undefined;
+
+        try {
+            const frontendHost = new URL(frontendUrl).hostname.toLowerCase();
+            const parts = frontendHost.split('.').filter(Boolean);
+
+            if (parts.length >= 3 && parts[0] !== 'www' && parts[0] !== 'api') {
+                return parts[0];
+            }
+
+            if (parts.length === 2 && parts[1] === 'localhost' && parts[0] !== 'www' && parts[0] !== 'api') {
+                return parts[0];
+            }
+        } catch {
+            return undefined;
+        }
+
+        return undefined;
     }
 
     private resolveTenantSlug(req: Request, providedTenantSlug?: string): string {
@@ -62,14 +88,22 @@ export class AuthController {
         const host = req.headers['host'] || '';
         const hostWithoutPort = host.split(':')[0];
         const parts = hostWithoutPort.split('.');
+        const isIpv4 = this.isIpv4Host(hostWithoutPort);
 
-        if (parts.length >= 3 && parts[0] !== 'www' && parts[0] !== 'api') {
+        if (!isIpv4 && parts.length >= 3 && parts[0] !== 'www' && parts[0] !== 'api') {
             return parts[0].toLowerCase();
         }
 
         // Support local subdomains like demo.localhost for UAT/dev use.
         if (parts.length === 2 && parts[1] === 'localhost' && parts[0] !== 'www' && parts[0] !== 'api') {
             return parts[0].toLowerCase();
+        }
+
+        if (hostWithoutPort === 'localhost' || hostWithoutPort === '127.0.0.1') {
+            const configuredTenantSlug = this.resolveTenantSlugFromFrontendUrl();
+            if (configuredTenantSlug) {
+                return configuredTenantSlug;
+            }
         }
 
         if (this.isDemoTenantFallbackEnabled()) {

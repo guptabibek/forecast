@@ -1,6 +1,13 @@
 import { reportApiError } from '@services/error-reporting';
+import { useApiLoadingStore } from '@stores/api-loading.store';
 import { useAuthStore } from '@stores/auth.store';
 import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
+
+const MUTATION_METHODS = new Set(['post', 'put', 'patch', 'delete']);
+
+function isMutation(config?: InternalAxiosRequestConfig): boolean {
+  return MUTATION_METHODS.has((config?.method ?? '').toLowerCase());
+}
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -28,7 +35,7 @@ function shouldSkipRefresh(path?: string): boolean {
   return AUTH_PATHS.some((authPath) => path.includes(authPath));
 }
 
-// Request interceptor - add auth token
+// Request interceptor - add auth token + track mutations
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const { tokens, user } = useAuthStore.getState();
@@ -44,6 +51,10 @@ apiClient.interceptors.request.use(
       if (subdomain && subdomain !== 'localhost' && subdomain !== 'www') {
         config.headers['X-Tenant-ID'] = subdomain;
       }
+    }
+
+    if (isMutation(config)) {
+      useApiLoadingStore.getState()._increment();
     }
 
     return config;
@@ -72,7 +83,12 @@ const processQueue = (error: AxiosError | null) => {
 };
 
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (isMutation(response.config)) {
+      useApiLoadingStore.getState()._decrement();
+    }
+    return response;
+  },
   async (error: AxiosError) => {
     reportApiError(error);
 
@@ -150,6 +166,10 @@ apiClient.interceptors.response.use(
 
     if (status === 429) {
       console.warn('[API] 429 Too Many Requests — rate limited');
+    }
+
+    if (isMutation(error.config)) {
+      useApiLoadingStore.getState()._decrement();
     }
 
     return Promise.reject(error);

@@ -182,6 +182,14 @@ export class SettingsService {
       compactMode: settings.compactMode ?? false,
       loginBgUrl: settings.loginBgUrl || null,
       customCss: settings.customCss || null,
+      // Module feature flags
+      enabledModules: {
+        planning: settings.enabledModules?.planning ?? true,
+        forecasting: settings.enabledModules?.forecasting ?? true,
+        manufacturing: settings.enabledModules?.manufacturing ?? true,
+        reports: settings.enabledModules?.reports ?? true,
+        data: settings.enabledModules?.data ?? true,
+      },
     };
   }
 
@@ -223,6 +231,7 @@ export class SettingsService {
       compactMode,
       loginBgUrl,
       customCss,
+      enabledModules,
       ...directFields 
     } = updateSettingsDto;
 
@@ -254,6 +263,7 @@ export class SettingsService {
       ...(compactMode !== undefined && { compactMode }),
       ...(loginBgUrl !== undefined && { loginBgUrl }),
       ...(customCss !== undefined && { customCss }),
+      ...(enabledModules !== undefined && { enabledModules: { ...currentSettings.enabledModules, ...enabledModules } }),
     };
 
     await this.prisma.tenant.update({

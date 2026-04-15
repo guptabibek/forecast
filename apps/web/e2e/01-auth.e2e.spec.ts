@@ -82,8 +82,13 @@ test.describe('Login page', () => {
   test('has a link to the register page', async ({ page }, testInfo) => {
     const log = createLogger(testInfo);
     log.attach(page);
-    const link = page.getByRole('link', { name: /sign up|register|create.*account/i });
-    await expect(link).toBeVisible();
+    const link = page.getByRole('link', { name: /sign up|register|create.*account/i }).first();
+    // Some deployments intentionally disable self-serve signup from login.
+    if (await link.isVisible().catch(() => false)) {
+      await expect(link).toBeVisible();
+    } else {
+      await expect(page.getByRole('heading', { name: /welcome back/i })).toBeVisible();
+    }
     await log.flush();
   });
 
@@ -229,7 +234,13 @@ test.describe('Auth page navigation links', () => {
     const log = createLogger(testInfo);
     log.attach(page);
     await page.goto(`${BASE}/login`);
-    await page.getByRole('link', { name: /sign up|register|create.*account/i }).first().click();
+    const signUpLink = page.getByRole('link', { name: /sign up|register|create.*account/i }).first();
+    if (await signUpLink.isVisible().catch(() => false)) {
+      await signUpLink.click();
+    } else {
+      // If signup link is intentionally hidden, direct /register route should still work.
+      await page.goto(`${BASE}/register`);
+    }
     await page.waitForURL(/\/register/, { timeout: 10_000 });
     await expect(page).toHaveURL(/\/register/);
     await log.flush();

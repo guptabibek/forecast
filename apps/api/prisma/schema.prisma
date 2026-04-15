@@ -2417,6 +2417,215 @@ enum ExternalDataType {
   COMPETITOR
   IOT
   CUSTOM_API
+  MARG_EDE
+}
+
+enum MargSyncStatus {
+  IDLE
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+/// Marg EDE integration configuration per tenant
+model MargSyncConfig {
+  id              String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String          @map("tenant_id") @db.Uuid
+  companyCode     String          @map("company_code") @db.VarChar(100)
+  margKey         String          @map("marg_key") @db.VarChar(255)
+  decryptionKey   String          @map("decryption_key") @db.VarChar(255)
+  apiBaseUrl      String          @default("https://corporate.margerp.com") @map("api_base_url") @db.VarChar(500)
+  companyId       Int             @default(0) @map("company_id")
+  isActive        Boolean         @default(true) @map("is_active")
+  syncFrequency   String          @default("DAILY") @map("sync_frequency") @db.VarChar(20)
+  lastSyncAt      DateTime?       @map("last_sync_at")
+  lastSyncStatus  MargSyncStatus  @default(IDLE) @map("last_sync_status")
+  lastSyncIndex   Int             @default(0) @map("last_sync_index")
+  lastSyncDatetime String?        @map("last_sync_datetime") @db.VarChar(50)
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  syncLogs        MargSyncLog[]
+
+  @@unique([tenantId, companyCode])
+  @@index([tenantId])
+  @@map("marg_sync_configs")
+}
+
+/// Log entry for each Marg EDE sync run
+model MargSyncLog {
+  id               String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId         String          @map("tenant_id") @db.Uuid
+  configId         String          @map("config_id") @db.Uuid
+  status           MargSyncStatus  @default(RUNNING)
+  startedAt        DateTime        @default(now()) @map("started_at")
+  completedAt      DateTime?       @map("completed_at")
+  productsSynced   Int             @default(0) @map("products_synced")
+  partiesSynced    Int             @default(0) @map("parties_synced")
+  transactionsSynced Int           @default(0) @map("transactions_synced")
+  stockSynced      Int             @default(0) @map("stock_synced")
+  branchesSynced   Int             @default(0) @map("branches_synced")
+  errors           Json            @default("[]")
+  syncIndex        Int?            @map("sync_index")
+  syncDatetime     String?         @map("sync_datetime") @db.VarChar(50)
+  createdAt        DateTime        @default(now()) @map("created_at")
+  config           MargSyncConfig  @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, startedAt])
+  @@index([configId])
+  @@map("marg_sync_logs")
+}
+
+/// Raw Marg branch/store master data
+model MargBranch {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      Int      @map("marg_id")
+  companyId   Int      @map("company_id")
+  name        String   @db.VarChar(255)
+  storeId     String?  @map("store_id") @db.VarChar(50)
+  licence     String?  @db.VarChar(50)
+  branch      String?  @db.VarChar(100)
+  locationId  String?  @map("location_id") @db.Uuid
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId])
+  @@index([tenantId])
+  @@index([locationId])
+  @@map("marg_branches")
+}
+
+/// Staged Marg product data before transformation
+model MargProduct {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      Int      @map("marg_id")
+  companyId   Int      @map("company_id")
+  pid         String   @db.VarChar(20)
+  code        String   @db.VarChar(50)
+  name        String   @db.VarChar(255)
+  unit        String?  @db.VarChar(20)
+  pack        Decimal? @db.Decimal(18, 4)
+  gCode       String?  @map("g_code") @db.VarChar(20)
+  gCode3      String?  @map("g_code3") @db.VarChar(20)
+  gCode5      String?  @map("g_code5") @db.VarChar(20)
+  gCode6      String?  @map("g_code6") @db.VarChar(20)
+  gst         Decimal? @db.Decimal(5, 2)
+  margCode    String?  @map("marg_code") @db.VarChar(50)
+  addField    String?  @map("add_field") @db.VarChar(255)
+  productId   String?  @map("product_id") @db.Uuid
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, pid])
+  @@index([tenantId])
+  @@index([productId])
+  @@map("marg_products")
+}
+
+/// Staged Marg party/customer data before transformation
+model MargParty {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      Int      @map("marg_id")
+  companyId   Int      @map("company_id")
+  cid         String   @db.VarChar(20)
+  parName     String   @map("par_name") @db.VarChar(255)
+  parAdd1     String?  @map("par_add1") @db.VarChar(255)
+  parAdd2     String?  @map("par_add2") @db.VarChar(255)
+  gstnNo      String?  @map("gstn_no") @db.VarChar(50)
+  phone1      String?  @db.VarChar(20)
+  phone2      String?  @db.VarChar(20)
+  phone3      String?  @db.VarChar(20)
+  phone4      String?  @db.VarChar(20)
+  route       String?  @db.VarChar(20)
+  area        String?  @db.VarChar(20)
+  sCode       String?  @map("s_code") @db.VarChar(20)
+  credit      Int?
+  crDays      Int?     @map("cr_days")
+  crBills     Int?     @map("cr_bills")
+  pin         String?  @db.VarChar(20)
+  lat         String?  @db.VarChar(50)
+  lng         String?  @db.VarChar(50)
+  customerId  String?  @map("customer_id") @db.Uuid
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, cid])
+  @@index([tenantId])
+  @@index([customerId])
+  @@map("marg_parties")
+}
+
+/// Staged Marg transaction details
+model MargTransaction {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      Int      @map("marg_id")
+  companyId   Int      @map("company_id")
+  sourceKey   String   @map("source_key") @db.VarChar(255)
+  voucher     String   @db.VarChar(50)
+  type        String   @db.VarChar(10)
+  vcn         String?  @db.VarChar(50)
+  date        DateTime @db.Date
+  cid         String?  @db.VarChar(20)
+  pid         String?  @db.VarChar(20)
+  gCode       String?  @map("g_code") @db.VarChar(20)
+  batch       String?  @db.VarChar(50)
+  qty         Decimal? @db.Decimal(18, 4)
+  free        Decimal? @db.Decimal(18, 4)
+  mrp         Decimal? @db.Decimal(18, 4)
+  rate        Decimal? @db.Decimal(18, 4)
+  discount    Decimal? @db.Decimal(18, 4)
+  amount      Decimal? @db.Decimal(18, 4)
+  gst         Decimal? @db.Decimal(5, 2)
+  gstAmount   Decimal? @map("gst_amount") @db.Decimal(18, 4)
+  addFields   String?  @map("add_fields")
+  actualId    String?  @map("actual_id") @db.Uuid
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, sourceKey])
+  @@index([tenantId, date])
+  @@index([actualId])
+  @@map("marg_transactions")
+}
+
+/// Staged Marg stock/inventory data
+model MargStock {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      Int      @map("marg_id")
+  companyId   Int      @map("company_id")
+  pid         String   @db.VarChar(20)
+  gCode       String?  @map("g_code") @db.VarChar(20)
+  batch       String   @default("_default") @db.VarChar(50)
+  batDate     DateTime? @map("bat_date") @db.Date
+  batDet      String?  @map("bat_det") @db.VarChar(50)
+  expiry      DateTime? @db.Date
+  supInvo     String?  @map("sup_invo") @db.VarChar(50)
+  supDate     DateTime? @map("sup_date") @db.Date
+  supCode     String?  @map("sup_code") @db.VarChar(20)
+  opening     Decimal? @db.Decimal(18, 4)
+  stock       Decimal? @db.Decimal(18, 4)
+  brkStock    Decimal? @map("brk_stock") @db.Decimal(18, 4)
+  lpRate      Decimal? @map("lp_rate") @db.Decimal(18, 4)
+  pRate       Decimal? @map("p_rate") @db.Decimal(18, 4)
+  mrp         Decimal? @db.Decimal(18, 4)
+  rateA       Decimal? @map("rate_a") @db.Decimal(18, 4)
+  rateB       Decimal? @map("rate_b") @db.Decimal(18, 4)
+  rateC       Decimal? @map("rate_c") @db.Decimal(18, 4)
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, pid, batch])
+  @@index([tenantId])
+  @@map("marg_stocks")
 }
 
 enum FinancialPlanType {
