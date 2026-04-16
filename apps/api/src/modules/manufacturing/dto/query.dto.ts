@@ -39,6 +39,20 @@ export class GetBatchesQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   expiringBefore?: string;
+
+  @IsOptional()
+  @IsString()
+  expiredOnly?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  daysToExpiry?: number;
+
+  @IsOptional()
+  @IsString()
+  ageBucket?: string;
 }
 
 // ============================================================================

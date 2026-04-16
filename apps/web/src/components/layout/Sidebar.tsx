@@ -61,7 +61,16 @@ const navigation: NavigationItem[] = [
       { name: 'Dimensions', href: '/data/dimensions', icon: CubeIcon },
     ],
   },
-  { name: 'Reports', href: '/reports', icon: DocumentChartBarIcon, module: 'reports' },
+  {
+    name: 'Reports',
+    module: 'reports',
+    items: [
+      { name: 'Report Studio', href: '/reports', icon: DocumentChartBarIcon, module: 'reports' },
+      { name: 'Forecast Accuracy', href: '/manufacturing/forecast-accuracy', icon: ChartBarIcon, module: 'reports' },
+      { name: 'S&OP Gap Analysis', href: '/manufacturing/sop-gap-analysis', icon: DocumentChartBarIcon, module: 'reports' },
+      { name: 'Batch Intelligence', href: '/manufacturing/batches', icon: CubeIcon, module: 'reports' },
+    ],
+  },
   {
     name: 'Manufacturing',
     module: 'manufacturing',
@@ -80,7 +89,6 @@ const navigation: NavigationItem[] = [
       { name: 'Workflows', href: '/manufacturing/workflow', icon: Cog6ToothIcon },
       { name: 'Fiscal Calendar', href: '/manufacturing/fiscal-calendar', icon: DocumentTextIcon },
       { name: 'Quality Inspections', href: '/manufacturing/quality-inspections', icon: ShieldCheckIcon },
-      { name: 'Forecast Accuracy', href: '/manufacturing/forecast-accuracy', icon: ChartBarIcon },
       { name: 'Product Costing', href: '/manufacturing/product-costing', icon: CubeIcon },
       { name: 'Costing Engine', href: '/manufacturing/costing-engine', icon: CurrencyDollarIcon },
       { name: 'Purchase Contracts', href: '/manufacturing/purchase-contracts', icon: DocumentTextIcon },
@@ -89,8 +97,6 @@ const navigation: NavigationItem[] = [
       { name: 'UOM Conversions', href: '/manufacturing/uom-conversions', icon: TableCellsIcon },
       { name: 'Location Hierarchy', href: '/manufacturing/location-hierarchy', icon: BuildingOffice2Icon },
       { name: 'Capacity Plans', href: '/manufacturing/capacity-plans', icon: ChartBarIcon },
-      { name: 'S&OP Gap Analysis', href: '/manufacturing/sop-gap-analysis', icon: DocumentChartBarIcon },
-      { name: 'Batches', href: '/manufacturing/batches', icon: CubeIcon },
     ],
   },
   {

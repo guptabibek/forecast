@@ -21,8 +21,10 @@ const transactionTypeIcons: Record<string, React.ReactNode> = {
   RECEIPT: <ArrowDownTrayIcon className="w-4 h-4 text-green-600" />,
   ISSUE: <ArrowUpTrayIcon className="w-4 h-4 text-red-600" />,
   TRANSFER: <ArrowsRightLeftIcon className="w-4 h-4 text-blue-600" />,
-  ADJUSTMENT: <AdjustmentsHorizontalIcon className="w-4 h-4 text-orange-600" />,
-  PRODUCTION: <PlusIcon className="w-4 h-4 text-green-600" />,
+  ADJUSTMENT_IN: <AdjustmentsHorizontalIcon className="w-4 h-4 text-emerald-600" />,
+  ADJUSTMENT_OUT: <AdjustmentsHorizontalIcon className="w-4 h-4 text-orange-600" />,
+  PRODUCTION_RECEIPT: <PlusIcon className="w-4 h-4 text-green-600" />,
+  PRODUCTION_ISSUE: <ArrowUpTrayIcon className="w-4 h-4 text-red-600" />,
   SCRAP: <ArrowUpTrayIcon className="w-4 h-4 text-red-600" />,
   RETURN: <ArrowDownTrayIcon className="w-4 h-4 text-blue-600" />,
 };
@@ -31,10 +33,42 @@ const transactionTypeVariant: Record<string, 'default' | 'primary' | 'secondary'
   RECEIPT: 'success',
   ISSUE: 'error',
   TRANSFER: 'primary',
-  ADJUSTMENT: 'warning',
-  PRODUCTION: 'success',
+  ADJUSTMENT_IN: 'success',
+  ADJUSTMENT_OUT: 'warning',
+  PRODUCTION_RECEIPT: 'success',
+  PRODUCTION_ISSUE: 'error',
   SCRAP: 'error',
   RETURN: 'primary',
+};
+
+const formatTransactionTypeLabel = (transactionType: string) =>
+  transactionType
+    .toLowerCase()
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+
+const getSignedQuantity = (transaction: InventoryTransaction) => {
+  if (typeof transaction.signedQuantity === 'number') {
+    return transaction.signedQuantity;
+  }
+
+  if (['ISSUE', 'ADJUSTMENT_OUT', 'SCRAP', 'PRODUCTION_ISSUE'].includes(transaction.transactionType)) {
+    return -Math.abs(Number(transaction.quantity || 0));
+  }
+
+  return Number(transaction.quantity || 0);
+};
+
+const getMovementRoute = (transaction: InventoryTransaction) => {
+  const from = transaction.location?.name || transaction.location?.code;
+  const to = transaction.toLocation?.name || transaction.toLocation?.code;
+
+  if (from && to) {
+    return `${from} -> ${to}`;
+  }
+
+  return from || to || '—';
 };
 
 export default function InventoryPage() {
@@ -95,7 +129,7 @@ export default function InventoryPage() {
 
   const policies: InventoryPolicy[] = Array.isArray(policiesData?.items) ? policiesData.items : Array.isArray(policiesData) ? policiesData : [];
   const levels: InventoryLevel[] = Array.isArray(levelsData?.items) ? levelsData.items : Array.isArray(levelsData) ? levelsData : [];
-  const transactions: InventoryTransaction[] = transactionsData || [];
+  const transactions: InventoryTransaction[] = Array.isArray(transactionsData) ? transactionsData : [];
 
   const hasError = isPoliciesError || isLevelsError || isTransactionsError;
   const firstError = policiesError || levelsError || transactionsError;
@@ -190,7 +224,7 @@ export default function InventoryPage() {
         <div className="flex items-center gap-2">
           {transactionTypeIcons[row.transactionType]}
           <Badge variant={transactionTypeVariant[row.transactionType] || 'default'} size="sm">
-            {row.transactionType}
+            {formatTransactionTypeLabel(row.transactionType)}
           </Badge>
         </div>
       ),
@@ -200,30 +234,51 @@ export default function InventoryPage() {
       header: 'Product',
       accessor: (row) => (
         <div>
-          <div>{row.product?.name || '—'}</div>
-          <div className="text-xs text-secondary-500">{row.product?.sku}</div>
+          <div>{row.product?.name || row.product?.code || row.productId || '—'}</div>
+          <div className="text-xs text-secondary-500">{row.product?.sku || row.product?.code || row.productId}</div>
         </div>
       ),
     },
     {
+      key: 'movement',
+      header: 'Movement',
+      accessor: (row) => getMovementRoute(row),
+    },
+    {
       key: 'quantity',
       header: 'Quantity',
-      accessor: (row) => (
-        <span className={row.quantity >= 0 ? 'text-green-600' : 'text-red-600'}>
-          {row.quantity >= 0 ? '+' : ''}{row.quantity}
-        </span>
-      ),
+      accessor: (row) => {
+        const quantity = getSignedQuantity(row);
+
+        return (
+          <span className={quantity > 0 ? 'text-green-600' : quantity < 0 ? 'text-red-600' : 'text-blue-600'}>
+            {quantity > 0 ? '+' : ''}{quantity}
+          </span>
+        );
+      },
       align: 'right',
+    },
+    {
+      key: 'uom',
+      header: 'UOM',
+      accessor: (row) => row.uom || '—',
+      align: 'center',
     },
     {
       key: 'reference',
       header: 'Reference',
-      accessor: (row) => row.referenceType ? `${row.referenceType}` : '—',
+      accessor: (row) => row.referenceNumber || row.referenceType || row.reason || '—',
     },
     {
       key: 'lot',
-      header: 'Lot',
-      accessor: (row) => row.lotNumber || '—',
+      header: 'Batch',
+      accessor: (row) => row.batch?.batchNumber || row.lotNumber || '—',
+    },
+    {
+      key: 'cost',
+      header: 'Value',
+      accessor: (row) => row.totalCost != null ? row.totalCost.toLocaleString() : '—',
+      align: 'right',
     },
     {
       key: 'notes',
@@ -356,8 +411,11 @@ export default function InventoryPage() {
                 <option value="RECEIPT">Receipts</option>
                 <option value="ISSUE">Issues</option>
                 <option value="TRANSFER">Transfers</option>
-                <option value="ADJUSTMENT">Adjustments</option>
-                <option value="PRODUCTION">Production</option>
+                <option value="ADJUSTMENT_IN">Adjustment In</option>
+                <option value="ADJUSTMENT_OUT">Adjustment Out</option>
+                <option value="PRODUCTION_RECEIPT">Production Receipt</option>
+                <option value="PRODUCTION_ISSUE">Production Issue</option>
+                <option value="RETURN">Returns</option>
                 <option value="SCRAP">Scrap</option>
               </select>
             }

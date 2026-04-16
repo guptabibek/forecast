@@ -1,12 +1,14 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
-  ActualType,
-  AuditAction,
-  CustomerType,
-  DimensionStatus,
-  LocationType,
-  PeriodType,
-  Prisma,
+    ActualType,
+    AuditAction,
+    BatchStatus,
+    CustomerType,
+    DimensionStatus,
+    InventoryTransactionType,
+    LocationType,
+    PeriodType,
+    Prisma,
 } from '@prisma/client';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { inflateRawSync } from 'zlib';
@@ -463,8 +465,10 @@ export class MargEdeService {
       await this.transformBranches(tenantId);
       await this.transformProducts(tenantId);
       await this.transformParties(tenantId);
-      await this.transformTransactionsToActuals(tenantId);
+      await this.transformStockToBatches(tenantId);
       await this.transformStockToInventoryLevels(tenantId);
+      await this.transformTransactionsToActuals(tenantId);
+      await this.backfillMargInventoryTransactions(tenantId, triggeredBy);
 
       // Update sync config with latest cursor
       await this.margPrisma.margSyncConfig.update({
@@ -1118,14 +1122,16 @@ export class MargEdeService {
         const customerId = await this.resolveCustomerId(tenantId, mt.companyId, mt.cid);
         const locationId = await this.resolveLocationId(tenantId, mt.companyId);
 
-        // Determine transaction type: G=Sales, P=Purchase, etc.
-        const isSale = ['G', 'S'].includes(mt.type.toUpperCase());
-        const actualType = isSale ? ActualType.SALES : ActualType.PURCHASES;
+        const movement = this.classifyMargTransaction(
+          mt.type,
+          mt.qty != null ? Number(mt.qty) : 0,
+          mt.amount != null ? Number(mt.amount) : 0,
+        );
 
         const actual = await this.prisma.actual.create({
           data: {
             tenantId,
-            actualType,
+            actualType: movement.actualType,
             periodDate: mt.date,
             periodType: PeriodType.DAILY,
             productId,
@@ -1145,6 +1151,8 @@ export class MargEdeService {
               margRate: mt.rate ? Number(mt.rate) : null,
               margDiscount: mt.discount ? Number(mt.discount) : null,
               margBatch: mt.batch,
+              margNormalizedType: movement.normalizedType,
+              margInventoryTransactionType: movement.inventoryTransactionType,
             },
           },
         });
@@ -1223,8 +1231,8 @@ export class MargEdeService {
     }
   }
 
-  /** Transform staged Marg stock → InventoryLevel records */
-  private async transformStockToInventoryLevels(tenantId: string): Promise<void> {
+  /** Transform staged Marg stock → Batch records so expiry/ageing remain queryable. */
+  private async transformStockToBatches(tenantId: string): Promise<void> {
     let cursor: string | null = null;
 
     while (true) {
@@ -1245,33 +1253,463 @@ export class MargEdeService {
 
         if (!productId || !locationId) continue;
 
-        const onHandQty = ms.stock != null ? Number(ms.stock) : 0;
-        const averageCost = ms.pRate != null ? Number(ms.pRate) : null;
+        const product = await this.prisma.product.findUnique({
+          where: { id: productId },
+          select: { unitOfMeasure: true },
+        });
 
-        await this.prisma.inventoryLevel.upsert({
-          where: {
-            tenantId_productId_locationId: { tenantId, productId, locationId },
-          },
+        const hasRealBatch = Boolean(ms.batch && ms.batch !== '_default');
+        const batchNumber = hasRealBatch
+          ? ms.batch
+          : `MARG-${ms.companyId}-${ms.pid}-DEFAULT`.slice(0, 50);
+        const quantity = ms.stock != null ? Number(ms.stock) : 0;
+        const manufacturingDate = this.normalizeMargStockDate(ms.batDate);
+        const expiryDate = this.normalizeMargStockDate(ms.expiry);
+        const costPerUnit = ms.pRate != null ? new Prisma.Decimal(Number(ms.pRate)) : null;
+        const notes = this.buildMargBatchNotes(ms);
+
+        await this.prisma.batch.upsert({
+          where: { tenantId_batchNumber: { tenantId, batchNumber } },
           create: {
             tenantId,
+            batchNumber,
             productId,
             locationId,
-            onHandQty,
-            availableQty: onHandQty,
-            averageCost: averageCost != null ? new Prisma.Decimal(averageCost) : null,
-            inventoryValue: averageCost != null ? new Prisma.Decimal(onHandQty * averageCost) : null,
+            quantity: new Prisma.Decimal(quantity),
+            availableQty: new Prisma.Decimal(quantity),
+            uom: product?.unitOfMeasure || 'EA',
+            status: this.resolveMargBatchStatus(quantity, expiryDate),
+            manufacturingDate,
+            expiryDate,
+            costPerUnit,
+            notes,
           },
           update: {
-            onHandQty,
-            availableQty: onHandQty,
-            averageCost: averageCost != null ? new Prisma.Decimal(averageCost) : null,
-            inventoryValue: averageCost != null ? new Prisma.Decimal(onHandQty * averageCost) : null,
+            productId,
+            locationId,
+            quantity: new Prisma.Decimal(quantity),
+            availableQty: new Prisma.Decimal(quantity),
+            uom: product?.unitOfMeasure || 'EA',
+            status: this.resolveMargBatchStatus(quantity, expiryDate),
+            manufacturingDate,
+            expiryDate,
+            costPerUnit,
+            notes,
           },
         });
+
+        const productUpdate: Prisma.ProductUpdateInput = {
+          ...(hasRealBatch ? { batchTracked: true } : {}),
+          ...(ms.mrp != null ? { listPrice: new Prisma.Decimal(Number(ms.mrp)) } : {}),
+          ...(ms.pRate != null ? { standardCost: new Prisma.Decimal(Number(ms.pRate)) } : {}),
+        };
+
+        if (Object.keys(productUpdate).length > 0) {
+          await this.prisma.product.update({
+            where: { id: productId },
+            data: productUpdate,
+          });
+        }
       }
 
       cursor = staged[staged.length - 1].id;
     }
+  }
+
+  /** Backfill a legacy InventoryTransaction row for each synced Marg actual. */
+  private async backfillMargInventoryTransactions(tenantId: string, preferredUserId?: string): Promise<void> {
+    const actorId = await this.resolveMargActorId(tenantId, preferredUserId);
+    if (!actorId) {
+      this.logger.warn(`Skipping Marg inventory-transaction backfill for tenant ${tenantId}; no actor user found`);
+      return;
+    }
+
+    const actuals = await this.prisma.actual.findMany({
+      where: {
+        tenantId,
+        sourceSystem: 'MARG_EDE',
+        productId: { not: null },
+        locationId: { not: null },
+      },
+      select: {
+        id: true,
+        productId: true,
+        locationId: true,
+        quantity: true,
+        periodDate: true,
+        sourceReference: true,
+        amount: true,
+        product: { select: { unitOfMeasure: true } },
+      },
+    });
+
+    if (actuals.length === 0) return;
+
+    const existingTransactions = await this.prisma.inventoryTransaction.findMany({
+      where: {
+        tenantId,
+        referenceType: 'MARG_ACTUAL',
+        referenceId: { in: actuals.map((actual) => actual.id) },
+      },
+      select: { referenceId: true },
+    });
+    const existingReferenceIds = new Set(existingTransactions.map((transaction) => transaction.referenceId).filter(Boolean));
+
+    const sourceKeys = actuals.map((actual) => actual.sourceReference).filter(Boolean) as string[];
+    const stagedTransactions: Array<{
+      sourceKey: string;
+      voucher: string;
+      type: string;
+      qty: Prisma.Decimal | null;
+      rate: Prisma.Decimal | null;
+      amount: Prisma.Decimal | null;
+      batch: string | null;
+      date: Date;
+    }> = sourceKeys.length === 0
+      ? []
+      : await this.margPrisma.margTransaction.findMany({
+          where: {
+            tenantId,
+            sourceKey: { in: sourceKeys },
+          },
+          select: {
+            sourceKey: true,
+            voucher: true,
+            type: true,
+            qty: true,
+            rate: true,
+            amount: true,
+            batch: true,
+            date: true,
+          },
+        });
+    const stagedBySourceKey = new Map<string, (typeof stagedTransactions)[number]>(
+      stagedTransactions.map((transaction) => [transaction.sourceKey, transaction]),
+    );
+
+    for (const actual of actuals) {
+      if (!actual.productId || !actual.locationId || existingReferenceIds.has(actual.id)) continue;
+
+      const staged = actual.sourceReference ? stagedBySourceKey.get(actual.sourceReference) : null;
+      const quantity = Number(staged?.qty ?? actual.quantity ?? 0);
+      if (!Number.isFinite(quantity) || quantity === 0) continue;
+
+      const movement = this.classifyMargTransaction(
+        staged?.type,
+        quantity,
+        staged?.amount != null ? Number(staged.amount) : Number(actual.amount),
+      );
+      const lotNumber = staged?.batch ? String(staged.batch).trim() : null;
+      const batchId = lotNumber
+        ? await this.resolveBatchId(tenantId, actual.productId, actual.locationId, lotNumber)
+        : null;
+      const unitCost = staged?.rate != null ? new Prisma.Decimal(Number(staged.rate)) : null;
+      const totalCost = unitCost != null
+        ? unitCost.mul(new Prisma.Decimal(Math.abs(quantity)))
+        : staged?.amount != null
+          ? new Prisma.Decimal(Math.abs(Number(staged.amount)))
+          : null;
+
+      await this.prisma.inventoryTransaction.create({
+        data: {
+          tenantId,
+          transactionType: movement.inventoryTransactionType,
+          productId: actual.productId,
+          locationId: actual.locationId,
+          quantity: new Prisma.Decimal(Math.abs(quantity)),
+          uom: actual.product?.unitOfMeasure || 'EA',
+          transactionDate: staged?.date || actual.periodDate,
+          referenceType: 'MARG_ACTUAL',
+          referenceId: actual.id,
+          referenceNumber: staged?.voucher ? String(staged.voucher).slice(0, 50) : null,
+          lotNumber,
+          batchId,
+          unitCost,
+          totalCost,
+          reason: `Marg ${movement.normalizedType}`.slice(0, 255),
+          notes: staged?.type ? `Marg source type: ${staged.type}` : 'Marg EDE synced transaction',
+          createdById: actorId,
+        },
+      });
+    }
+  }
+
+  /** Transform staged Marg stock → InventoryLevel records */
+  private async transformStockToInventoryLevels(tenantId: string): Promise<void> {
+    let cursor: string | null = null;
+    const aggregates = new Map<string, {
+      productId: string;
+      locationId: string;
+      onHandQty: number;
+      availableQty: number;
+      inventoryValue: number;
+      costQty: number;
+      lastReceiptDate: Date | null;
+    }>();
+
+    while (true) {
+      const staged = await this.margPrisma.margStock.findMany({
+        where: {
+          tenantId,
+          ...(cursor ? { id: { gt: cursor } } : {}),
+        },
+        orderBy: { id: 'asc' },
+        take: TRANSFORM_BATCH_SIZE,
+      });
+
+      if (staged.length === 0) break;
+
+      for (const ms of staged) {
+        const productId = await this.resolveProductId(tenantId, ms.companyId, ms.pid);
+        const locationId = await this.resolveLocationId(tenantId, ms.companyId);
+
+        if (!productId || !locationId) continue;
+
+        const key = `${productId}:${locationId}`;
+        const current = aggregates.get(key) || {
+          productId,
+          locationId,
+          onHandQty: 0,
+          availableQty: 0,
+          inventoryValue: 0,
+          costQty: 0,
+          lastReceiptDate: null,
+        };
+        const quantity = ms.stock != null ? Number(ms.stock) : 0;
+        const cost = ms.pRate != null ? Number(ms.pRate) : null;
+        const supplierDate = this.normalizeMargStockDate(ms.supDate);
+
+        current.onHandQty += quantity;
+        current.availableQty += quantity;
+
+        if (cost != null) {
+          current.inventoryValue += quantity * cost;
+          current.costQty += quantity;
+        }
+
+        if (supplierDate && (!current.lastReceiptDate || supplierDate > current.lastReceiptDate)) {
+          current.lastReceiptDate = supplierDate;
+        }
+
+        aggregates.set(key, current);
+      }
+
+      cursor = staged[staged.length - 1].id;
+    }
+
+    for (const aggregate of aggregates.values()) {
+      const averageCost = aggregate.costQty !== 0 ? aggregate.inventoryValue / aggregate.costQty : null;
+
+      await this.prisma.inventoryLevel.upsert({
+        where: {
+          tenantId_productId_locationId: {
+            tenantId,
+            productId: aggregate.productId,
+            locationId: aggregate.locationId,
+          },
+        },
+        create: {
+          tenantId,
+          productId: aggregate.productId,
+          locationId: aggregate.locationId,
+          onHandQty: new Prisma.Decimal(aggregate.onHandQty),
+          availableQty: new Prisma.Decimal(aggregate.availableQty),
+          averageCost: averageCost != null ? new Prisma.Decimal(averageCost) : null,
+          inventoryValue: averageCost != null ? new Prisma.Decimal(aggregate.inventoryValue) : null,
+          lastReceiptDate: aggregate.lastReceiptDate,
+        },
+        update: {
+          onHandQty: new Prisma.Decimal(aggregate.onHandQty),
+          availableQty: new Prisma.Decimal(aggregate.availableQty),
+          averageCost: averageCost != null ? new Prisma.Decimal(averageCost) : null,
+          inventoryValue: averageCost != null ? new Prisma.Decimal(aggregate.inventoryValue) : null,
+          lastReceiptDate: aggregate.lastReceiptDate,
+        },
+      });
+    }
+
+    const existingMargLevels = await this.prisma.inventoryLevel.findMany({
+      where: {
+        tenantId,
+        product: { is: { externalId: { startsWith: 'marg:' } } },
+        location: { is: { externalId: { startsWith: 'marg:branch:' } } },
+      },
+      select: { id: true, productId: true, locationId: true },
+    });
+
+    const activeKeys = new Set(aggregates.keys());
+    for (const level of existingMargLevels) {
+      const key = `${level.productId}:${level.locationId}`;
+      if (activeKeys.has(key)) continue;
+
+      await this.prisma.inventoryLevel.update({
+        where: { id: level.id },
+        data: {
+          onHandQty: new Prisma.Decimal(0),
+          availableQty: new Prisma.Decimal(0),
+          inventoryValue: new Prisma.Decimal(0),
+        },
+      });
+    }
+  }
+
+  private async resolveMargActorId(tenantId: string, preferredUserId?: string): Promise<string | null> {
+    if (preferredUserId) {
+      const preferred = await this.prisma.user.findFirst({
+        where: { id: preferredUserId, tenantId },
+        select: { id: true },
+      });
+      if (preferred) return preferred.id;
+    }
+
+    const fallback = await this.prisma.user.findFirst({
+      where: { tenantId, status: 'ACTIVE' },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+
+    return fallback?.id || null;
+  }
+
+  private async resolveBatchId(
+    tenantId: string,
+    productId: string,
+    locationId: string,
+    batchNumber: string,
+  ): Promise<string | null> {
+    const direct = await this.prisma.batch.findFirst({
+      where: { tenantId, batchNumber, productId, locationId },
+      select: { id: true },
+    });
+    if (direct) return direct.id;
+
+    const fallback = await this.prisma.batch.findFirst({
+      where: { tenantId, batchNumber },
+      select: { id: true },
+    });
+    return fallback?.id || null;
+  }
+
+  private classifyMargTransaction(rawType: string | null | undefined, quantity: number, amount: number) {
+    const normalized = String(rawType || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    const compact = normalized.replace(/[^A-Z]/g, '');
+    const includesAny = (...tokens: string[]) =>
+      tokens.some((token) => normalized.includes(token) || compact === token);
+
+    if (includesAny('SCRAP', 'WASTAGE')) {
+      return {
+        actualType: ActualType.INVENTORY,
+        inventoryTransactionType: InventoryTransactionType.SCRAP,
+        normalizedType: 'SCRAP',
+      };
+    }
+
+    if (includesAny('ADJUST', 'ADJ')) {
+      return {
+        actualType: ActualType.INVENTORY,
+        inventoryTransactionType: quantity >= 0 ? InventoryTransactionType.ADJUSTMENT_IN : InventoryTransactionType.ADJUSTMENT_OUT,
+        normalizedType: 'ADJUSTMENT',
+      };
+    }
+
+    if (includesAny('TRANSFER', 'STOCKTRANSFER')) {
+      return {
+        actualType: ActualType.INVENTORY,
+        inventoryTransactionType: InventoryTransactionType.TRANSFER,
+        normalizedType: 'TRANSFER',
+      };
+    }
+
+    if (includesAny('PURCHASERETURN', 'PRETURN')) {
+      return {
+        actualType: ActualType.PURCHASES,
+        inventoryTransactionType: InventoryTransactionType.RETURN,
+        normalizedType: 'PURCHASE_RETURN',
+      };
+    }
+
+    if (includesAny('RETURN', 'SALERETURN', 'SR')) {
+      return {
+        actualType: ActualType.SALES,
+        inventoryTransactionType: InventoryTransactionType.RETURN,
+        normalizedType: 'SALE_RETURN',
+      };
+    }
+
+    if (
+      includesAny('PURCHASE', 'PURCHASES', 'RECEIPT', 'INWARD', 'GRN') ||
+      compact === 'P'
+    ) {
+      return {
+        actualType: ActualType.PURCHASES,
+        inventoryTransactionType: InventoryTransactionType.RECEIPT,
+        normalizedType: 'PURCHASE',
+      };
+    }
+
+    if (
+      includesAny('SALE', 'SALES', 'ISSUE', 'OUTWARD') ||
+      compact === 'G' ||
+      compact === 'S'
+    ) {
+      return {
+        actualType: ActualType.SALES,
+        inventoryTransactionType: InventoryTransactionType.ISSUE,
+        normalizedType: 'SALE',
+      };
+    }
+
+    if (quantity < 0 || amount < 0) {
+      return {
+        actualType: ActualType.SALES,
+        inventoryTransactionType: InventoryTransactionType.ISSUE,
+        normalizedType: normalized || 'ISSUE',
+      };
+    }
+
+    return {
+      actualType: ActualType.PURCHASES,
+      inventoryTransactionType: InventoryTransactionType.RECEIPT,
+      normalizedType: normalized || 'RECEIPT',
+    };
+  }
+
+  private normalizeMargStockDate(value: Date | null | undefined): Date | null {
+    if (!value) return null;
+    const normalized = new Date(value);
+    normalized.setUTCHours(0, 0, 0, 0);
+    if (Number.isNaN(normalized.getTime()) || normalized.getFullYear() <= 1901) {
+      return null;
+    }
+    return normalized;
+  }
+
+  private resolveMargBatchStatus(quantity: number, expiryDate: Date | null): BatchStatus {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (quantity <= 0) return BatchStatus.CONSUMED;
+    if (expiryDate && expiryDate < today) return BatchStatus.EXPIRED;
+    return BatchStatus.AVAILABLE;
+  }
+
+  private buildMargBatchNotes(ms: {
+    batch: string;
+    batDet?: string | null;
+    supInvo?: string | null;
+    supCode?: string | null;
+    supDate?: Date | null;
+    mrp?: Prisma.Decimal | number | null;
+  }): string | null {
+    const notes: string[] = [];
+    const supplierDate = this.normalizeMargStockDate(ms.supDate);
+    if (ms.batch === '_default') notes.push('Marg batch number not provided; placeholder batch created');
+    if (ms.batDet) notes.push(`Marg batch detail: ${String(ms.batDet).trim()}`);
+    if (ms.supInvo) notes.push(`Supplier invoice: ${String(ms.supInvo).trim()}`);
+    if (ms.supCode) notes.push(`Supplier code: ${String(ms.supCode).trim()}`);
+    if (supplierDate) notes.push(`Supplier date: ${supplierDate.toISOString().slice(0, 10)}`);
+    if (ms.mrp != null) notes.push(`MRP: ${Number(ms.mrp)}`);
+    return notes.length > 0 ? notes.join(' | ') : null;
   }
 
   // ===================== HELPERS =====================

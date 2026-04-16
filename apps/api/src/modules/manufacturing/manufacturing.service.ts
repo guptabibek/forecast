@@ -7573,6 +7573,13 @@ export class ManufacturingService {
     limit?: number;
   }) {
     const where: any = { tenantId };
+    const limit = Math.min(500, Math.max(1, filters?.limit || 100));
+    const negativeTypes = new Set([
+      'ISSUE',
+      'ADJUSTMENT_OUT',
+      'SCRAP',
+      'PRODUCTION_ISSUE',
+    ]);
     
     if (filters?.productId) {
       where.productId = filters.productId;
@@ -7586,11 +7593,57 @@ export class ManufacturingService {
       if (filters.endDate) where.transactionDate.lte = new Date(filters.endDate);
     }
 
-    return this.prisma.inventoryTransaction.findMany({
+    const items = await this.prisma.inventoryTransaction.findMany({
       where,
-      orderBy: { transactionDate: 'desc' },
-      take: filters?.limit || 100,
+      include: {
+        product: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+          },
+        },
+        location: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+          },
+        },
+        toLocation: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+          },
+        },
+        batch: {
+          select: {
+            id: true,
+            batchNumber: true,
+            manufacturingDate: true,
+            expiryDate: true,
+          },
+        },
+      },
+      orderBy: [{ transactionDate: 'desc' }, { createdAt: 'desc' }],
+      take: limit,
     });
+
+    return items.map((item) => ({
+      ...item,
+      quantity: Number(item.quantity || 0),
+      signedQuantity: negativeTypes.has(item.transactionType)
+        ? -Math.abs(Number(item.quantity || 0))
+        : Number(item.quantity || 0),
+      direction: item.transactionType === 'TRANSFER'
+        ? 'MOVE'
+        : negativeTypes.has(item.transactionType)
+          ? 'OUT'
+          : 'IN',
+      unitCost: item.unitCost != null ? Number(item.unitCost) : null,
+      totalCost: item.totalCost != null ? Number(item.totalCost) : null,
+    }));
   }
 
   async adjustInventory(tenantId: string, data: {
@@ -9513,32 +9566,149 @@ export class ManufacturingService {
 
   // ──── Batch Management ────
 
-  async getBatches(tenantId: string, params?: { status?: string; productId?: string; locationId?: string; expiringBefore?: string; pageSize?: number }) {
+  async getBatches(tenantId: string, params?: {
+    status?: string;
+    productId?: string;
+    locationId?: string;
+    expiringBefore?: string;
+    expiredOnly?: string;
+    daysToExpiry?: number;
+    ageBucket?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
     const where: any = { tenantId };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const page = Math.max(1, Number(params?.page) || 1);
+    const pageSize = Math.min(500, Math.max(1, Number(params?.pageSize) || 100));
+    const skip = (page - 1) * pageSize;
+    const expiredOnly = ['1', 'true', 'yes'].includes(String(params?.expiredOnly || '').trim().toLowerCase());
+
+    const addDays = (base: Date, days: number) => {
+      const value = new Date(base);
+      value.setDate(value.getDate() + days);
+      return value;
+    };
+
+    const addMonths = (base: Date, months: number) => {
+      const value = new Date(base);
+      value.setMonth(value.getMonth() + months);
+      return value;
+    };
+
+    const getAgeBucket = (manufacturingDate?: Date | null) => {
+      if (!manufacturingDate) return 'unknown';
+      const ageDays = Math.floor((today.getTime() - manufacturingDate.getTime()) / 86400000);
+      if (ageDays <= 90) return '0-3m';
+      if (ageDays <= 180) return '3-6m';
+      if (ageDays <= 365) return '6-12m';
+      return '>12m';
+    };
+
     if (params?.status) where.status = params.status;
     if (params?.productId) where.productId = params.productId;
     if (params?.locationId) where.locationId = params.locationId;
-    if (params?.expiringBefore) where.expiryDate = { lte: new Date(params.expiringBefore) };
 
-    const items = await this.prisma.batch.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: Number(params?.pageSize) || 100,
+    if (expiredOnly) {
+      where.expiryDate = { lt: today };
+    } else if (params?.daysToExpiry) {
+      where.expiryDate = { gte: today, lte: addDays(today, Number(params.daysToExpiry)) };
+    } else if (params?.expiringBefore) {
+      where.expiryDate = { lte: new Date(params.expiringBefore) };
+    }
+
+    if (params?.ageBucket) {
+      const bucket = String(params.ageBucket).trim();
+      if (bucket === '0-3m') where.manufacturingDate = { gte: addMonths(today, -3) };
+      if (bucket === '3-6m') where.manufacturingDate = { gte: addMonths(today, -6), lt: addMonths(today, -3) };
+      if (bucket === '6-12m') where.manufacturingDate = { gte: addMonths(today, -12), lt: addMonths(today, -6) };
+      if (bucket === '>12m') where.manufacturingDate = { lt: addMonths(today, -12) };
+    }
+
+    const [items, total, summaryRows] = await Promise.all([
+      this.prisma.batch.findMany({
+        where,
+        include: {
+          product: { select: { id: true, name: true, code: true, unitOfMeasure: true } },
+          location: { select: { id: true, name: true, code: true } },
+        },
+        orderBy: [{ expiryDate: 'asc' }, { createdAt: 'desc' }],
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.batch.count({ where }),
+      this.prisma.batch.findMany({
+        where,
+        select: {
+          quantity: true,
+          availableQty: true,
+          costPerUnit: true,
+          expiryDate: true,
+          manufacturingDate: true,
+          status: true,
+        },
+      }),
+    ]);
+
+    const summary = summaryRows.reduce((acc, row) => {
+      const quantity = Number(row.quantity || 0);
+      const availableQty = Number(row.availableQty || 0);
+      const costPerUnit = Number(row.costPerUnit || 0);
+      const value = quantity * costPerUnit;
+      const ageBucket = getAgeBucket(row.manufacturingDate);
+
+      acc.totalQty += quantity;
+      acc.totalAvailableQty += availableQty;
+      acc.totalValue += value;
+
+      if (row.expiryDate && row.expiryDate < today) {
+        acc.expiredQty += quantity;
+        acc.expiredValue += value;
+      }
+
+      if (row.expiryDate && row.expiryDate >= today && row.expiryDate <= addDays(today, 30)) {
+        acc.nearExpiry30Qty += quantity;
+        acc.nearExpiry30Value += value;
+      }
+
+      if (row.expiryDate && row.expiryDate >= today && row.expiryDate <= addDays(today, 90)) {
+        acc.nearExpiry90Qty += quantity;
+        acc.nearExpiry90Value += value;
+      }
+
+      if (acc.ageBuckets[ageBucket] !== undefined) {
+        acc.ageBuckets[ageBucket] += quantity;
+      }
+
+      return acc;
+    }, {
+      totalQty: 0,
+      totalAvailableQty: 0,
+      totalValue: 0,
+      expiredQty: 0,
+      expiredValue: 0,
+      nearExpiry30Qty: 0,
+      nearExpiry30Value: 0,
+      nearExpiry90Qty: 0,
+      nearExpiry90Value: 0,
+      ageBuckets: {
+        '0-3m': 0,
+        '3-6m': 0,
+        '6-12m': 0,
+        '>12m': 0,
+      } as Record<string, number>,
     });
 
-    // Enrich with product and location names
-    const productIds = [...new Set(items.map(i => i.productId))];
-    const locationIds = [...new Set(items.map(i => i.locationId))];
-    const [products, locations] = await Promise.all([
-      productIds.length ? this.prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true, name: true, code: true, unitOfMeasure: true } }) : [],
-      locationIds.length ? this.prisma.location.findMany({ where: { id: { in: locationIds } }, select: { id: true, name: true, code: true } }) : [],
-    ]);
-    const prodMap = new Map(products.map(p => [p.id, p] as const));
-    const locMap = new Map(locations.map(l => [l.id, l] as const));
-
     return {
-      items: items.map(b => ({ ...b, product: prodMap.get(b.productId) || null, location: locMap.get(b.locationId) || null })),
-      total: items.length,
+      items,
+      total,
+      page,
+      pageSize,
+      summary: {
+        totalBatches: total,
+        ...summary,
+      },
     };
   }
 

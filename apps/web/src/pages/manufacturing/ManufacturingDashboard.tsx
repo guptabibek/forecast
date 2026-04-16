@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
     Activity,
     AlertTriangle,
+    Archive,
     ArrowRight,
     BarChart3,
     Calculator,
@@ -27,7 +28,7 @@ import {
     useMyPendingApprovals,
     usePlannedOrders,
 } from '../../hooks';
-import { manufacturingService } from '../../services/api';
+import { batchService, manufacturingService } from '../../services/api';
 import type { MRPException } from '../../services/api/mrp.service';
 import type { WorkflowInstance } from '../../services/api/workflow.service';
 
@@ -63,6 +64,12 @@ export function ManufacturingDashboard() {
     queryFn: () => manufacturingService.getDashboard(),
   });
 
+  const { data: batchOverview } = useQuery({
+    queryKey: ['manufacturing', 'dashboard', 'batches', 'overview'],
+    queryFn: () => batchService.getAll({ page: 1, pageSize: 5 }),
+    staleTime: 60_000,
+  });
+
   // Fetch key metrics
   const { data: exceptions } = useMRPExceptions({ status: 'OPEN' });
   const { data: pendingApprovals } = useMyPendingApprovals();
@@ -77,6 +84,8 @@ export function ManufacturingDashboard() {
   const approvalList = (Array.isArray(pendingApprovals) ? pendingApprovals : (pendingApprovals as any)?.items ?? []) as WorkflowInstance[];
   const plannedOrderList = Array.isArray(plannedOrders) ? plannedOrders : (plannedOrders as any)?.items ?? [];
   const bottleneckList = Array.isArray(bottlenecks) ? bottlenecks : (bottlenecks as any)?.items ?? [];
+  const batchSummary = batchOverview?.summary;
+  const fefoQueue = (batchOverview?.items ?? []).filter((batch) => Number(batch.availableQty) > 0 && !!batch.expiryDate).slice(0, 4);
 
   const modules: ModuleCard[] = [
     {
@@ -125,6 +134,22 @@ export function ManufacturingDashboard() {
       metrics: [
         { label: 'Below Safety Stock', value: dashboardMetrics?.inventoryPolicies?.belowSafetyStock ?? '—', trend: (dashboardMetrics?.inventoryPolicies?.belowSafetyStock ?? 0) > 0 ? 'down' : 'neutral' },
         { label: 'Total Policies', value: dashboardMetrics?.inventoryPolicies?.total ?? '—' },
+      ],
+    },
+    {
+      id: 'batches',
+      title: 'Batch Intelligence',
+      description: 'Batch-wise stock, near-expiry, expired lots, ageing, and FEFO rotation.',
+      icon: <Archive className="w-6 h-6" />,
+      path: '/manufacturing/batches',
+      color: 'bg-slate-700',
+      metrics: [
+        { label: 'Tracked Batches', value: batchSummary?.totalBatches ?? '—' },
+        {
+          label: 'Near Expiry 90d',
+          value: batchSummary?.nearExpiry90Qty ?? '—',
+          trend: (batchSummary?.nearExpiry90Qty ?? 0) > 0 ? 'down' : 'neutral',
+        },
       ],
     },
     {
@@ -353,6 +378,103 @@ export function ManufacturingDashboard() {
               )}
             </div>
           ))}
+        </div>
+
+        <div className="mt-8 bg-slate-950 rounded-2xl border border-slate-800 p-6 text-white">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-200">
+                Phase 1 live
+              </div>
+              <h2 className="mt-3 text-2xl font-semibold tracking-tight">Batch stock, expiry, and ageing are now live in UI</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                Use Batch Intelligence for batch-wise stock, near-expiry, expired, ageing, and FEFO views powered by the live Marg-backed inventory sync.
+              </p>
+            </div>
+            <button
+              onClick={() => navigate('/manufacturing/batches')}
+              className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
+            >
+              Open Batch Intelligence
+            </button>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-5">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Tracked Batches</p>
+              <p className="mt-3 text-3xl font-semibold">{batchSummary?.totalBatches ?? '—'}</p>
+              <p className="mt-2 text-sm text-slate-300">Total quantity {batchSummary?.totalQty ?? '—'}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Near Expiry 30d</p>
+              <p className="mt-3 text-3xl font-semibold">{batchSummary?.nearExpiry30Qty ?? '—'}</p>
+              <p className="mt-2 text-sm text-slate-300">Value at risk {batchSummary?.nearExpiry30Value ?? '—'}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Near Expiry 90d</p>
+              <p className="mt-3 text-3xl font-semibold">{batchSummary?.nearExpiry90Qty ?? '—'}</p>
+              <p className="mt-2 text-sm text-slate-300">Use this for replenishment and FEFO planning</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Expired Qty</p>
+              <p className="mt-3 text-3xl font-semibold">{batchSummary?.expiredQty ?? '—'}</p>
+              <p className="mt-2 text-sm text-slate-300">Blocked value {batchSummary?.expiredValue ?? '—'}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">FEFO Queue</p>
+              <p className="mt-3 text-3xl font-semibold">{fefoQueue.length}</p>
+              <p className="mt-2 text-sm text-slate-300">Priority lots ready for earliest-expiry consumption</p>
+            </div>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold text-white">What Changed</h3>
+                <button
+                  onClick={() => navigate('/manufacturing/batches')}
+                  className="text-sm font-medium text-sky-300 hover:text-sky-200"
+                >
+                  View screen
+                </button>
+              </div>
+              <ul className="mt-4 space-y-3 text-sm text-slate-300">
+                <li>Batch-wise stock list with value, availability, and status.</li>
+                <li>Near-expiry and expired filters backed by live API data.</li>
+                <li>Ageing buckets driven by manufacturing date.</li>
+                <li>FEFO queue seeded from earliest-expiry available lots.</li>
+              </ul>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold text-white">FEFO Candidates</h3>
+                <button
+                  onClick={() => navigate('/manufacturing/batches')}
+                  className="text-sm font-medium text-sky-300 hover:text-sky-200"
+                >
+                  Open queue
+                </button>
+              </div>
+              <div className="mt-4 space-y-3">
+                {fefoQueue.length > 0 ? fefoQueue.map((batch) => (
+                  <div key={batch.id} className="rounded-xl border border-white/10 bg-slate-900/60 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-white">{batch.batchNumber}</p>
+                        <p className="text-xs text-slate-400">{batch.product?.name || batch.productId}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-white">{batch.availableQty} {batch.uom}</p>
+                        <p className="text-xs text-slate-400">Exp {batch.expiryDate ? new Date(batch.expiryDate).toLocaleDateString() : '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+                )) : (
+                  <p className="text-sm text-slate-400">No FEFO candidates are currently available.</p>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Recent Activity Section */}

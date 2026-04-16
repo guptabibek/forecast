@@ -119,18 +119,40 @@ export interface LaborEntry {
   notes?: string;
 }
 
+export type InventoryTransactionType =
+  | 'RECEIPT'
+  | 'ISSUE'
+  | 'TRANSFER'
+  | 'ADJUSTMENT_IN'
+  | 'ADJUSTMENT_OUT'
+  | 'SCRAP'
+  | 'RETURN'
+  | 'PRODUCTION_RECEIPT'
+  | 'PRODUCTION_ISSUE';
+
 export interface InventoryTransaction {
   id: string;
   productId: string;
-  product?: { id: string; sku: string; name: string };
-  transactionType: 'RECEIPT' | 'ISSUE' | 'TRANSFER' | 'ADJUSTMENT' | 'PRODUCTION' | 'SCRAP' | 'RETURN';
+  product?: { id: string; code?: string; sku?: string; name: string };
+  locationId: string;
+  location?: { id: string; code: string; name: string };
+  toLocationId?: string;
+  toLocation?: { id: string; code: string; name: string };
+  batchId?: string;
+  batch?: { id: string; batchNumber: string; manufacturingDate?: string; expiryDate?: string };
+  transactionType: InventoryTransactionType;
   quantity: number;
+  signedQuantity?: number;
+  direction?: 'IN' | 'OUT' | 'MOVE';
+  uom: string;
   transactionDate: string;
   referenceType?: string;
   referenceId?: string;
-  fromLocation?: string;
-  toLocation?: string;
+  referenceNumber?: string;
   lotNumber?: string;
+  unitCost?: number | null;
+  totalCost?: number | null;
+  reason?: string;
   notes?: string;
 }
 
