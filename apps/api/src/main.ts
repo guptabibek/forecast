@@ -43,20 +43,9 @@ async function bootstrap() {
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ extended: true, limit: '10mb' }));
 
-  // CORS configuration
-  const corsOrigins = configService
-    .get<string>('CORS_ORIGINS')
-    ?.split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
   app.enableCors({
-    origin: corsOrigins?.length ? corsOrigins : [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://localhost:80',
-      'http://localhost',
-    ],
+    // Reflect the caller origin so SaaS workspace URLs do not require env allowlist churn.
+    origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID', 'X-Request-ID'],

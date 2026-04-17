@@ -9,6 +9,7 @@ const FORECAST_ONLY_MENU_PATHS = new Set([
 ]);
 
 const ROLE_LABELS: Record<UserRole, string> = {
+  SUPER_ADMIN: 'Super Admin',
   ADMIN: 'Admin',
   PLANNER: 'Planner',
   FINANCE: 'Finance',
@@ -16,6 +17,10 @@ const ROLE_LABELS: Record<UserRole, string> = {
   FORECAST_PLANNER: 'Forecast Planner',
   FORECAST_VIEWER: 'Forecast Viewer',
 };
+
+export function isSuperAdmin(role?: UserRole | null): boolean {
+  return role === 'SUPER_ADMIN';
+}
 
 export function isForecastPlannerRole(role?: UserRole | null): boolean {
   return role === 'FORECAST_PLANNER';
@@ -30,6 +35,10 @@ export function isManufacturingBlockedRole(role?: UserRole | null): boolean {
 }
 
 export function getFallbackPathForRole(role?: UserRole | null): string {
+  if (role === 'SUPER_ADMIN') {
+    return '/platform';
+  }
+
   return role === 'FORECAST_VIEWER' ? '/forecasts' : '/dashboard';
 }
 
@@ -50,6 +59,10 @@ export function roleMatches(role: UserRole | null | undefined, ...roles: UserRol
 export function canShowSidebarHref(role: UserRole | null | undefined, href: string): boolean {
   if (!role) {
     return false;
+  }
+
+  if (isSuperAdmin(role)) {
+    return href === '/platform' || href.startsWith('/platform/');
   }
 
   if (isForecastViewerRole(role)) {

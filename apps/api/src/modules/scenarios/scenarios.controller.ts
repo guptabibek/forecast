@@ -17,6 +17,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequireModule } from '../platform/require-module.decorator';
 import { CreateScenarioDto } from './dto/create-scenario.dto';
 import { UpdateScenarioDto } from './dto/update-scenario.dto';
 import { ScenariosService } from './scenarios.service';
@@ -25,6 +26,7 @@ import { ScenariosService } from './scenarios.service';
 @ApiBearerAuth()
 @Controller('scenarios')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequireModule('forecasting')
 export class ScenariosController {
   constructor(private readonly scenariosService: ScenariosService) {}
 

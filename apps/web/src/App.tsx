@@ -1,4 +1,4 @@
-import { getFallbackPathForRole, isForecastViewerRole, isManufacturingBlockedRole } from '@/permissions';
+import { getFallbackPathForRole, isForecastViewerRole, isManufacturingBlockedRole, isSuperAdmin } from '@/permissions';
 import { ErrorBoundary } from '@components/common/ErrorBoundary';
 import { useAuthStore } from '@stores/auth.store';
 import { lazy, Suspense } from 'react';
@@ -13,8 +13,8 @@ const Dashboard = lazy(() => import('@pages/Dashboard'));
 const NotFound = lazy(() => import('@pages/NotFound'));
 const ForgotPassword = lazy(() => import('@pages/auth/ForgotPassword'));
 const Login = lazy(() => import('@pages/auth/Login'));
-const Register = lazy(() => import('@pages/auth/Register'));
 const ResetPassword = lazy(() => import('@pages/auth/ResetPassword'));
+const ForceResetPassword = lazy(() => import('@pages/auth/ForceResetPassword'));
 const Actuals = lazy(() => import('@pages/data/Actuals'));
 const DataImport = lazy(() => import('@pages/data/DataImport'));
 const Dimensions = lazy(() => import('@pages/data/Dimensions'));
@@ -35,6 +35,9 @@ const Profile = lazy(() => import('@pages/settings/Profile'));
 const MargEde = lazy(() => import('@pages/settings/MargEde'));
 const Settings = lazy(() => import('@pages/settings/Settings'));
 const Users = lazy(() => import('@pages/settings/Users'));
+const Roles = lazy(() => import('@pages/settings/Roles'));
+const PlatformDashboard = lazy(() => import('@pages/platform/PlatformDashboard'));
+const TenantManage = lazy(() => import('@pages/platform/TenantManage'));
 
 function RouteFallback() {
   return (
@@ -46,7 +49,7 @@ function RouteFallback() {
 
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, user } = useAuthStore();
 
   if (isLoading) {
     return (
@@ -60,18 +63,28 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
+  // Force password reset before accessing any protected route
+  if (user?.mustResetPassword) {
+    return <Navigate to="/force-reset-password" replace />;
+  }
+
   return <>{children}</>;
 }
 
 // Public Route Component (redirect to dashboard if authenticated)
 function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, user } = useAuthStore();
 
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={getFallbackPathForRole(user?.role)} replace />;
   }
 
   return <>{children}</>;
+}
+
+function HomeRoute() {
+  const role = useAuthStore((s) => s.user?.role);
+  return <Navigate to={getFallbackPathForRole(role)} replace />;
 }
 
 function RoleAwareRoute({
@@ -85,6 +98,9 @@ function RoleAwareRoute({
 }) {
   const role = useAuthStore((s) => s.user?.role);
 
+  // SUPER_ADMIN is never blocked
+  if (isSuperAdmin(role)) return <>{children}</>;
+
   const blocked =
     (restrictForecastViewer && isForecastViewerRole(role)) ||
     (restrictManufacturing && isManufacturingBlockedRole(role));
@@ -93,6 +109,22 @@ function RoleAwareRoute({
     return <Navigate to={getFallbackPathForRole(role)} replace />;
   }
 
+  return <>{children}</>;
+}
+
+function SuperAdminRoute({ children }: { children: React.ReactNode }) {
+  const role = useAuthStore((s) => s.user?.role);
+  if (!isSuperAdmin(role)) {
+    return <Navigate to={getFallbackPathForRole(role)} replace />;
+  }
+  return <>{children}</>;
+}
+
+function TenantOnlyRoute({ children }: { children: React.ReactNode }) {
+  const role = useAuthStore((s) => s.user?.role);
+  if (isSuperAdmin(role)) {
+    return <Navigate to="/platform" replace />;
+  }
   return <>{children}</>;
 }
 
@@ -108,14 +140,6 @@ export default function App() {
           element={
             <PublicRoute>
               <Login />
-            </PublicRoute>
-          }
-        />
-        <Route
-          path="/register"
-          element={
-            <PublicRoute>
-              <Register />
             </PublicRoute>
           }
         />
@@ -137,15 +161,20 @@ export default function App() {
         />
       </Route>
 
+      {/* Force password reset — authenticated but must change password */}
+      <Route path="/force-reset-password" element={<ForceResetPassword />} />
+
       {/* Protected routes */}
       <Route
         element={
           <ProtectedRoute>
-            <MainLayout />
+            <TenantOnlyRoute>
+              <MainLayout />
+            </TenantOnlyRoute>
           </ProtectedRoute>
         }
       >
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<HomeRoute />} />
         <Route path="/dashboard" element={<Dashboard />} />
 
         {/* Plans */}
@@ -174,6 +203,7 @@ export default function App() {
         {/* Settings */}
         <Route path="/settings" element={<RoleAwareRoute restrictForecastViewer><Settings /></RoleAwareRoute>} />
         <Route path="/settings/users" element={<RoleAwareRoute restrictForecastViewer><Users /></RoleAwareRoute>} />
+        <Route path="/settings/roles" element={<RoleAwareRoute restrictForecastViewer><Roles /></RoleAwareRoute>} />
         <Route path="/settings/marg-ede" element={<RoleAwareRoute restrictForecastViewer><MargEde /></RoleAwareRoute>} />
         <Route path="/settings/profile" element={<Profile />} />
         <Route path="/settings/audit-log" element={<RoleAwareRoute restrictForecastViewer><AuditLog /></RoleAwareRoute>} />
@@ -181,6 +211,19 @@ export default function App() {
 
         {/* Manufacturing */}
         <Route path="/manufacturing/*" element={<RoleAwareRoute restrictManufacturing><ManufacturingRoutes /></RoleAwareRoute>} />
+      </Route>
+
+      <Route
+        element={
+          <ProtectedRoute>
+            <SuperAdminRoute>
+              <MainLayout />
+            </SuperAdminRoute>
+          </ProtectedRoute>
+        }
+      >
+        <Route path="/platform" element={<PlatformDashboard />} />
+        <Route path="/platform/tenants/:id" element={<TenantManage />} />
       </Route>
 
       {/* 404 */}

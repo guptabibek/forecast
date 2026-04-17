@@ -15,7 +15,7 @@ describe('PrismaService tenant scoping middleware', () => {
       return this;
     });
 
-    const service = new PrismaService({ get: jest.fn(() => 'tenant-1') } as any);
+    const service = new PrismaService({ isActive: jest.fn(() => true), get: jest.fn(() => 'tenant-1') } as any);
     expect(service).toBeDefined();
     expect(middleware).toBeDefined();
 
@@ -42,7 +42,7 @@ describe('PrismaService tenant scoping middleware', () => {
       return this;
     });
 
-    new PrismaService({ get: jest.fn(() => 'tenant-1') } as any);
+    new PrismaService({ isActive: jest.fn(() => true), get: jest.fn(() => 'tenant-1') } as any);
 
     const next = jest.fn(async (params: any) => params);
     const result = await middleware!(
@@ -73,7 +73,7 @@ describe('PrismaService tenant scoping middleware', () => {
       return this;
     });
 
-    new PrismaService({ get: jest.fn(() => 'tenant-1') } as any);
+    new PrismaService({ isActive: jest.fn(() => true), get: jest.fn(() => 'tenant-1') } as any);
 
     const params = {
       model: 'Tenant',
@@ -95,7 +95,7 @@ describe('PrismaService tenant scoping middleware', () => {
       return this;
     });
 
-    new PrismaService({ get: jest.fn(() => undefined) } as any);
+    new PrismaService({ isActive: jest.fn(() => true), get: jest.fn(() => undefined) } as any);
 
     const params = {
       model: 'User',

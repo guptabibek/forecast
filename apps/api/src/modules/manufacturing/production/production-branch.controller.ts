@@ -13,6 +13,7 @@ import {
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
+import { RequireModule } from '../../platform/require-module.decorator';
 import {
     CreateDowntimeReasonDto,
     CreateDowntimeRecordDto,
@@ -28,6 +29,7 @@ import { ProductionBranchService } from './production-branch.service';
 
 @Controller({ path: 'manufacturing/production', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequireModule('manufacturing')
 export class ProductionBranchController {
   constructor(private readonly productionService: ProductionBranchService) {}
 

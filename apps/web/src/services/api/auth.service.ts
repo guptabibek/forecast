@@ -1,4 +1,4 @@
-import type { AuthTokens, LoginRequest, RegisterRequest, User } from '@/types';
+import type { AuthTokens, LoginRequest, User } from '@/types';
 import { api } from './client';
 
 interface AuthResponse extends AuthTokens {
@@ -20,16 +20,6 @@ export const authService = {
   login: (data: LoginRequest): Promise<AuthResponse> =>
     api.post<AuthResponse>('/auth/login', data),
 
-  register: (data: RegisterRequest): Promise<AuthResponse> =>
-    api.post<AuthResponse>('/auth/register', {
-      tenantName: data.tenantName,
-      email: data.email,
-      password: data.password,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      tenantSlug: data.tenantSubdomain,
-    }),
-
   logout: (): Promise<void> =>
     api.post('/auth/logout'),
 
@@ -46,8 +36,11 @@ export const authService = {
   forgotPassword: (email: string): Promise<void> =>
     api.post('/auth/forgot-password', { email }),
 
-  resetPassword: (data: { token: string; password: string }): Promise<void> =>
+  resetPassword: (data: { email: string; otp: string; password: string }): Promise<void> =>
     api.post('/auth/reset-password', data),
+
+  forceResetPassword: (newPassword: string): Promise<void> =>
+    api.post('/auth/force-reset-password', { newPassword }),
 
   revokeSession: (sessionId: string): Promise<void> =>
     api.delete(`/auth/sessions/${sessionId}`),

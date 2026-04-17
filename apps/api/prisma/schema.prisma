@@ -16,6 +16,8 @@ model Tenant {
   domain               String?              @unique @db.VarChar(255)
   subdomain            String?              @unique @db.VarChar(100)
   status               TenantStatus         @default(ACTIVE)
+  licenseStatus        TenantLicenseStatus  @default(ACTIVE) @map("license_status")
+  licenseExpiresAt     DateTime?            @map("license_expires_at")
   tier                 TenantTier           @default(STARTER)
   settings             Json                 @default("{}")
   logoUrl              String?              @db.VarChar(500)
@@ -41,6 +43,7 @@ model Tenant {
   passwordResetTokens  PasswordResetToken[]
   planVersions         PlanVersion[]
   products             Product[]
+  refreshTokens        RefreshToken[]
   reports              Report[]
   scenarios            Scenario[]
   users                User[]
@@ -49,6 +52,8 @@ model Tenant {
   productBrands        ProductBrand[]       @relation("TenantProductBrands")
   productSubcategories ProductSubcategory[] @relation("TenantProductSubcategories")
   channels             Channel[]            @relation("TenantChannels")
+  tenantModules        TenantModule[]
+  tenantRoles          TenantRole[]
 
   @@map("tenants")
 }
@@ -99,6 +104,7 @@ model User {
   lockedUntil                     DateTime?                @map("locked_until")
   mfaEnabled                      Boolean                  @default(false) @map("mfa_enabled")
   mfaSecret                       String?                  @map("mfa_secret") @db.VarChar(255)
+  mustResetPassword                Boolean                  @default(false) @map("must_reset_password")
   createdAt                       DateTime                 @default(now()) @map("created_at")
   updatedAt                       DateTime                 @updatedAt @map("updated_at")
   auditLogs                       AuditLog[]
@@ -141,9 +147,12 @@ model User {
   sopCyclesSupplyManaged          SOPCycle[]               @relation("SOPSupplyManager")
   sopCyclesFinanceManaged         SOPCycle[]               @relation("SOPFinanceManager")
   sopCyclesExecutiveSponsored     SOPCycle[]               @relation("SOPExecutiveSponsor")
+  customRoleId                    String?                  @map("custom_role_id") @db.Uuid
+  customRole                      TenantRole?              @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, email])
   @@index([tenantId])
+  @@index([tenantId, createdAt])
   @@index([email])
   @@map("users")
 }
@@ -166,6 +175,7 @@ model PasswordResetToken {
 
 model RefreshToken {
   id        String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
   userId    String    @map("user_id") @db.Uuid
   token     String    @unique @db.VarChar(500)
   expiresAt DateTime  @map("expires_at")
@@ -173,8 +183,10 @@ model RefreshToken {
   revokedAt DateTime? @map("revoked_at")
   userAgent String?   @map("user_agent") @db.VarChar(500)
   ipAddress String?   @map("ip_address") @db.VarChar(45)
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@index([userId])
   @@index([token])
   @@map("refresh_tokens")
@@ -614,6 +626,7 @@ model DataImport {
 
   @@index([tenantId])
   @@index([tenantId, status])
+  @@index([tenantId, createdAt])
   @@map("data_imports")
 }
 
@@ -720,6 +733,7 @@ model ForecastRun {
   @@index([tenantId, planVersionId, scenarioId])
   @@index([tenantId, status])
   @@index([tenantId, startPeriod, endPeriod])
+  @@index([tenantId, createdAt])
   @@map("forecast_runs")
 }
 
@@ -791,6 +805,7 @@ model ForecastOverride {
 
   @@index([tenantId, forecastRunId, periodDate])
   @@index([tenantId, status])
+  @@index([tenantId, forecastRunId, status])
   @@map("forecast_overrides")
 }
 
@@ -1173,7 +1188,7 @@ model InventoryLevel {
 
   @@unique([tenantId, productId, locationId])
   @@index([tenantId])
-  @@index([productId])
+  @@index([tenantId, locationId])
   @@map("inventory_levels")
 }
 
@@ -1253,8 +1268,8 @@ model PlannedOrder {
   supplier         Supplier?          @relation(fields: [supplierId], references: [id])
 
   @@index([tenantId])
-  @@index([productId])
-  @@index([status])
+  @@index([tenantId, productId])
+  @@index([tenantId, status])
   @@map("planned_orders")
 }
 
@@ -1719,8 +1734,8 @@ model PurchaseOrder {
 
   @@unique([tenantId, orderNumber])
   @@index([tenantId])
-  @@index([supplierId])
-  @@index([status])
+  @@index([tenantId, status])
+  @@index([tenantId, supplierId])
   @@map("purchase_orders")
 }
 
@@ -1826,8 +1841,9 @@ model WorkOrder {
 
   @@unique([tenantId, orderNumber])
   @@index([tenantId])
-  @@index([productId])
-  @@index([status])
+  @@index([tenantId, status])
+  @@index([tenantId, productId])
+  @@index([tenantId, locationId])
   @@map("work_orders")
 }
 
@@ -1957,9 +1973,9 @@ model InventoryTransaction {
   createdBy       User                     @relation("ITCreatedBy", fields: [createdById], references: [id])
 
   @@index([tenantId])
-  @@index([productId])
-  @@index([transactionType])
-  @@index([transactionDate])
+  @@index([tenantId, transactionDate])
+  @@index([tenantId, transactionType])
+  @@index([tenantId, productId, transactionDate])
   @@map("inventory_transactions")
 }
 
@@ -1994,6 +2010,11 @@ enum TenantStatus {
   CANCELLED
 }
 
+enum TenantLicenseStatus {
+  ACTIVE
+  SUSPENDED
+}
+
 enum TenantTier {
   STARTER
   PROFESSIONAL
@@ -2001,6 +2022,7 @@ enum TenantTier {
 }
 
 enum UserRole {
+  SUPER_ADMIN
   ADMIN
   PLANNER
   FORECAST_PLANNER
@@ -2464,6 +2486,8 @@ model MargSyncLog {
   transactionsSynced Int           @default(0) @map("transactions_synced")
   stockSynced      Int             @default(0) @map("stock_synced")
   branchesSynced   Int             @default(0) @map("branches_synced")
+  vouchersSynced   Int             @default(0) @map("vouchers_synced")
+  saleTypesSynced  Int             @default(0) @map("sale_types_synced")
   errors           Json            @default("[]")
   syncIndex        Int?            @map("sync_index")
   syncDatetime     String?         @map("sync_datetime") @db.VarChar(50)
@@ -2481,6 +2505,7 @@ model MargBranch {
   tenantId    String   @map("tenant_id") @db.Uuid
   margId      Int      @map("marg_id")
   companyId   Int      @map("company_id")
+  code        String?  @db.VarChar(20)
   name        String   @db.VarChar(255)
   storeId     String?  @map("store_id") @db.VarChar(50)
   licence     String?  @db.VarChar(50)
@@ -2513,7 +2538,7 @@ model MargProduct {
   gCode6      String?  @map("g_code6") @db.VarChar(20)
   gst         Decimal? @db.Decimal(5, 2)
   margCode    String?  @map("marg_code") @db.VarChar(50)
-  addField    String?  @map("add_field") @db.VarChar(255)
+  addField    String?  @map("add_field")
   productId   String?  @map("product_id") @db.Uuid
   rawData     Json?    @map("raw_data")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -2533,22 +2558,30 @@ model MargParty {
   companyId   Int      @map("company_id")
   cid         String   @db.VarChar(20)
   parName     String   @map("par_name") @db.VarChar(255)
+  parAddr     String?  @map("par_addr") @db.VarChar(255)
   parAdd1     String?  @map("par_add1") @db.VarChar(255)
   parAdd2     String?  @map("par_add2") @db.VarChar(255)
-  gstnNo      String?  @map("gstn_no") @db.VarChar(50)
+  gstNo       String?  @map("gst_no") @db.VarChar(50)
   phone1      String?  @db.VarChar(20)
   phone2      String?  @db.VarChar(20)
   phone3      String?  @db.VarChar(20)
   phone4      String?  @db.VarChar(20)
   route       String?  @db.VarChar(20)
   area        String?  @db.VarChar(20)
+  mr          String?  @db.VarChar(20)
   sCode       String?  @map("s_code") @db.VarChar(20)
+  rate        String?  @db.VarChar(10)
   credit      Int?
   crDays      Int?     @map("cr_days")
   crBills     Int?     @map("cr_bills")
+  crStatus    String?  @map("cr_status") @db.VarChar(10)
+  margCode    String?  @map("marg_code") @db.VarChar(50)
+  addField    String?  @map("add_field")
+  dlNo        String?  @map("dl_no") @db.VarChar(255)
   pin         String?  @db.VarChar(20)
   lat         String?  @db.VarChar(50)
   lng         String?  @db.VarChar(50)
+  isDeleted   Boolean  @default(false) @map("is_deleted")
   customerId  String?  @map("customer_id") @db.Uuid
   rawData     Json?    @map("raw_data")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -2564,7 +2597,7 @@ model MargParty {
 model MargTransaction {
   id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
-  margId      Int      @map("marg_id")
+  margId      BigInt   @map("marg_id")
   companyId   Int      @map("company_id")
   sourceKey   String   @map("source_key") @db.VarChar(255)
   voucher     String   @db.VarChar(50)
@@ -2575,6 +2608,7 @@ model MargTransaction {
   pid         String?  @db.VarChar(20)
   gCode       String?  @map("g_code") @db.VarChar(20)
   batch       String?  @db.VarChar(50)
+  batDet      String?  @map("bat_det") @db.VarChar(50)
   qty         Decimal? @db.Decimal(18, 4)
   free        Decimal? @db.Decimal(18, 4)
   mrp         Decimal? @db.Decimal(18, 4)
@@ -2583,7 +2617,7 @@ model MargTransaction {
   amount      Decimal? @db.Decimal(18, 4)
   gst         Decimal? @db.Decimal(5, 2)
   gstAmount   Decimal? @map("gst_amount") @db.Decimal(18, 4)
-  addFields   String?  @map("add_fields")
+  addField    String?  @map("add_field")
   actualId    String?  @map("actual_id") @db.Uuid
   rawData     Json?    @map("raw_data")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -2593,6 +2627,57 @@ model MargTransaction {
   @@index([tenantId, date])
   @@index([actualId])
   @@map("marg_transactions")
+}
+
+/// Staged Marg voucher headers (MDis = master distribution records)
+model MargVoucher {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      BigInt   @map("marg_id")
+  companyId   Int      @map("company_id")
+  voucher     String   @db.VarChar(50)
+  type        String   @db.VarChar(10)
+  vcn         String?  @db.VarChar(50)
+  date        DateTime @db.Date
+  cid         String?  @db.VarChar(20)
+  finalAmt    Decimal? @map("final_amt") @db.Decimal(18, 4)
+  cash        Decimal? @db.Decimal(18, 4)
+  others      Decimal? @db.Decimal(18, 4)
+  salesman    String?  @db.VarChar(100)
+  mr          String?  @db.VarChar(100)
+  route       String?  @db.VarChar(100)
+  area        String?  @db.VarChar(100)
+  orn         String?  @db.VarChar(100)
+  addField    String?  @map("add_field")
+  oDate       DateTime? @map("o_date") @db.Date
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, voucher, type])
+  @@index([tenantId, date])
+  @@map("marg_vouchers")
+}
+
+/// Staged Marg sale type / classification masters
+model MargSaleType {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      Int      @map("marg_id")
+  companyId   Int      @map("company_id")
+  sgCode      String   @map("sg_code") @db.VarChar(50)
+  sCode       String   @map("s_code") @db.VarChar(50)
+  name        String   @db.VarChar(255)
+  main        String?  @db.VarChar(100)
+  margCode    String?  @map("marg_code") @db.VarChar(50)
+  addField    String?  @map("add_field")
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, sgCode, sCode])
+  @@index([tenantId])
+  @@map("marg_sale_types")
 }
 
 /// Staged Marg stock/inventory data
@@ -2619,6 +2704,7 @@ model MargStock {
   rateA       Decimal? @map("rate_a") @db.Decimal(18, 4)
   rateB       Decimal? @map("rate_b") @db.Decimal(18, 4)
   rateC       Decimal? @map("rate_c") @db.Decimal(18, 4)
+  addField    String?  @map("add_field")
   rawData     Json?    @map("raw_data")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -2795,6 +2881,7 @@ model QualityInspection {
   @@index([tenantId, status])
   @@index([tenantId, workOrderId])
   @@index([tenantId, purchaseOrderId])
+  @@index([tenantId, createdAt])
   @@map("quality_inspections")
 }
 
@@ -3176,9 +3263,9 @@ model Batch {
 
   @@unique([tenantId, batchNumber])
   @@index([tenantId])
-  @@index([productId])
-  @@index([status])
-  @@index([expiryDate])
+  @@index([tenantId, productId])
+  @@index([tenantId, status])
+  @@index([tenantId, expiryDate])
   @@map("batches")
 }
 
@@ -3215,9 +3302,9 @@ model InventoryReservation {
 
   @@unique([tenantId, reservationNumber])
   @@index([tenantId])
-  @@index([productId, locationId])
+  @@index([tenantId, productId, locationId])
   @@index([referenceType, referenceId])
-  @@index([status])
+  @@index([tenantId, status])
   @@map("inventory_reservations")
 }
 
@@ -3251,8 +3338,8 @@ model InventoryHold {
 
   @@unique([tenantId, holdNumber])
   @@index([tenantId])
-  @@index([productId, locationId])
-  @@index([status])
+  @@index([tenantId, productId, locationId])
+  @@index([tenantId, status])
   @@index([inspectionId])
   @@map("inventory_holds")
 }
@@ -3407,6 +3494,7 @@ model JournalEntry {
   @@index([fiscalPeriodId])
   @@index([referenceType, referenceId])
   @@index([tenantId, entryDate])
+  @@index([tenantId, createdAt])
   @@map("journal_entries")
 }
 
@@ -3487,7 +3575,7 @@ model InventoryLedger {
   journalEntry    JournalEntry?   @relation("LedgerJournalEntry", fields: [journalEntryId], references: [id])
 
   @@index([tenantId])
-  @@index([productId, locationId])
+  @@index([tenantId, productId, locationId])
   @@index([batchId])
   @@index([tenantId, transactionDate])
   @@index([referenceType, referenceId])
@@ -3675,8 +3763,9 @@ model NonConformanceReport {
   @@unique([tenantId, ncrNumber])
   @@index([tenantId])
   @@index([tenantId, status])
-  @@index([productId])
+  @@index([tenantId, productId])
   @@index([inspectionId])
+  @@index([tenantId, createdAt])
   @@map("non_conformance_reports")
 }
 
@@ -3714,6 +3803,7 @@ model CorrectiveAction {
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([ncrId])
+  @@index([tenantId, createdAt])
   @@map("corrective_actions")
 }
 
@@ -4203,6 +4293,46 @@ model DowntimeRecord {
   @@index([tenantId, productionLineId])
   @@index([tenantId, startTime])
   @@map("downtime_records")
+}
+
+/// Tracks which modules/features are enabled per tenant.
+/// Super-admin configures these to control what each tenant can access.
+model TenantModule {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  module    String   @db.VarChar(50)
+  enabled   Boolean  @default(true)
+  config    Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, module])
+  @@index([tenantId])
+  @@map("tenant_modules")
+}
+
+/// Dynamic RBAC: tenant-scoped roles with module access + action permissions.
+model TenantRole {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  name         String   @db.VarChar(100)
+  slug         String   @db.VarChar(100)
+  description  String?  @db.VarChar(500)
+  /// JSON map of module keys to boolean (e.g. {planning: true, manufacturing: false})
+  moduleAccess Json     @default("{}") @map("module_access")
+  /// JSON array of permission strings (e.g. ["plan:create","plan:edit","forecast:read"])
+  permissions  Json     @default("[]") @map("permissions")
+  isSystem     Boolean  @default(false) @map("is_system")
+  isDefault    Boolean  @default(false) @map("is_default")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users        User[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@map("tenant_roles")
 }
 
 /// Master list of scrap reason codes

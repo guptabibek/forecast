@@ -23,7 +23,6 @@ const apiClient: AxiosInstance = axios.create({
 
 const AUTH_PATHS = [
   '/auth/login',
-  '/auth/register',
   '/auth/refresh',
   '/auth/logout',
   '/auth/forgot-password',
@@ -132,10 +131,10 @@ apiClient.interceptors.response.use(
         const currentPath = window.location.pathname;
         useAuthStore.getState().logout();
         // Do not redirect away from public auth pages – those pages are
-        // intentionally accessible without a session (register, forgot-password,
-        // reset-password).  Only redirect to /login when the user is on a
+        // intentionally accessible without a session (forgot-password,
+        // reset-password). Only redirect to /login when the user is on a
         // protected route.
-        const publicAuthPaths = ['/login', '/register', '/forgot-password', '/reset-password'];
+        const publicAuthPaths = ['/login', '/forgot-password', '/reset-password'];
         const isPublicPath = publicAuthPaths.some((p) => currentPath.startsWith(p));
         if (!isPublicPath) {
           window.location.href = '/login';

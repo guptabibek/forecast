@@ -13,14 +13,6 @@ interface AuthState {
 
   // Actions
   login: (email: string, password: string) => Promise<void>;
-  register: (data: {
-    email: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-    tenantName: string;
-    tenantSubdomain: string;
-  }) => Promise<void>;
   logout: () => Promise<void>;
   refreshToken: () => Promise<void>;
   updateUser: (user: Partial<User>) => void;
@@ -67,28 +59,6 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      register: async (data) => {
-        set({ isLoading: true, error: null });
-        try {
-          const response = await authService.register(data);
-          set({
-            user: response.user,
-            tokens: {
-              accessToken: response.accessToken,
-              expiresIn: response.expiresIn,
-            },
-            isAuthenticated: true,
-            isLoading: false,
-          });
-        } catch (error: unknown) {
-          set({
-            error: getApiErrorMessage(error, 'Registration failed'),
-            isLoading: false,
-          });
-          throw error;
-        }
-      },
-
       logout: async () => {
         try {
           await authService.logout();
@@ -112,12 +82,19 @@ export const useAuthStore = create<AuthState>()(
         refreshInFlight = (async () => {
           try {
             const response = await authService.refreshToken();
-            set({
+            const partial: Partial<AuthState> = {
               tokens: {
                 accessToken: response.accessToken,
                 expiresIn: response.expiresIn,
               },
-            });
+            };
+            // Populate user from refresh response so reload doesn't flash to login
+            const u = (response as unknown as Record<string, unknown>).user;
+            if (u && typeof u === 'object' && 'id' in u) {
+              partial.user = u as User;
+              partial.isAuthenticated = true;
+            }
+            set(partial);
           } catch (error) {
             // Refresh failed, log out
             set({

@@ -1,5 +1,9 @@
 -- Ensure uuid_generate_v4() is available for UUID defaults.
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'uuid-ossp extension already exists or requires superuser — skipping';
+END $$;
 
 -- CreateEnum: CostingMethod
 DO $$ BEGIN

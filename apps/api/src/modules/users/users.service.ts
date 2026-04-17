@@ -59,8 +59,10 @@ export class UsersService {
           lastName: createUserDto.lastName,
           passwordHash: hashedPassword,
           role: createUserDto.role as UserRole,
+          ...(createUserDto.customRoleId ? { customRole: { connect: { id: createUserDto.customRoleId } } } : {}),
           tenant: { connect: { id: currentUser.tenantId } },
           status: UserStatus.PENDING,
+          mustResetPassword: true,
         },
         select: {
           id: true,
@@ -178,6 +180,13 @@ export class UsersService {
     if (updateUserDto.lastName) updateData.lastName = updateUserDto.lastName;
     if (updateUserDto.role) updateData.role = updateUserDto.role as UserRole;
     if (updateUserDto.avatarUrl !== undefined) updateData.avatarUrl = updateUserDto.avatarUrl;
+    if ('customRoleId' in updateUserDto) {
+      if (updateUserDto.customRoleId) {
+        updateData.customRole = { connect: { id: updateUserDto.customRoleId } };
+      } else {
+        updateData.customRole = { disconnect: true };
+      }
+    }
 
     return this.prisma.user.update({
       where: { id },

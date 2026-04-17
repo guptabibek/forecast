@@ -9,51 +9,6 @@ import {
     MinLength,
 } from 'class-validator';
 
-export class RegisterDto {
-  @ApiProperty({ example: 'Acme Inc' })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(255)
-  tenantName: string;
-
-  @ApiProperty({ example: 'acme' })
-  @IsString()
-  @IsNotEmpty()
-  @Matches(/^[a-z0-9-]+$/, {
-    message: 'Tenant slug can only contain lowercase letters, numbers, and hyphens',
-  })
-  tenantSlug: string;
-
-  @ApiProperty({ example: 'user@example.com' })
-  @IsEmail()
-  email: string;
-
-  @ApiProperty({ example: 'SecurePass123!' })
-  @IsString()
-  @MinLength(8)
-  @MaxLength(100)
-  @Matches(
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
-    {
-      message:
-        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
-    },
-  )
-  password: string;
-
-  @ApiProperty({ example: 'John' })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(100)
-  firstName: string;
-
-  @ApiProperty({ example: 'Doe' })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(100)
-  lastName: string;
-}
-
 export class LoginDto {
 
   @ApiProperty({ example: 'user@example.com' })
@@ -66,7 +21,7 @@ export class LoginDto {
   password: string;
 
   // Optionally sent by client, otherwise auto-detected by controller
-  @ApiPropertyOptional({ example: 'demo' })
+  @ApiPropertyOptional({ example: 'acme' })
   @IsOptional()
   @IsString()
   tenantSlug?: string;
@@ -119,10 +74,19 @@ export class ForgotPasswordDto {
 }
 
 export class ResetPasswordDto {
-  @ApiProperty()
+  @ApiProperty({ example: 'user@example.com' })
+  @IsEmail()
+  email: string;
+
+  @ApiProperty({ example: '123456', description: '6-digit OTP sent via email' })
   @IsString()
   @IsNotEmpty()
-  token: string;
+  otp: string;
+
+  @ApiPropertyOptional({ example: 'acme' })
+  @IsOptional()
+  @IsString()
+  tenantSlug?: string;
 
   @ApiProperty()
   @IsString()
@@ -136,6 +100,21 @@ export class ResetPasswordDto {
     },
   )
   password: string;
+}
+
+export class ForceResetPasswordDto {
+  @ApiProperty()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  @Matches(
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
+    {
+      message:
+        'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
+    },
+  )
+  newPassword: string;
 }
 
 export class TokenResponse {
@@ -158,6 +137,11 @@ export class TokenResponse {
     firstName: string;
     lastName: string;
     role: string;
+    permissions?: string[];
+    moduleAccess?: Record<string, boolean>;
+    roleId?: string | null;
+    roleName?: string;
+    mustResetPassword?: boolean;
   };
 
   @ApiProperty()

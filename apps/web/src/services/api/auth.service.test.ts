@@ -20,28 +20,6 @@ describe('authService', () => {
     vi.clearAllMocks();
   });
 
-  it('maps tenantSubdomain to tenantSlug during registration', async () => {
-    post.mockResolvedValueOnce({ accessToken: 'token' });
-
-    await authService.register({
-      tenantName: 'Acme',
-      tenantSubdomain: 'acme',
-      email: 'admin@acme.com',
-      password: 'SecurePass123!',
-      firstName: 'Ada',
-      lastName: 'Lovelace',
-    });
-
-    expect(post).toHaveBeenCalledWith('/auth/register', {
-      tenantName: 'Acme',
-      email: 'admin@acme.com',
-      password: 'SecurePass123!',
-      firstName: 'Ada',
-      lastName: 'Lovelace',
-      tenantSlug: 'acme',
-    });
-  });
-
   it('calls refresh token endpoint without body', async () => {
     post.mockResolvedValueOnce({ accessToken: 'new-token', refreshToken: 'new-rt', expiresIn: 900, tokenType: 'Bearer' });
 

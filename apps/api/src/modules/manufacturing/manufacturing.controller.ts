@@ -18,6 +18,7 @@ import { PrismaService } from '../../core/database/prisma.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequireModule } from '../platform/require-module.decorator';
 import {
     AddBomComponentDto,
     AddWorkflowStepDto,
@@ -170,6 +171,7 @@ import { QualityService } from './services/quality.service';
 
 @Controller({ path: 'manufacturing', version: '1' })
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequireModule('manufacturing')
 export class ManufacturingController {
   constructor(
     private readonly manufacturingService: ManufacturingService,

@@ -2,6 +2,13 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { Prisma, PrismaClient } from '@prisma/client';
 import { ClsService } from 'nestjs-cls';
 
+/**
+ * The super-admin's synthetic tenant ID has no DB row.
+ * Skip automatic tenant-scoping when this is the active CLS tenant so that
+ * platform-level (cross-tenant) queries are not incorrectly filtered.
+ */
+const SA_SYNTHETIC_TENANT_ID = '00000000-0000-0000-0000-000000000000';
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
@@ -18,6 +25,28 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
         : ['error'],
     });
 
+    // Middleware: Set RLS session variable for every model query.
+    // IMPORTANT: Skip raw queries (`!params.model`) — `$queryRawUnsafe` called
+    // from within this middleware would re-trigger `$use`, creating infinite
+    // async recursion and eventual OOM.
+    this.$use(async (params, next) => {
+      if (!params.model) {
+        return next(params);
+      }
+      const tenantId = this.getTenantId();
+      if (tenantId && tenantId !== SA_SYNTHETIC_TENANT_ID) {
+        try {
+          // Use parameterized set_config() instead of string interpolation to prevent SQL injection
+          await this.$queryRawUnsafe(`SELECT set_config('app.current_tenant_id', $1, true)`, tenantId);
+        } catch {
+          // SET LOCAL only works inside a transaction; ignore for non-transactional queries
+          // RLS will fall back to permissive (current_tenant_id() returns NULL)
+        }
+      }
+      return next(params);
+    });
+
+    // Middleware: Auto-inject tenantId into all tenant-scoped queries
     this.$use(async (params, next) => {
       const modelName = params.model;
       if (!modelName || !this.tenantScopedModels.has(modelName)) {
@@ -25,7 +54,15 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       }
 
       const tenantId = this.getTenantId();
-      if (!tenantId) {
+      if (!tenantId || tenantId === SA_SYNTHETIC_TENANT_ID) {
+        // Strict mode: warn when tenant-scoped model is accessed without tenant context
+        // This catches accidental bypasses in background jobs or misconfigured routes
+        if (process.env.NODE_ENV !== 'test') {
+          this.logger.warn(
+            `Tenant-scoped model "${modelName}" accessed without tenant context (action: ${params.action}). ` +
+            `This query will run WITHOUT tenant filtering. Ensure CLS is initialized for background jobs.`,
+          );
+        }
         return next(params);
       }
 
@@ -115,7 +152,22 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
    * Get current tenant ID from context
    */
   getTenantId(): string | undefined {
-    return this.cls.get('tenantId');
+    try {
+      return this.cls.isActive() ? this.cls.get('tenantId') : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Set tenant context in CLS for background job processing.
+   * Call this at the start of queue processor handlers to enable
+   * automatic tenant scoping via Prisma middleware.
+   */
+  setTenantContext(tenantId: string): void {
+    if (this.cls.isActive()) {
+      this.cls.set('tenantId', tenantId);
+    }
   }
 
   /**
@@ -194,5 +246,16 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     callback: (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>) => Promise<T>,
   ): Promise<T> {
     return this.$transaction(callback);
+  }
+
+  /**
+   * Execute a callback within a CLS context scoped to a specific tenant.
+   * Use this in background job processors to enable automatic tenant filtering.
+   */
+  async executeInTenantContext<T>(tenantId: string, callback: () => Promise<T>): Promise<T> {
+    return this.cls.run(async () => {
+      this.cls.set('tenantId', tenantId);
+      return callback();
+    });
   }
 }

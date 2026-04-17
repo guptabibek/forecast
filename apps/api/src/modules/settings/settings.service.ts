@@ -182,14 +182,42 @@ export class SettingsService {
       compactMode: settings.compactMode ?? false,
       loginBgUrl: settings.loginBgUrl || null,
       customCss: settings.customCss || null,
-      // Module feature flags
-      enabledModules: {
-        planning: settings.enabledModules?.planning ?? true,
-        forecasting: settings.enabledModules?.forecasting ?? true,
-        manufacturing: settings.enabledModules?.manufacturing ?? true,
-        reports: settings.enabledModules?.reports ?? true,
-        data: settings.enabledModules?.data ?? true,
-      },
+      // Module feature flags – TenantModule rows (managed by SA) override
+      // the JSON-based enabledModules stored in tenant.settings.
+      enabledModules: await this.resolveEnabledModules(tenant.id, settings),
+    };
+  }
+
+  /**
+   * Resolve the canonical enabled-modules map for a tenant.
+   * TenantModule rows (set by SA) take precedence over the JSON settings column.
+   */
+  private async resolveEnabledModules(
+    tenantId: string,
+    settings: Record<string, any>,
+  ): Promise<Record<string, boolean>> {
+    const rows = await this.prisma.tenantModule.findMany({
+      where: { tenantId },
+      select: { module: true, enabled: true },
+    });
+
+    if (rows.length > 0) {
+      // SA-managed modules take precedence
+      const result: Record<string, boolean> = {};
+      for (const key of ['planning', 'forecasting', 'manufacturing', 'reports', 'data', 'marg-ede']) {
+        const row = rows.find((r) => r.module === key);
+        result[key] = row ? row.enabled : true;
+      }
+      return result;
+    }
+
+    // Fallback: legacy JSON settings
+    return {
+      planning: settings.enabledModules?.planning ?? true,
+      forecasting: settings.enabledModules?.forecasting ?? true,
+      manufacturing: settings.enabledModules?.manufacturing ?? true,
+      reports: settings.enabledModules?.reports ?? true,
+      data: settings.enabledModules?.data ?? true,
     };
   }
 

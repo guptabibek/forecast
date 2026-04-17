@@ -8,6 +8,7 @@ interface MargSyncJobData {
   configId: string;
   tenantId: string;
   triggeredBy?: string;
+  fromDate?: string;
 }
 
 @Processor(QUEUE_NAMES.MARG_SYNC)
@@ -19,11 +20,11 @@ export class MargSyncProcessor extends WorkerHost {
   }
 
   async process(job: Job<MargSyncJobData>): Promise<any> {
-    const { configId, tenantId, triggeredBy } = job.data;
-    this.logger.log(`Starting Marg EDE sync: configId=${configId}, tenantId=${tenantId}`);
+    const { configId, tenantId, triggeredBy, fromDate } = job.data;
+    this.logger.log(`Starting Marg EDE sync: configId=${configId}, tenantId=${tenantId}${fromDate ? `, fromDate=${fromDate}` : ''}`);
 
     try {
-      const syncLogId = await this.margEdeService.runSync(configId, tenantId, triggeredBy);
+      const syncLogId = await this.margEdeService.runSync(configId, tenantId, triggeredBy, fromDate);
       this.logger.log(`Marg EDE sync completed: syncLogId=${syncLogId}`);
       return { syncLogId, status: 'completed' };
     } catch (err) {

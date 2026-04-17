@@ -29,8 +29,9 @@ COPY --from=api-builder /workspace/apps/api/package*.json ./
 COPY --from=api-builder /workspace/apps/api/node_modules ./node_modules
 COPY --from=api-builder /workspace/apps/api/dist ./dist
 COPY --from=api-builder /workspace/apps/api/prisma ./prisma
+COPY scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
 
-RUN chown -R node:node /app
+RUN chmod +x /app/docker-entrypoint.sh && chown -R node:node /app
 
 USER node
 
@@ -39,7 +40,7 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3000/api/v1/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
-CMD ["node", "dist/main.js"]
+CMD ["/app/docker-entrypoint.sh"]
 
 ########################
 # Web build/runtime

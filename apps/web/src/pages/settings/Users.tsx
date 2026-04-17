@@ -1,4 +1,5 @@
-import type { User, UserRole } from '@/types';
+import { isSuperAdmin } from '@/permissions';
+import type { TenantRole, User, UserRole } from '@/types';
 import { Dialog, Listbox, Transition } from '@headlessui/react';
 import {
     ArrowPathIcon,
@@ -15,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { userService } from '@services/api';
+import { rolesService } from '@services/api/roles.service';
 import { useAuthStore } from '@stores/auth.store';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -25,6 +27,11 @@ import toast from 'react-hot-toast';
 import { z } from 'zod';
 
 const roles: { value: UserRole; label: string; description: string }[] = [
+  {
+    value: 'SUPER_ADMIN',
+    label: 'Super Admin',
+    description: 'Platform-level admin — manages all tenants and modules',
+  },
   {
     value: 'ADMIN',
     label: 'Admin',
@@ -57,14 +64,20 @@ const roles: { value: UserRole; label: string; description: string }[] = [
   },
 ];
 
+const adminRole = roles.find((role) => role.value === 'ADMIN')!;
+const superAdminRole = roles.find((role) => role.value === 'SUPER_ADMIN')!;
+
 const userSchema = z.object({
   email: z.string().email('Invalid email address'),
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
-  role: z.enum(['ADMIN', 'PLANNER', 'FORECAST_PLANNER', 'FINANCE', 'VIEWER', 'FORECAST_VIEWER']),
 });
 
 type UserFormData = z.infer<typeof userSchema>;
+type UserMutationPayload = UserFormData & {
+  role: UserRole;
+  customRoleId?: string | null;
+};
 
 export default function Users() {
   const queryClient = useQueryClient();
@@ -79,7 +92,21 @@ export default function Users() {
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [selectedRole, setSelectedRole] = useState(roles[1]);
+  const [selectedRole, setSelectedRole] = useState(adminRole);
+  const [selectedCustomRole, setSelectedCustomRole] = useState<TenantRole | null>(null);
+  const [customRoleTouched, setCustomRoleTouched] = useState(false);
+
+  // Only the admin system role is tenant-assignable. Super admins can still assign the platform role.
+  const visibleRoles = isSuperAdmin(currentUser?.role)
+    ? roles.filter((role) => role.value === 'SUPER_ADMIN' || role.value === 'ADMIN')
+    : roles.filter((role) => role.value === 'ADMIN');
+
+  // Fetch tenant roles for the custom role picker
+  const { data: tenantRolesData } = useQuery({
+    queryKey: ['roles'],
+    queryFn: () => rolesService.listRoles(),
+  });
+  const tenantRoles = tenantRolesData?.data ?? [];
 
   // Fetch users
   const { data: users, isLoading } = useQuery({
@@ -89,7 +116,7 @@ export default function Users() {
 
   // Create/Invite user mutation
   const createMutation = useMutation({
-    mutationFn: (data: UserFormData) => userService.invite(data),
+    mutationFn: (data: UserMutationPayload) => userService.invite(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
       toast.success('User invited successfully');
@@ -102,7 +129,7 @@ export default function Users() {
 
   // Update user mutation
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<UserFormData> }) => userService.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: Partial<UserMutationPayload> }) => userService.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
       toast.success('User updated successfully');
@@ -144,7 +171,9 @@ export default function Users() {
   } = useForm<UserFormData>({
     resolver: zodResolver(userSchema),
     defaultValues: {
-      role: 'PLANNER',
+      email: '',
+      firstName: '',
+      lastName: '',
     },
   });
 
@@ -155,32 +184,58 @@ export default function Users() {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
-        role: user.role,
       });
-      setSelectedRole(roles.find((r) => r.value === user.role) || roles[1]);
+      setSelectedRole(
+        user.role === 'SUPER_ADMIN' && isSuperAdmin(currentUser?.role)
+          ? superAdminRole
+          : adminRole,
+      );
+      setSelectedCustomRole(
+        user.roleId ? tenantRoles.find((tenantRole) => tenantRole.id === user.roleId) ?? null : null,
+      );
     } else {
       setEditingUser(null);
       reset({
         email: '',
         firstName: '',
         lastName: '',
-        role: 'PLANNER',
       });
-      setSelectedRole(roles[1]);
+      setSelectedRole(adminRole);
+      setSelectedCustomRole(null);
     }
+    setCustomRoleTouched(false);
     setIsModalOpen(true);
   };
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingUser(null);
-    reset();
+    setSelectedRole(adminRole);
+    setSelectedCustomRole(null);
+    setCustomRoleTouched(false);
+    reset({
+      email: '',
+      firstName: '',
+      lastName: '',
+    });
   };
 
   const onSubmit = (data: UserFormData) => {
-    const submitData = {
+    const preserveHiddenLegacyRole =
+      !!editingUser &&
+      editingUser.role !== 'ADMIN' &&
+      editingUser.role !== 'SUPER_ADMIN';
+
+    const submitData: UserMutationPayload = {
       ...data,
-      role: selectedRole.value,
+      role: preserveHiddenLegacyRole ? editingUser.role : selectedRole.value,
+      ...(editingUser
+        ? customRoleTouched
+          ? { customRoleId: selectedCustomRole?.id ?? null }
+          : {}
+        : selectedCustomRole
+          ? { customRoleId: selectedCustomRole.id }
+          : {}),
     };
 
     if (editingUser) {
@@ -237,7 +292,7 @@ export default function Users() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {roles.map((role) => {
+        {visibleRoles.map((role) => {
           const count = users?.filter((u) => u.role === role.value).length || 0;
           return (
             <div key={role.value} className="card p-4">
@@ -433,55 +488,135 @@ export default function Users() {
                     </div>
 
                     <div>
-                      <label className="label">Role</label>
-                      <Listbox value={selectedRole} onChange={setSelectedRole}>
-                        <div className="relative">
-                          <Listbox.Button className="input w-full text-left flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <ShieldCheckIcon className="w-5 h-5 text-secondary-400" />
-                              <span>{selectedRole.label}</span>
-                            </div>
-                            <ChevronUpDownIcon className="w-5 h-5 text-secondary-400" />
-                          </Listbox.Button>
-                          <Transition
-                            as={Fragment}
-                            leave="transition ease-in duration-100"
-                            leaveFrom="opacity-100"
-                            leaveTo="opacity-0"
-                          >
-                            <Listbox.Options className="absolute z-10 mt-1 w-full bg-white dark:bg-secondary-700 rounded-lg shadow-lg border border-secondary-200 dark:border-secondary-600 max-h-60 overflow-auto">
-                              {roles.map((role) => (
+                      <label className="label">System Role</label>
+                      <p className="text-xs text-secondary-500 mb-2">
+                        Non-admin access should be assigned through a permission role. Tenant users keep the admin system role.
+                      </p>
+                      {visibleRoles.length === 1 ? (
+                        <div className="input w-full flex items-center gap-2 text-left">
+                          <ShieldCheckIcon className="w-5 h-5 text-secondary-400" />
+                          <span>{selectedRole.label}</span>
+                        </div>
+                      ) : (
+                        <Listbox value={selectedRole} onChange={setSelectedRole}>
+                          <div className="relative">
+                            <Listbox.Button className="input w-full text-left flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <ShieldCheckIcon className="w-5 h-5 text-secondary-400" />
+                                <span>{selectedRole.label}</span>
+                              </div>
+                              <ChevronUpDownIcon className="w-5 h-5 text-secondary-400" />
+                            </Listbox.Button>
+                            <Transition
+                              as={Fragment}
+                              leave="transition ease-in duration-100"
+                              leaveFrom="opacity-100"
+                              leaveTo="opacity-0"
+                            >
+                              <Listbox.Options className="absolute z-10 mt-1 w-full bg-white dark:bg-secondary-700 rounded-lg shadow-lg border border-secondary-200 dark:border-secondary-600 max-h-60 overflow-auto">
+                                {visibleRoles.map((role) => (
+                                  <Listbox.Option
+                                    key={role.value}
+                                    value={role}
+                                    className={({ active }) =>
+                                      clsx(
+                                        'px-4 py-3 cursor-pointer',
+                                        active &&
+                                          'bg-primary-50 dark:bg-primary-900/30',
+                                      )
+                                    }
+                                  >
+                                    {({ selected }) => (
+                                      <div className="flex items-center justify-between">
+                                        <div>
+                                          <p className="font-medium">{role.label}</p>
+                                          <p className="text-sm text-secondary-500">
+                                            {role.description}
+                                          </p>
+                                        </div>
+                                        {selected && (
+                                          <CheckIcon className="w-5 h-5 text-primary-500" />
+                                        )}
+                                      </div>
+                                    )}
+                                  </Listbox.Option>
+                                ))}
+                              </Listbox.Options>
+                            </Transition>
+                          </div>
+                        </Listbox>
+                      )}
+                    </div>
+
+                    {/* Dynamic role assignment for tenant-level RBAC */}
+                    {tenantRoles.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1">
+                          Permission Role <span className="text-xs text-secondary-400">(optional)</span>
+                        </label>
+                        <p className="text-xs text-secondary-500 mb-2">
+                          Use a tenant permission role for non-admin access. Leave this empty to keep full admin permissions.
+                        </p>
+                        <Listbox
+                          value={selectedCustomRole}
+                          onChange={(role) => {
+                            setSelectedCustomRole(role);
+                            setCustomRoleTouched(true);
+                          }}
+                        >
+                          <div className="relative">
+                            <Listbox.Button className="input w-full text-left flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <ShieldCheckIcon className="w-5 h-5 text-secondary-400" />
+                                <span>{selectedCustomRole?.name ?? 'Use default admin permissions'}</span>
+                              </div>
+                              <ChevronUpDownIcon className="w-5 h-5 text-secondary-400" />
+                            </Listbox.Button>
+                            <Transition
+                              as={Fragment}
+                              leave="transition ease-in duration-100"
+                              leaveFrom="opacity-100"
+                              leaveTo="opacity-0"
+                            >
+                              <Listbox.Options className="absolute z-10 mt-1 w-full bg-white dark:bg-secondary-700 rounded-lg shadow-lg border border-secondary-200 dark:border-secondary-600 max-h-60 overflow-auto">
                                 <Listbox.Option
-                                  key={role.value}
-                                  value={role}
+                                  value={null}
                                   className={({ active }) =>
-                                    clsx(
-                                      'px-4 py-3 cursor-pointer',
-                                      active &&
-                                        'bg-primary-50 dark:bg-primary-900/30',
-                                    )
+                                    clsx('px-4 py-3 cursor-pointer', active && 'bg-primary-50 dark:bg-primary-900/30')
                                   }
                                 >
                                   {({ selected }) => (
                                     <div className="flex items-center justify-between">
-                                      <div>
-                                        <p className="font-medium">{role.label}</p>
-                                        <p className="text-sm text-secondary-500">
-                                          {role.description}
-                                        </p>
-                                      </div>
-                                      {selected && (
-                                        <CheckIcon className="w-5 h-5 text-primary-500" />
-                                      )}
+                                      <p className="font-medium text-secondary-500">Use default admin permissions</p>
+                                      {selected && <CheckIcon className="w-5 h-5 text-primary-500" />}
                                     </div>
                                   )}
                                 </Listbox.Option>
-                              ))}
-                            </Listbox.Options>
-                          </Transition>
-                        </div>
-                      </Listbox>
-                    </div>
+                                {tenantRoles.map((tr) => (
+                                  <Listbox.Option
+                                    key={tr.id}
+                                    value={tr}
+                                    className={({ active }) =>
+                                      clsx('px-4 py-3 cursor-pointer', active && 'bg-primary-50 dark:bg-primary-900/30')
+                                    }
+                                  >
+                                    {({ selected }) => (
+                                      <div className="flex items-center justify-between">
+                                        <div>
+                                          <p className="font-medium">{tr.name}</p>
+                                          <p className="text-sm text-secondary-500">{tr.description}</p>
+                                        </div>
+                                        {selected && <CheckIcon className="w-5 h-5 text-primary-500" />}
+                                      </div>
+                                    )}
+                                  </Listbox.Option>
+                                ))}
+                              </Listbox.Options>
+                            </Transition>
+                          </div>
+                        </Listbox>
+                      </div>
+                    )}
 
                     <div className="flex justify-end gap-3 pt-4">
                       <button

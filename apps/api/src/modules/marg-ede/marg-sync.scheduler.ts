@@ -1,10 +1,11 @@
 import { InjectQueue } from '@nestjs/bullmq';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { MargSyncConfig, MargSyncStatus } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../../core/database/prisma.service';
 import { QUEUE_NAMES } from '../../core/queue/queue.constants';
+import { MargEdeService } from './marg-ede.service';
 
 @Injectable()
 export class MargSyncScheduler {
@@ -12,12 +13,28 @@ export class MargSyncScheduler {
 
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue(QUEUE_NAMES.MARG_SYNC) private readonly margSyncQueue: Queue,
+    private readonly margEdeService: MargEdeService,
+    @Optional() @InjectQueue(QUEUE_NAMES.MARG_SYNC) private readonly margSyncQueue: Queue | null,
   ) {}
 
   /** Run every hour. Configs are checked against their syncFrequency. */
   @Cron(CronExpression.EVERY_HOUR)
   async scheduleActiveSyncs(): Promise<void> {
+    // Recover stale locks: if a sync has been RUNNING for over 2 hours,
+    // it likely crashed without the error handler executing. Reset to FAILED
+    // so the next scheduled cycle can retry.
+    const staleCutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const staleReset = await this.prisma.margSyncConfig.updateMany({
+      where: {
+        lastSyncStatus: MargSyncStatus.RUNNING,
+        lastSyncAt: { lt: staleCutoff },
+      },
+      data: { lastSyncStatus: MargSyncStatus.FAILED },
+    });
+    if (staleReset.count > 0) {
+      this.logger.warn(`Reset ${staleReset.count} stale RUNNING Marg sync config(s) to FAILED`);
+    }
+
     const configs = await this.prisma.margSyncConfig.findMany({
       where: {
         isActive: true,
@@ -28,6 +45,18 @@ export class MargSyncScheduler {
     const now = new Date();
     for (const config of configs) {
       if (!this.isDue(config, now)) continue;
+      if (!this.margSyncQueue) {
+        this.logger.warn(`Redis not configured — running scheduled Marg sync inline for config=${config.id}`);
+        try {
+          await this.margEdeService.runSync(config.id, config.tenantId, 'scheduler');
+        } catch (error) {
+          this.logger.error(
+            `Inline scheduled Marg sync failed for config=${config.id}: ${(error as Error).message}`,
+            (error as Error).stack,
+          );
+        }
+        continue;
+      }
 
       this.logger.log(`Scheduling Marg sync: config=${config.id}, tenant=${config.tenantId}`);
 

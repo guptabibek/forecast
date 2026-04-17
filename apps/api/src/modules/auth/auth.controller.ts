@@ -25,11 +25,11 @@ import { SKIP_TENANT_CHECK } from '../../core/guards/tenant.guard';
 import { AuthService } from './auth.service';
 import {
     ChangePasswordDto,
+    ForceResetPasswordDto,
     ForgotPasswordDto,
     LoginDto,
     PublicTokenResponse,
     RefreshTokenDto,
-    RegisterDto,
     ResetPasswordDto,
     TokenResponse,
 } from './dto/auth.dto';
@@ -47,32 +47,8 @@ export class AuthController {
         return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host);
     }
 
-    private isDemoTenantFallbackEnabled(): boolean {
-        const raw = (process.env.ALLOW_DEMO_TENANT_FALLBACK || '').trim().toLowerCase();
-        const enabled = raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
-        return process.env.NODE_ENV !== 'production' && enabled;
-    }
-
-    private resolveTenantSlugFromFrontendUrl(): string | undefined {
-        const frontendUrl = (process.env.FRONTEND_URL || '').trim();
-        if (!frontendUrl) return undefined;
-
-        try {
-            const frontendHost = new URL(frontendUrl).hostname.toLowerCase();
-            const parts = frontendHost.split('.').filter(Boolean);
-
-            if (parts.length >= 3 && parts[0] !== 'www' && parts[0] !== 'api') {
-                return parts[0];
-            }
-
-            if (parts.length === 2 && parts[1] === 'localhost' && parts[0] !== 'www' && parts[0] !== 'api') {
-                return parts[0];
-            }
-        } catch {
-            return undefined;
-        }
-
-        return undefined;
+    private isReservedWorkspaceLabel(label: string): boolean {
+        return ['www', 'api', 'app'].includes(label);
     }
 
     private resolveTenantSlug(req: Request, providedTenantSlug?: string): string {
@@ -85,40 +61,51 @@ export class AuthController {
             return headerTenant.trim().toLowerCase();
         }
 
-        const host = req.headers['host'] || '';
-        const hostWithoutPort = host.split(':')[0];
-        const parts = hostWithoutPort.split('.');
-        const isIpv4 = this.isIpv4Host(hostWithoutPort);
+        const forwardedHost = (req.headers['x-forwarded-host'] as string | undefined)
+            ?.split(',')[0]
+            ?.trim();
+        const rawHost = forwardedHost || req.headers['host'] || '';
+        const hostWithoutPort = rawHost.split(':')[0].trim().toLowerCase();
 
-        if (!isIpv4 && parts.length >= 3 && parts[0] !== 'www' && parts[0] !== 'api') {
-            return parts[0].toLowerCase();
-        }
-
-        // Support local subdomains like demo.localhost for UAT/dev use.
-        if (parts.length === 2 && parts[1] === 'localhost' && parts[0] !== 'www' && parts[0] !== 'api') {
-            return parts[0].toLowerCase();
+        if (!hostWithoutPort) {
+            throw new BadRequestException('Workspace context is missing. Sign in via your workspace URL.');
         }
 
         if (hostWithoutPort === 'localhost' || hostWithoutPort === '127.0.0.1') {
-            const configuredTenantSlug = this.resolveTenantSlugFromFrontendUrl();
-            if (configuredTenantSlug) {
-                return configuredTenantSlug;
+            return 'localhost';
+        }
+
+        if (hostWithoutPort.endsWith('.localhost')) {
+            const localSubdomain = hostWithoutPort.replace(/\.localhost$/, '');
+            if (localSubdomain && !this.isReservedWorkspaceLabel(localSubdomain)) {
+                return localSubdomain;
             }
         }
 
-        if (this.isDemoTenantFallbackEnabled()) {
-            return 'demo';
+        const parts = hostWithoutPort.split('.').filter(Boolean);
+        if (!this.isIpv4Host(hostWithoutPort) && parts.length >= 3) {
+            const candidate = parts[0].toLowerCase();
+            if (!this.isReservedWorkspaceLabel(candidate)) {
+                return candidate;
+            }
         }
 
-        throw new BadRequestException('Workspace context is missing. Sign in via your workspace URL (for example: https://acme.your-domain.com).');
+        return hostWithoutPort;
     }
 
-    private getRefreshCookieOptions() {
+    private getRefreshCookieOptions(req: Request) {
         const refreshDays = Number(process.env.REFRESH_TOKEN_DAYS || 7);
-        const isProd = process.env.NODE_ENV === 'production';
+        const forwardedProto = (req.headers['x-forwarded-proto'] as string | undefined)
+            ?.split(',')[0]
+            ?.trim()
+            ?.toLowerCase();
+        const isSecureRequest = forwardedProto
+            ? forwardedProto === 'https'
+            : req.secure || req.protocol === 'https';
+
         return {
             httpOnly: true,
-            secure: isProd,
+            secure: isSecureRequest,
             sameSite: 'lax' as const,
             maxAge: refreshDays * 24 * 60 * 60 * 1000,
             // Use '/' so the browser sends the cookie regardless of proxy path-rewriting
@@ -128,13 +115,13 @@ export class AuthController {
         };
     }
 
-    private setRefreshCookie(res: Response, refreshToken: string) {
-        res.cookie(REFRESH_COOKIE_NAME, refreshToken, this.getRefreshCookieOptions());
+    private setRefreshCookie(req: Request, res: Response, refreshToken: string) {
+        res.cookie(REFRESH_COOKIE_NAME, refreshToken, this.getRefreshCookieOptions(req));
     }
 
-    private clearRefreshCookie(res: Response) {
+    private clearRefreshCookie(req: Request, res: Response) {
         res.clearCookie(REFRESH_COOKIE_NAME, {
-            ...this.getRefreshCookieOptions(),
+            ...this.getRefreshCookieOptions(req),
             maxAge: 0,
         });
     }
@@ -155,28 +142,6 @@ export class AuthController {
     private toPublicTokenResponse(payload: TokenResponse): PublicTokenResponse {
         const { refreshToken: _refreshToken, ...rest } = payload;
         return rest;
-    }
-
-    @Post('register')
-    @Throttle({
-        short: { limit: 2, ttl: 1000 },
-        medium: { limit: 6, ttl: 10000 },
-        long: { limit: 20, ttl: 60000 },
-    })
-    @ApiOperation({ summary: 'Register a new user' })
-    @ApiResponse({ status: 201, description: 'User registered successfully' })
-    @ApiResponse({ status: 400, description: 'Invalid input' })
-    @ApiResponse({ status: 409, description: 'Email already exists' })
-    @ApiResponse({ status: 429, description: 'Too many registration attempts' })
-    async register(
-        @Body() dto: RegisterDto,
-        @Res({ passthrough: true }) res: Response,
-    ): Promise<PublicTokenResponse> {
-        const tokenResponse = await this.authService.register(dto);
-        if (tokenResponse.refreshToken) {
-            this.setRefreshCookie(res, tokenResponse.refreshToken);
-        }
-        return this.toPublicTokenResponse(tokenResponse);
     }
 
     @Post('login')
@@ -204,16 +169,22 @@ export class AuthController {
 
         const tokenResponse = await this.authService.login(dto);
         if (tokenResponse.refreshToken) {
-            this.setRefreshCookie(res, tokenResponse.refreshToken);
+            this.setRefreshCookie(req, res, tokenResponse.refreshToken);
         }
         return this.toPublicTokenResponse(tokenResponse);
     }
 
     @Post('refresh')
+    @Throttle({
+        short: { limit: 5, ttl: 1000 },
+        medium: { limit: 15, ttl: 10000 },
+        long: { limit: 30, ttl: 60000 },
+    })
     @HttpCode(HttpStatus.OK)
     @ApiOperation({ summary: 'Refresh access token' })
     @ApiResponse({ status: 200, description: 'Token refreshed successfully' })
     @ApiResponse({ status: 401, description: 'Invalid refresh token' })
+    @ApiResponse({ status: 429, description: 'Too many refresh attempts' })
     async refreshToken(
         @Req() req: Request,
         @Body() dto: Partial<RefreshTokenDto>,
@@ -230,7 +201,7 @@ export class AuthController {
             userAgent: req.headers['user-agent'],
         });
         if (tokenResponse.refreshToken) {
-            this.setRefreshCookie(res, tokenResponse.refreshToken);
+            this.setRefreshCookie(req, res, tokenResponse.refreshToken);
         }
 
         return this.toPublicTokenResponse(tokenResponse);
@@ -250,7 +221,7 @@ export class AuthController {
         const userId = (req as any).user.sub;
         const refreshToken = body?.refreshToken || this.extractRefreshTokenFromCookie(req);
         await this.authService.logout(userId, refreshToken);
-        this.clearRefreshCookie(res);
+        this.clearRefreshCookie(req, res);
     }
 
     @Get('me')
@@ -342,11 +313,36 @@ export class AuthController {
     }
 
     @Post('reset-password')
+    @Throttle({
+        short: { limit: 3, ttl: 1000 },
+        medium: { limit: 8, ttl: 10000 },
+        long: { limit: 15, ttl: 60000 },
+    })
     @HttpCode(HttpStatus.NO_CONTENT)
-    @ApiOperation({ summary: 'Reset password using a valid token' })
+    @ApiOperation({ summary: 'Reset password using OTP from email' })
     @ApiResponse({ status: 204, description: 'Password reset successfully' })
-    async resetPassword(@Body() dto: ResetPasswordDto): Promise<void> {
+    @ApiResponse({ status: 400, description: 'Invalid or expired OTP' })
+    async resetPassword(
+        @Body() dto: ResetPasswordDto,
+        @Req() req: Request,
+    ): Promise<void> {
+        dto.tenantSlug = this.resolveTenantSlug(req, dto.tenantSlug);
         await this.authService.resetPassword(dto);
+    }
+
+    @Post('force-reset-password')
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth()
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @ApiOperation({ summary: 'Force reset password (for first-time login)' })
+    @ApiResponse({ status: 204, description: 'Password reset successfully' })
+    @ApiResponse({ status: 400, description: 'Invalid request' })
+    async forceResetPassword(
+        @Req() req: Request,
+        @Body() dto: ForceResetPasswordDto,
+    ): Promise<void> {
+        const userId = (req as any).user.sub;
+        await this.authService.forceResetPassword(userId, dto.newPassword);
     }
 }
 

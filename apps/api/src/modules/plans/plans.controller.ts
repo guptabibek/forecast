@@ -20,6 +20,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequireModule } from '../platform/require-module.decorator';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { PlanQueryDto } from './dto/plan-query.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
@@ -29,6 +30,7 @@ import { PlansService } from './plans.service';
 @ApiBearerAuth()
 @Controller('plans')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequireModule('planning')
 export class PlansController {
   constructor(private readonly plansService: PlansService) {}
 

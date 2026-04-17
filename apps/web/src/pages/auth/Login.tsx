@@ -1,3 +1,4 @@
+import { getFallbackPathForRole } from '@/permissions';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useAuthStore } from '@stores/auth.store';
 import { useState } from 'react';
@@ -33,8 +34,13 @@ export default function Login() {
 
     try {
       await login(data.email, data.password);
+      const user = useAuthStore.getState().user;
+      if (user?.mustResetPassword) {
+        navigate('/force-reset-password', { replace: true });
+        return;
+      }
       toast.success('Welcome back!');
-      navigate('/dashboard');
+      navigate(getFallbackPathForRole(user?.role), { replace: true });
     } catch (err) {
       toast.error('Invalid email or password');
     } finally {

@@ -1,4 +1,4 @@
-import { canShowSidebarHref } from '@/permissions';
+import { canShowSidebarHref, isSuperAdmin } from '@/permissions';
 import { useAuthStore } from '@/stores/auth.store';
 import {
     ArrowPathIcon,
@@ -19,6 +19,7 @@ import {
     SwatchIcon,
     TableCellsIcon,
     UsersIcon,
+    WrenchScrewdriverIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline';
 import { prefetchRoute } from '@services/route-prefetch';
@@ -98,9 +99,17 @@ const navigation: NavigationItem[] = [
     items: [
       { name: 'General', href: '/settings', icon: Cog6ToothIcon },
       { name: 'Users', href: '/settings/users', icon: UsersIcon },
+      { name: 'Roles', href: '/settings/roles', icon: ShieldCheckIcon },
       { name: 'Marg EDE', href: '/settings/marg-ede', icon: ArrowPathIcon },
       { name: 'Audit Log', href: '/settings/audit-log', icon: ShieldCheckIcon },
       { name: 'Notifications', href: '/notifications', icon: BellIcon },
+    ],
+  },
+  {
+    name: 'Platform Admin',
+    module: 'platform-admin',
+    items: [
+      { name: 'Tenants', href: '/platform', icon: WrenchScrewdriverIcon, module: 'platform-admin' },
     ],
   },
 ];
@@ -113,6 +122,7 @@ export default function Sidebar({
 }: SidebarProps) {
   const location = useLocation();
   const role = useAuthStore((s) => s.user?.role);
+  const userModuleAccess = useAuthStore((s) => s.user?.moduleAccess);
   const { settings } = useBranding();
 
   const brandName = settings?.name || 'ForecastPro';
@@ -126,8 +136,14 @@ export default function Sidebar({
   };
 
   const isModuleEnabled = (mod?: string) => {
-    if (!mod || !enabledModules) return true;
-    return enabledModules[mod as keyof typeof enabledModules] !== false;
+    if (!mod) return true;
+    // Platform admin section is only visible to SUPER_ADMIN
+    if (mod === 'platform-admin') return isSuperAdmin(role);
+    // Check tenant-level module toggle
+    if (enabledModules && enabledModules[mod as keyof typeof enabledModules] === false) return false;
+    // Check user's role-level module access (dynamic RBAC)
+    if (userModuleAccess && mod in userModuleAccess && userModuleAccess[mod] === false) return false;
+    return true;
   };
 
   const visibleNavigation = useMemo(

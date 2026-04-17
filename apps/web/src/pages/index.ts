@@ -1,7 +1,6 @@
 // Auth pages
 export { default as ForgotPassword } from './auth/ForgotPassword';
 export { default as Login } from './auth/Login';
-export { default as Register } from './auth/Register';
 export { default as ResetPassword } from './auth/ResetPassword';
 
 // Main pages
@@ -37,3 +36,4 @@ export { default as Users } from './settings/Users';
 
 // Manufacturing
 export { ManufacturingDashboard, ManufacturingRoutes } from './manufacturing';
+

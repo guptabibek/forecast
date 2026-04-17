@@ -1,22 +1,23 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
+    BadRequestException,
+    Injectable,
+    Logger,
+    NotFoundException,
+    Optional,
 } from '@nestjs/common';
 import {
-  AuditAction,
-  ForecastModel,
-  JobStatus,
-  OverrideStatus,
-  PeriodType,
-  PlanStatus,
-  Prisma,
-  ReconciliationStatus,
-  ScenarioType,
-  WorkflowEntityType,
-  WorkflowStatus,
+    AuditAction,
+    ForecastModel,
+    JobStatus,
+    OverrideStatus,
+    PeriodType,
+    PlanStatus,
+    Prisma,
+    ReconciliationStatus,
+    ScenarioType,
+    WorkflowEntityType,
+    WorkflowStatus,
 } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { AuditService } from '../../core/audit/audit.service';
@@ -52,7 +53,7 @@ export class ForecastsService {
     private readonly prisma: PrismaService,
     private readonly forecastEngine: ForecastEngineService,
     private readonly modelRegistry: ForecastModelRegistry,
-    @InjectQueue(QUEUE_NAMES.FORECAST) private readonly forecastQueue: Queue,
+    @Optional() @InjectQueue(QUEUE_NAMES.FORECAST) private readonly forecastQueue: Queue | null,
     private readonly workflowService: WorkflowService,
     private readonly timeBucketService: TimeBucketService,
     private readonly fxRateService: FxRateService,
@@ -720,6 +721,12 @@ export class ForecastsService {
         endPeriod: run.endPeriod,
       },
     });
+
+    if (!this.forecastQueue) {
+      throw new BadRequestException(
+        'Background processing is not available. Configure REDIS_URL to enable forecast runs.',
+      );
+    }
 
     const job = await this.forecastQueue.add(
       'run-forecast',

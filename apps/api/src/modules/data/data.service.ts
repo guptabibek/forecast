@@ -3,6 +3,7 @@ import {
     BadRequestException,
     Injectable,
     NotFoundException,
+    Optional,
 } from '@nestjs/common';
 import { FileType, ImportStatus, Prisma, ImportType as PrismaImportType } from '@prisma/client';
 import { Queue } from 'bullmq';
@@ -19,7 +20,7 @@ import { UpdateDimensionDto } from './dto/update-dimension.dto';
 export class DataService {
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue(QUEUE_NAMES.IMPORT) private readonly importQueue: Queue,
+    @Optional() @InjectQueue(QUEUE_NAMES.IMPORT) private readonly importQueue: Queue | null,
   ) {}
 
   // ==================== IMPORTS ====================
@@ -73,6 +74,11 @@ export class DataService {
     });
 
     // Queue the import job
+    if (!this.importQueue) {
+      throw new BadRequestException(
+        'Background processing is not available. Configure REDIS_URL to enable data imports.',
+      );
+    }
     await this.importQueue.add(
       'process-import',
       {
@@ -131,7 +137,9 @@ export class DataService {
       };
     }
 
-    const queueJobs = await this.importQueue.getJobs(['waiting', 'delayed', 'prioritized', 'active']);
+    const queueJobs = this.importQueue
+      ? await this.importQueue.getJobs(['waiting', 'delayed', 'prioritized', 'active'])
+      : [];
     const queueJob = queueJobs.find((job) => (job.data as { jobId?: string })?.jobId === id);
 
     if (queueJob) {

@@ -1,12 +1,12 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
-  ActualType,
-  AuditAction,
-  CustomerType,
-  DimensionStatus,
-  LocationType,
-  PeriodType,
-  Prisma,
+    ActualType,
+    AuditAction,
+    CustomerType,
+    DimensionStatus,
+    LocationType,
+    PeriodType,
+    Prisma,
 } from '@prisma/client';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { inflateRawSync } from 'zlib';
@@ -194,7 +194,7 @@ export class MargEdeService {
       [],
     ).catch(() => {/* best-effort */});
 
-    await this.margPrisma.margSyncConfig.delete({ where: { id } });
+    await this.margPrisma.margSyncConfig.delete({ where: { id, tenantId: user.tenantId } });
   }
 
   // ===================== SYNC STATUS =====================
@@ -301,9 +301,12 @@ export class MargEdeService {
     const parsedIndex = Number(
       this.readFirstDefined([dataSection, parsedPayload, rawEnvelope], ['Index']) ?? 0,
     );
-    const parsedDataStatus = Number(
-      this.readFirstDefined([dataSection, parsedPayload, rawEnvelope], ['DataStatus', 'Datastatus']) ?? 0,
+    const rawDataStatus = this.readFirstDefined(
+      [dataSection, parsedPayload, rawEnvelope],
+      ['DataStatus', 'Datastatus'],
     );
+    // Marg returns DataStatus as numeric 10 or string "Completed" depending on tenant/version
+    const parsedDataStatus = this.normalizeDataStatus(rawDataStatus);
     const parsedDateTime = String(
       this.readFirstDefined([dataSection, parsedPayload, rawEnvelope], ['DateTime', 'Datetime']) ?? '',
     ).trim();
@@ -324,7 +327,7 @@ export class MargEdeService {
 
   // ===================== FULL SYNC ORCHESTRATOR =====================
 
-  async runSync(configId: string, tenantId: string, triggeredBy?: string): Promise<string> {
+  async runSync(configId: string, tenantId: string, triggeredBy?: string, fromDate?: string): Promise<string> {
     const config = await this.margPrisma.margSyncConfig.findFirst({
       where: { id: configId, tenantId },
     });
@@ -348,8 +351,10 @@ export class MargEdeService {
     let margKey = '';
     let decryptionKey = '';
 
-    let currentIndex = config.lastSyncIndex;
-    let lastDatetime = config.lastSyncDatetime || '';
+    // When fromDate is provided, override the stored cursor to fetch from that date.
+    // Index resets to 0 so the Marg API returns data starting from the specified date.
+    let currentIndex = fromDate ? 0 : config.lastSyncIndex;
+    let lastDatetime = fromDate || config.lastSyncDatetime || '';
 
     // Create sync log
     const syncLog = await this.margPrisma.margSyncLog.create({
@@ -368,6 +373,8 @@ export class MargEdeService {
     let transactionsCount = 0;
     let stockCount = 0;
     let branchesCount = 0;
+    let vouchersCount = 0;
+    let saleTypesCount = 0;
 
     try {
       margKey = this.decryptSecret(config.margKey);
@@ -423,6 +430,16 @@ export class MargEdeService {
           stockCount += count;
         }
 
+        if (payload.MDis.length > 0) {
+          const count = await this.syncVouchers(tenantId, payload.MDis);
+          vouchersCount += count;
+        }
+
+        if (payload.SaleType.length > 0) {
+          const count = await this.syncSaleTypes(tenantId, payload.SaleType);
+          saleTypesCount += count;
+        }
+
         const nextDatetime = String(payload.DateTime || '').trim();
         const hasIndexCursor = Number.isInteger(payload.Index) && payload.Index >= 0;
         const indexAdvanced = hasIndexCursor && payload.Index > previousIndex;
@@ -434,6 +451,18 @@ export class MargEdeService {
 
         if (nextDatetime) {
           lastDatetime = nextDatetime;
+        }
+
+        // Persist cursor progress after each page so crashes don't lose all work.
+        // On retry, sync resumes from the last saved cursor instead of restarting.
+        if (indexAdvanced || datetimeAdvanced) {
+          await this.margPrisma.margSyncConfig.update({
+            where: { id: configId },
+            data: {
+              lastSyncIndex: currentIndex,
+              ...(lastDatetime ? { lastSyncDatetime: lastDatetime } : {}),
+            },
+          });
         }
 
         // DataStatus=10 means server cursor has reached sync completion.
@@ -488,6 +517,8 @@ export class MargEdeService {
           transactionsSynced: transactionsCount,
           stockSynced: stockCount,
           branchesSynced: branchesCount,
+          vouchersSynced: vouchersCount,
+          saleTypesSynced: saleTypesCount,
           errors: errors as any,
           syncIndex: currentIndex,
           syncDatetime: lastDatetime || null,
@@ -496,7 +527,8 @@ export class MargEdeService {
 
       this.logger.log(
         `Marg sync completed: products=${productsCount}, parties=${partiesCount}, ` +
-        `transactions=${transactionsCount}, stock=${stockCount}, branches=${branchesCount}`,
+        `transactions=${transactionsCount}, stock=${stockCount}, branches=${branchesCount}, ` +
+        `vouchers=${vouchersCount}, saleTypes=${saleTypesCount}`,
       );
 
       await this.auditService.log(
@@ -529,6 +561,8 @@ export class MargEdeService {
           transactionsSynced: transactionsCount,
           stockSynced: stockCount,
           branchesSynced: branchesCount,
+          vouchersSynced: vouchersCount,
+          saleTypesSynced: saleTypesCount,
           errors: errors as any,
           syncIndex: currentIndex,
           syncDatetime: lastDatetime || null,
@@ -571,6 +605,7 @@ export class MargEdeService {
           tenantId,
           margId,
           companyId,
+          code: String(b.Code || '').trim() || null,
           name: String(b.Name || '').trim(),
           storeId: String(b.StoreID || '').trim() || null,
           licence: String(b.Licence || '').trim() || null,
@@ -579,6 +614,7 @@ export class MargEdeService {
         },
         update: {
           margId,
+          code: String(b.Code || '').trim() || null,
           name: String(b.Name || '').trim(),
           storeId: String(b.StoreID || '').trim() || null,
           licence: String(b.Licence || '').trim() || null,
@@ -664,43 +700,59 @@ export class MargEdeService {
           companyId,
           cid,
           parName: String(p.ParNam || '').trim(),
+          parAddr: String(p.PARADD || '').trim() || null,
           parAdd1: String(p.ParAdd1 || '').trim() || null,
           parAdd2: String(p.ParAdd2 || '').trim() || null,
-          gstnNo: String(p['GSTNNo.'] || p.GSTNNo || '').trim() || null,
+          gstNo: String(p.GSTNo || '').trim() || null,
           phone1: String(p.Phone1 || '').trim() || null,
           phone2: String(p.Phone2 || '').trim() || null,
           phone3: String(p.Phone3 || '').trim() || null,
           phone4: String(p.Phone4 || '').trim() || null,
           route: String(p.Rout || '').trim() || null,
           area: String(p.Area || '').trim() || null,
+          mr: String(p.MR || '').trim() || null,
           sCode: String(p.SCode || '').trim() || null,
+          rate: String(p.Rate || '').trim() || null,
           credit: p.Credit != null ? Number(p.Credit) : null,
           crDays: p.CRDays != null ? Number(p.CRDays) : null,
           crBills: p.CRBills != null ? Number(p.CRBills) : null,
+          crStatus: String(p.CRStatus || '').trim() || null,
+          margCode: String(p.MargCode || '').trim() || null,
+          addField: String(p.AddField || '').trim() || null,
+          dlNo: String(p.DlNo || '').trim() || null,
           pin: String(p.Pin || '').trim() || null,
           lat: String(p.Lat || '').trim() || null,
           lng: String(p.Lng || '').trim() || null,
+          isDeleted: String(p.Is_Deleted) === '1',
           rawData: p,
         },
         update: {
           margId,
           parName: String(p.ParNam || '').trim(),
+          parAddr: String(p.PARADD || '').trim() || null,
           parAdd1: String(p.ParAdd1 || '').trim() || null,
           parAdd2: String(p.ParAdd2 || '').trim() || null,
-          gstnNo: String(p['GSTNNo.'] || p.GSTNNo || '').trim() || null,
+          gstNo: String(p.GSTNo || '').trim() || null,
           phone1: String(p.Phone1 || '').trim() || null,
           phone2: String(p.Phone2 || '').trim() || null,
           phone3: String(p.Phone3 || '').trim() || null,
           phone4: String(p.Phone4 || '').trim() || null,
           route: String(p.Rout || '').trim() || null,
           area: String(p.Area || '').trim() || null,
+          mr: String(p.MR || '').trim() || null,
           sCode: String(p.SCode || '').trim() || null,
+          rate: String(p.Rate || '').trim() || null,
           credit: p.Credit != null ? Number(p.Credit) : null,
           crDays: p.CRDays != null ? Number(p.CRDays) : null,
           crBills: p.CRBills != null ? Number(p.CRBills) : null,
+          crStatus: String(p.CRStatus || '').trim() || null,
+          margCode: String(p.MargCode || '').trim() || null,
+          addField: String(p.AddField || '').trim() || null,
+          dlNo: String(p.DlNo || '').trim() || null,
           pin: String(p.Pin || '').trim() || null,
           lat: String(p.Lat || '').trim() || null,
           lng: String(p.Lng || '').trim() || null,
+          isDeleted: String(p.Is_Deleted) === '1',
           rawData: p,
         },
       });
@@ -715,7 +767,7 @@ export class MargEdeService {
       const companyId = this.toInt32(d.CompanyID, 0);
       if (companyId <= 0) continue;
 
-      const margId = this.toInt32(d.ID, 0);
+      const margId = this.toBigInt(d.ID);
       const voucher = String(d.Voucher || '').trim();
       if (!voucher) continue;
 
@@ -735,12 +787,13 @@ export class MargEdeService {
           sourceKey,
           voucher,
           type: String(d.Type || '').trim(),
-          vcn: String(d.Vcn || d.VCN || '').trim() || null,
+          vcn: String(d.VCN || d.Vcn || '').trim() || null,
           date: parsedDate,
           cid: String(d.CID || '').trim() || null,
           pid: String(d.PID || '').trim() || null,
-          gCode: String(d.Gcode || d.GCode || '').trim() || null,
+          gCode: String(d.GCode || d.Gcode || '').trim() || null,
           batch: String(d.Batch || '').trim() || null,
+          batDet: String(d.BatDet || '').trim() || null,
           qty: d.Qty != null ? Number(d.Qty) : null,
           free: d.Free != null ? Number(d.Free) : null,
           mrp: d.MRP != null ? Number(d.MRP) : null,
@@ -748,19 +801,20 @@ export class MargEdeService {
           discount: d.Discount != null ? Number(d.Discount) : null,
           amount: d.Amount != null ? Number(d.Amount) : null,
           gst: d.GST != null ? Number(d.GST) : null,
-          gstAmount: d.GSTamount != null ? Number(d.GSTamount) : null,
-          addFields: String(d.AddFields || '').trim() || null,
+          gstAmount: d.GSTAmount != null ? Number(d.GSTAmount) : null,
+          addField: String(d.AddField || '').trim() || null,
           rawData: d,
         },
         update: {
           margId,
           type: String(d.Type || '').trim(),
-          vcn: String(d.Vcn || d.VCN || '').trim() || null,
+          vcn: String(d.VCN || d.Vcn || '').trim() || null,
           date: parsedDate,
           cid: String(d.CID || '').trim() || null,
           pid: String(d.PID || '').trim() || null,
-          gCode: String(d.Gcode || d.GCode || '').trim() || null,
+          gCode: String(d.GCode || d.Gcode || '').trim() || null,
           batch: String(d.Batch || '').trim() || null,
+          batDet: String(d.BatDet || '').trim() || null,
           qty: d.Qty != null ? Number(d.Qty) : null,
           free: d.Free != null ? Number(d.Free) : null,
           mrp: d.MRP != null ? Number(d.MRP) : null,
@@ -768,8 +822,8 @@ export class MargEdeService {
           discount: d.Discount != null ? Number(d.Discount) : null,
           amount: d.Amount != null ? Number(d.Amount) : null,
           gst: d.GST != null ? Number(d.GST) : null,
-          gstAmount: d.GSTamount != null ? Number(d.GSTamount) : null,
-          addFields: String(d.AddFields || '').trim() || null,
+          gstAmount: d.GSTAmount != null ? Number(d.GSTAmount) : null,
+          addField: String(d.AddField || '').trim() || null,
           rawData: d,
         },
       });
@@ -810,11 +864,12 @@ export class MargEdeService {
           stock: s.Stock != null ? Number(s.Stock) : null,
           brkStock: s.BrkStock != null ? Number(s.BrkStock) : null,
           lpRate: s.LPRate != null ? Number(s.LPRate) : null,
-          pRate: s.Prate != null ? Number(s.Prate) : null,
+          pRate: s.PRate != null ? Number(s.PRate) : null,
           mrp: s.MRP != null ? Number(s.MRP) : null,
           rateA: s.RateA != null ? Number(s.RateA) : null,
           rateB: s.RateB != null ? Number(s.RateB) : null,
           rateC: s.RateC != null ? Number(s.RateC) : null,
+          addField: String(s.AddField || '').trim() || null,
           rawData: s,
         },
         update: {
@@ -830,12 +885,117 @@ export class MargEdeService {
           stock: s.Stock != null ? Number(s.Stock) : null,
           brkStock: s.BrkStock != null ? Number(s.BrkStock) : null,
           lpRate: s.LPRate != null ? Number(s.LPRate) : null,
-          pRate: s.Prate != null ? Number(s.Prate) : null,
+          pRate: s.PRate != null ? Number(s.PRate) : null,
           mrp: s.MRP != null ? Number(s.MRP) : null,
           rateA: s.RateA != null ? Number(s.RateA) : null,
           rateB: s.RateB != null ? Number(s.RateB) : null,
           rateC: s.RateC != null ? Number(s.RateC) : null,
+          addField: String(s.AddField || '').trim() || null,
           rawData: s,
+        },
+      });
+      count++;
+    }
+    return count;
+  }
+
+  private async syncVouchers(tenantId: string, mdis: any[]): Promise<number> {
+    let count = 0;
+    for (const m of mdis) {
+      const companyId = this.toInt32(m.CompanyID, 0);
+      if (companyId <= 0) continue;
+
+      const margId = this.toBigInt(m.ID);
+      const voucher = String(m.Voucher || '').trim();
+      if (!voucher) continue;
+
+      const parsedDate = this.parseMargDate(m.Date);
+      if (!parsedDate) continue;
+
+      const type = String(m.Type || '').trim();
+
+      await this.margPrisma.margVoucher.upsert({
+        where: {
+          tenantId_companyId_voucher_type: { tenantId, companyId, voucher, type },
+        },
+        create: {
+          tenantId,
+          margId,
+          companyId,
+          voucher,
+          type,
+          vcn: String(m.VCN || m.Vcn || '').trim() || null,
+          date: parsedDate,
+          cid: String(m.CID || '').trim() || null,
+          finalAmt: m.Final != null ? Number(m.Final) : null,
+          cash: m.Cash != null ? Number(m.Cash) : null,
+          others: m.Others != null ? Number(m.Others) : null,
+          salesman: String(m.Salun || '').trim() || null,
+          mr: String(m.MR || '').trim() || null,
+          route: String(m.Rout || '').trim() || null,
+          area: String(m.Area || '').trim() || null,
+          orn: String(m.ORN || '').trim() || null,
+          addField: String(m.AddField || '').trim() || null,
+          oDate: m.ODate ? this.parseMargDate(m.ODate) : null,
+          rawData: m,
+        },
+        update: {
+          margId,
+          vcn: String(m.VCN || m.Vcn || '').trim() || null,
+          date: parsedDate,
+          cid: String(m.CID || '').trim() || null,
+          finalAmt: m.Final != null ? Number(m.Final) : null,
+          cash: m.Cash != null ? Number(m.Cash) : null,
+          others: m.Others != null ? Number(m.Others) : null,
+          salesman: String(m.Salun || '').trim() || null,
+          mr: String(m.MR || '').trim() || null,
+          route: String(m.Rout || '').trim() || null,
+          area: String(m.Area || '').trim() || null,
+          orn: String(m.ORN || '').trim() || null,
+          addField: String(m.AddField || '').trim() || null,
+          oDate: m.ODate ? this.parseMargDate(m.ODate) : null,
+          rawData: m,
+        },
+      });
+      count++;
+    }
+    return count;
+  }
+
+  private async syncSaleTypes(tenantId: string, saleTypes: any[]): Promise<number> {
+    let count = 0;
+    for (const st of saleTypes) {
+      const companyId = this.toInt32(st.CompanyID, 0);
+      if (companyId <= 0) continue;
+
+      const margId = this.toInt32(st.ID, 0);
+      const sgCode = String(st.SGCode || '').trim();
+      const sCode = String(st.SCode || '').trim();
+      if (!sgCode || !sCode) continue;
+
+      await this.margPrisma.margSaleType.upsert({
+        where: {
+          tenantId_companyId_sgCode_sCode: { tenantId, companyId, sgCode, sCode },
+        },
+        create: {
+          tenantId,
+          margId,
+          companyId,
+          sgCode,
+          sCode,
+          name: String(st.Name || '').trim(),
+          main: String(st.Main || '').trim() || null,
+          margCode: String(st.MargCode || '').trim() || null,
+          addField: String(st.AddField || '').trim() || null,
+          rawData: st,
+        },
+        update: {
+          margId,
+          name: String(st.Name || '').trim(),
+          main: String(st.Main || '').trim() || null,
+          margCode: String(st.MargCode || '').trim() || null,
+          addField: String(st.AddField || '').trim() || null,
+          rawData: st,
         },
       });
       count++;
@@ -984,7 +1144,7 @@ export class MargEdeService {
             attributes: {
               margCid: mp.cid,
               margCompanyId: mp.companyId,
-              gstn: mp.gstnNo,
+              gstn: mp.gstNo,
               address1: mp.parAdd1,
               address2: mp.parAdd2,
               phone1: mp.phone1,
@@ -1118,9 +1278,24 @@ export class MargEdeService {
         const customerId = await this.resolveCustomerId(tenantId, mt.companyId, mt.cid);
         const locationId = await this.resolveLocationId(tenantId, mt.companyId);
 
-        // Determine transaction type: G=Sales, P=Purchase, etc.
-        const isSale = ['G', 'S'].includes(mt.type.toUpperCase());
-        const actualType = isSale ? ActualType.SALES : ActualType.PURCHASES;
+        // Determine transaction type from Marg type codes:
+        //   G=Goods Sent/Challan, S=Sales Invoice, D=Dispatch → SALES
+        //   P=Purchase Invoice → PURCHASES
+        //   R=Sales Return → SALES (qty/amount may be negative)
+        //   X=Purchase Return → PURCHASES (qty/amount may be negative)
+        //   L=Loss/Breakage, B=Branch Transfer → INVENTORY
+        //   V=Voucher/Journal, W=Write-off → EXPENSE
+        const typeUpper = mt.type.toUpperCase();
+        let actualType: ActualType;
+        if (['G', 'S', 'D', 'R'].includes(typeUpper)) {
+          actualType = ActualType.SALES;
+        } else if (['P', 'X'].includes(typeUpper)) {
+          actualType = ActualType.PURCHASES;
+        } else if (['L', 'B'].includes(typeUpper)) {
+          actualType = ActualType.INVENTORY;
+        } else {
+          actualType = ActualType.EXPENSE;
+        }
 
         const actual = await this.prisma.actual.create({
           data: {
@@ -1142,6 +1317,7 @@ export class MargEdeService {
               margType: mt.type,
               margGst: mt.gst ? Number(mt.gst) : null,
               margGstAmount: mt.gstAmount ? Number(mt.gstAmount) : null,
+              margMrp: mt.mrp ? Number(mt.mrp) : null,
               margRate: mt.rate ? Number(mt.rate) : null,
               margDiscount: mt.discount ? Number(mt.discount) : null,
               margBatch: mt.batch,
@@ -1165,61 +1341,70 @@ export class MargEdeService {
    * in a later sync page).
    */
   private async relinkOrphanedActuals(tenantId: string): Promise<void> {
-    // Find MARG_EDE actuals missing product, customer, or location links
-    const orphans = await this.prisma.actual.findMany({
-      where: {
-        tenantId,
-        sourceSystem: 'MARG_EDE',
-        OR: [{ productId: null }, { customerId: null }, { locationId: null }],
-      },
-      select: { id: true, productId: true, customerId: true, locationId: true, sourceReference: true },
-    });
+    let cursor: string | null = null;
 
-    if (orphans.length === 0) return;
+    while (true) {
+      // Paginated fetch of orphaned actuals to avoid memory pressure
+      const orphans = await this.prisma.actual.findMany({
+        where: {
+          tenantId,
+          sourceSystem: 'MARG_EDE',
+          OR: [{ productId: null }, { customerId: null }, { locationId: null }],
+          ...(cursor ? { id: { gt: cursor } } : {}),
+        },
+        orderBy: { id: 'asc' },
+        take: TRANSFORM_BATCH_SIZE,
+        select: { id: true, productId: true, customerId: true, locationId: true, sourceReference: true },
+      });
 
-    this.logger.log(`Re-linking ${orphans.length} orphaned Marg EDE actuals`);
+      if (orphans.length === 0) break;
 
-    // Build sourceKey → actual mapping
-    const sourceKeys = orphans.map((o) => o.sourceReference).filter(Boolean) as string[];
-    if (sourceKeys.length === 0) return;
+      this.logger.log(`Re-linking batch of ${orphans.length} orphaned Marg EDE actuals`);
 
-    // Look up the staged transactions for the source keys
-    const stagedTxns = await this.margPrisma.margTransaction.findMany({
-      where: { tenantId, sourceKey: { in: sourceKeys } },
-      select: { sourceKey: true, pid: true, cid: true, companyId: true },
-    });
-
-    const txnBySourceKey = new Map<string, { sourceKey: string; pid: string; cid: string; companyId: number }>(
-      stagedTxns.map((t: any) => [t.sourceKey, t]),
-    );
-
-    for (const orphan of orphans) {
-      const txn = txnBySourceKey.get(orphan.sourceReference!);
-      if (!txn) continue;
-
-      const updates: Record<string, unknown> = {};
-
-      if (!orphan.productId && txn.pid) {
-        const productId = await this.resolveProductId(tenantId, txn.companyId, txn.pid);
-        if (productId) updates.productId = productId;
-      }
-
-      if (!orphan.customerId && txn.cid) {
-        const customerId = await this.resolveCustomerId(tenantId, txn.companyId, txn.cid);
-        if (customerId) updates.customerId = customerId;
-      }
-
-      if (!orphan.locationId) {
-        const locationId = await this.resolveLocationId(tenantId, txn.companyId);
-        if (locationId) updates.locationId = locationId;
-      }
-
-      if (Object.keys(updates).length > 0) {
-        await this.prisma.actual.update({
-          where: { id: orphan.id },
-          data: updates,
+      // Build sourceKey → actual mapping
+      const sourceKeys = orphans.map((o) => o.sourceReference).filter(Boolean) as string[];
+      if (sourceKeys.length > 0) {
+        // Look up the staged transactions for the source keys
+        const stagedTxns = await this.margPrisma.margTransaction.findMany({
+          where: { tenantId, sourceKey: { in: sourceKeys } },
+          select: { sourceKey: true, pid: true, cid: true, companyId: true },
         });
+
+        const txnBySourceKey = new Map<string, { sourceKey: string; pid: string; cid: string; companyId: number }>(
+          stagedTxns.map((t: any) => [t.sourceKey, t]),
+        );
+
+        for (const orphan of orphans) {
+          const txn = txnBySourceKey.get(orphan.sourceReference!);
+          if (!txn) continue;
+
+          const updates: Record<string, unknown> = {};
+
+          if (!orphan.productId && txn.pid) {
+            const productId = await this.resolveProductId(tenantId, txn.companyId, txn.pid);
+            if (productId) updates.productId = productId;
+          }
+
+          if (!orphan.customerId && txn.cid) {
+            const customerId = await this.resolveCustomerId(tenantId, txn.companyId, txn.cid);
+            if (customerId) updates.customerId = customerId;
+          }
+
+          if (!orphan.locationId) {
+            const locationId = await this.resolveLocationId(tenantId, txn.companyId);
+            if (locationId) updates.locationId = locationId;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await this.prisma.actual.update({
+              where: { id: orphan.id },
+              data: updates,
+            });
+          }
+        }
       }
+
+      cursor = orphans[orphans.length - 1].id;
     }
   }
 
@@ -1425,6 +1610,29 @@ export class MargEdeService {
     return truncated;
   }
 
+  /** Convert Marg IDs that can exceed INT32 to BigInt for Prisma */
+  private toBigInt(value: unknown): bigint {
+    if (value == null) return BigInt(0);
+    try {
+      return BigInt(Math.trunc(Number(value)));
+    } catch {
+      return BigInt(0);
+    }
+  }
+
+  /**
+   * Normalize Marg DataStatus which can be numeric (10) or string ("Completed").
+   * Returns COMPLETE_DATA_STATUS (10) for completion, 0 otherwise.
+   */
+  private normalizeDataStatus(value: unknown): number {
+    if (value == null) return 0;
+    const num = Number(value);
+    if (Number.isFinite(num)) return num;
+    const str = String(value).trim().toUpperCase();
+    if (str === 'COMPLETED' || str === 'COMPLETE') return COMPLETE_DATA_STATUS;
+    return 0;
+  }
+
   private parsePositiveInt(raw: string | undefined, fallback: number): number {
     const parsed = Number(raw);
     if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
@@ -1474,15 +1682,14 @@ export class MargEdeService {
 
   private buildSourceKey(row: Record<string, unknown>, parsedDate: Date): string {
     const raw = [
+      String(row.ID || '').trim(),
+      String(row.CompanyID || '').trim(),
       String(row.Voucher || '').trim(),
-      String(row.Vcn || row.VCN || '').trim(),
+      String(row.VCN || row.Vcn || '').trim(),
       String(row.PID || '').trim(),
       String(row.Batch || '').trim(),
       String(row.Type || '').trim(),
       parsedDate.toISOString().slice(0, 10),
-      String(row.Qty || ''),
-      String(row.Amount || ''),
-      String(row.Rate || ''),
     ].join('|');
 
     return createHash('sha256').update(raw).digest('hex');
@@ -1699,7 +1906,16 @@ export class MargEdeService {
       }),
       this.margPrisma.margTransaction.count({ where: { tenantId } }),
     ]);
-    return { items, total, page: safePage, pageSize: safePageSize };
+
+    return {
+      items: items.map((item) => ({
+        ...item,
+        margId: item.margId.toString(),
+      })),
+      total,
+      page: safePage,
+      pageSize: safePageSize,
+    };
   }
 
   async getStagedStock(tenantId: string, page = 1, pageSize = 50) {

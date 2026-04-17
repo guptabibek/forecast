@@ -37,6 +37,11 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('User not authenticated');
     }
 
+    // SUPER_ADMIN bypasses all role and permission checks
+    if (user.role === 'SUPER_ADMIN') {
+      return true;
+    }
+
     // Check roles
     if (requiredRoles?.length) {
       const effectiveRoles = IMPLIED_ROLES[user.role] || [user.role];

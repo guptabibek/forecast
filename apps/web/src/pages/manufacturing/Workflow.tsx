@@ -17,7 +17,7 @@ const safeFormat = (dateVal: any, fmt: string, fallback = '—') => {
 
 const ENTITY_TYPES = ['FORECAST', 'PLAN', 'SCENARIO', 'PURCHASE_ORDER', 'BOM', 'PROMOTION'];
 const APPROVER_TYPES = ['SPECIFIC_USER', 'ROLE', 'MANAGER', 'DEPARTMENT_HEAD'];
-const USER_ROLES = ['ADMIN', 'PLANNER', 'FINANCE', 'VIEWER'];
+const USER_ROLES = ['ADMIN'];
 const statusVariant: Record<string, any> = { PENDING: 'secondary', IN_PROGRESS: 'warning', APPROVED: 'success', REJECTED: 'error', CANCELLED: 'error' };
 
 const emptyTemplate = { name: '', description: '', entityType: 'FORECAST', thresholdAmount: 0, isActive: true };
@@ -118,7 +118,8 @@ export default function WorkflowPage() {
     mutationFn: ({ templateId, dto }: { templateId: string; dto: typeof emptyStep }) =>
       workflowService.addStep(templateId, {
         stepOrder: Number(dto.stepOrder), name: dto.name, approverType: dto.approverType,
-        approverRole: dto.approverRole || undefined, timeoutHours: Number(dto.timeoutHours) || undefined,
+        approverRole: dto.approverType === 'ROLE' ? dto.approverRole || undefined : undefined,
+        timeoutHours: Number(dto.timeoutHours) || undefined,
       }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['manufacturing', 'workflow'] }); setShowAddStep(false); setStepForm(emptyStep); toast.success('Step added'); },
     onError: (err: any) => { toast.error(err?.response?.data?.message || 'Failed to add step'); },
@@ -355,8 +356,15 @@ export default function WorkflowPage() {
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={stepForm.name} onChange={(e) => setStepForm({ ...stepForm, name: e.target.value })} placeholder="Manager Approval" /></div>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">Approver Type *</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={stepForm.approverType} onChange={(e) => setStepForm({ ...stepForm, approverType: e.target.value })}>{APPROVER_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">Role</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={stepForm.approverRole} onChange={(e) => setStepForm({ ...stepForm, approverRole: e.target.value })}><option value="">Select role...</option>{USER_ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Approver Type *</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={stepForm.approverType} onChange={(e) => setStepForm({ ...stepForm, approverType: e.target.value, approverRole: e.target.value === 'ROLE' ? stepForm.approverRole : '' })}>{APPROVER_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">System Role</label>
+              <select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 disabled:bg-gray-50 disabled:text-gray-400" value={stepForm.approverRole} disabled={stepForm.approverType !== 'ROLE'} onChange={(e) => setStepForm({ ...stepForm, approverRole: e.target.value })}>
+                <option value="">{stepForm.approverType === 'ROLE' ? 'Select system role...' : 'Select ROLE approver type first'}</option>
+                {USER_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-gray-500">Non-admin approvals should use specific-user or manager routing instead of legacy system roles.</p>
+            </div>
           </div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Timeout (hrs)</label><input type="number" className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={stepForm.timeoutHours} onChange={(e) => setStepForm({ ...stepForm, timeoutHours: +e.target.value })} /></div>
           <div className="flex justify-end gap-3 pt-4 border-t">

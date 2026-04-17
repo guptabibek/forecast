@@ -1,11 +1,13 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import {
+    BadRequestException,
     Body,
     Controller,
     Delete,
     Get,
     HttpCode,
     HttpStatus,
+    Optional,
     Param,
     ParseUUIDPipe,
     Patch,
@@ -22,6 +24,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequireModule } from '../platform/require-module.decorator';
 import { CreateMargConfigDto, UpdateMargConfigDto } from './dto';
 import { MargEdeService } from './marg-ede.service';
 
@@ -29,11 +32,12 @@ import { MargEdeService } from './marg-ede.service';
 @ApiBearerAuth()
 @Controller('marg-ede')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequireModule('marg-ede')
 export class MargEdeController {
   constructor(
     private readonly margEdeService: MargEdeService,
     private readonly auditService: AuditService,
-    @InjectQueue(QUEUE_NAMES.MARG_SYNC) private readonly margSyncQueue: Queue,
+    @Optional() @InjectQueue(QUEUE_NAMES.MARG_SYNC) private readonly margSyncQueue: Queue | null,
   ) {}
 
   // ==================== CONFIG ENDPOINTS ====================
@@ -90,14 +94,54 @@ export class MargEdeController {
   @Post('configs/:id/sync')
   @Roles('ADMIN', 'PLANNER')
   @ApiOperation({ summary: 'Trigger manual Marg EDE data sync' })
-  async triggerSync(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
-    // Queue it as a background job to avoid HTTP timeout
+  @ApiQuery({ name: 'fromDate', required: false, type: String, description: 'Sync data from this date (YYYY-MM-DD). Omit for automatic incremental sync from last cursor.' })
+  async triggerSync(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: any,
+    @Query('fromDate') fromDate?: string,
+  ) {
+    // Validate fromDate format if provided
+    let validatedFromDate: string | undefined;
+    if (fromDate) {
+      const trimmed = fromDate.trim();
+      const parsed = new Date(trimmed);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new BadRequestException('fromDate must be a valid date (YYYY-MM-DD)');
+      }
+      validatedFromDate = trimmed;
+    }
+
+    // Prefer background processing when Redis is available.
+    // Fall back to inline execution so tenants can still sync without Redis.
+    if (!this.margSyncQueue) {
+      const syncLogId = await this.margEdeService.runSync(id, user.tenantId, user.id, validatedFromDate);
+
+      await this.auditService.log(
+        user.tenantId,
+        user.id,
+        AuditAction.IMPORT,
+        'MargSyncConfig',
+        id,
+        null,
+        null,
+        [],
+        { action: 'marg_sync_completed_inline', syncLogId },
+      ).catch(() => {/* best-effort */});
+
+      return {
+        syncLogId,
+        status: 'completed',
+        message: 'Marg EDE sync completed inline because Redis background processing is disabled',
+      };
+    }
+
     const job = await this.margSyncQueue.add(
       'marg-sync',
       {
         configId: id,
         tenantId: user.tenantId,
         triggeredBy: user.id,
+        fromDate: validatedFromDate,
       },
       { attempts: 1 },
     );

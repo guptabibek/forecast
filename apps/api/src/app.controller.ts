@@ -1,15 +1,19 @@
 import { Controller, Get, HttpCode, HttpStatus, Res, SetMetadata } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
-import Redis from 'ioredis';
+import { TenantCacheService } from './core/cache/tenant-cache.service';
 import { PrismaService } from './core/database/prisma.service';
 import { SKIP_TENANT_CHECK } from './core/guards/tenant.guard';
+import { isRedisConfigured } from './core/queue/queue.module';
 
 @ApiTags('Health')
 @Controller()
 @SetMetadata(SKIP_TENANT_CHECK, true)
 export class AppController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cacheService: TenantCacheService,
+  ) {}
 
   @Get('health')
   @HttpCode(HttpStatus.OK)
@@ -46,7 +50,8 @@ export class AppController {
   @ApiResponse({ status: 503, description: 'One or more dependencies are unavailable' })
   async readiness(@Res({ passthrough: true }) res: Response) {
     const dbHealthy = await this.checkDatabase();
-    const redisHealthy = await this.checkRedis();
+    const redisConfigured = isRedisConfigured();
+    const redisHealthy = redisConfigured ? await this.cacheService.isHealthy() : true;
     const ready = dbHealthy && redisHealthy;
     const statusCode = ready ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE;
     res.status(statusCode);
@@ -59,7 +64,9 @@ export class AppController {
       services: {
         api: ready ? 'ready' : 'degraded',
         database: dbHealthy ? 'healthy' : 'unhealthy',
-        redis: redisHealthy ? 'healthy' : 'unhealthy',
+        redis: redisConfigured
+          ? (redisHealthy ? 'healthy' : 'unhealthy')
+          : 'disabled',
       },
     };
   }
@@ -84,34 +91,6 @@ export class AppController {
       return true;
     } catch {
       return false;
-    }
-  }
-
-  private async checkRedis(): Promise<boolean> {
-    const host = process.env.REDIS_HOST || 'localhost';
-    const port = Number(process.env.REDIS_PORT || 6379);
-    const password = process.env.REDIS_PASSWORD;
-
-    const redis = new Redis({
-      host,
-      port,
-      password: password || undefined,
-      lazyConnect: true,
-      maxRetriesPerRequest: 1,
-      connectTimeout: 1500,
-      enableOfflineQueue: false,
-    });
-
-    try {
-      await redis.connect();
-      const pong = await redis.ping();
-      return pong === 'PONG';
-    } catch {
-      return false;
-    } finally {
-      await redis.quit().catch(async () => {
-        await redis.disconnect();
-      });
     }
   }
 }

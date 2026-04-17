@@ -123,14 +123,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!settings) return;
 
-    // Debug log - remove after fixing
-    console.log('[ThemeProvider] Applying settings:', {
-      sidebarBg: settings.sidebarBg,
-      headerBg: settings.headerBg,
-      primaryColor: settings.primaryColor,
-      themeKey,
-    });
-
     const root = document.documentElement;
 
     // Theme mode

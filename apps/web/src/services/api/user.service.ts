@@ -63,12 +63,14 @@ export interface InviteUserDto {
   role: UserRole;
   firstName?: string;
   lastName?: string;
+  customRoleId?: string | null;
 }
 
 export interface UpdateUserDto {
   firstName?: string;
   lastName?: string;
   role?: UserRole;
+  customRoleId?: string | null;
   isActive?: boolean;
 }
 

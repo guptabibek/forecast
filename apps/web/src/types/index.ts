@@ -9,9 +9,35 @@ export interface User {
   avatarUrl?: string;
   lastLoginAt?: string;
   createdAt: string;
+  permissions?: string[];
+  moduleAccess?: Record<string, boolean>;
+  roleId?: string | null;
+  roleName?: string;
+  mustResetPassword?: boolean;
 }
 
-export type UserRole = 'ADMIN' | 'PLANNER' | 'FINANCE' | 'VIEWER' | 'FORECAST_PLANNER' | 'FORECAST_VIEWER';
+export type UserRole = 'SUPER_ADMIN' | 'ADMIN' | 'PLANNER' | 'FINANCE' | 'VIEWER' | 'FORECAST_PLANNER' | 'FORECAST_VIEWER';
+
+/** Dynamic RBAC role */
+export interface TenantRole {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  moduleAccess: Record<string, boolean>;
+  permissions: string[];
+  isSystem: boolean;
+  isDefault: boolean;
+  userCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Permission group definition from the API */
+export interface PermissionGroup {
+  label: string;
+  permissions: Array<{ key: string; label: string }>;
+}
 
 export interface AuthTokens {
   accessToken: string;
@@ -22,15 +48,6 @@ export interface AuthTokens {
 export interface LoginRequest {
   email: string;
   password: string;
-}
-
-export interface RegisterRequest {
-  email: string;
-  password: string;
-  firstName: string;
-  lastName: string;
-  tenantName: string;
-  tenantSubdomain: string;
 }
 
 // ============ Tenant Types ============

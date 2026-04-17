@@ -285,7 +285,7 @@ export class PlansService {
       throw new BadRequestException('Cannot delete an approved or locked plan');
     }
 
-    await this.prisma.planVersion.delete({ where: { id } });
+    await this.prisma.planVersion.delete({ where: { id, tenantId: user.tenantId } });
   }
 
   async clone(id: string, name: string, user: any) {

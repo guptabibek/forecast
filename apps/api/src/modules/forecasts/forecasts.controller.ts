@@ -18,6 +18,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequireModule } from '../platform/require-module.decorator';
 import { AutoSelectPrimaryForecastDto, SetPrimaryForecastDto } from './dto/accuracy-metrics.dto';
 import { ApproveOverrideDto } from './dto/approve-override.dto';
 import { CreateForecastDto } from './dto/create-forecast.dto';
@@ -33,6 +34,7 @@ import { ForecastsService } from './forecasts.service';
 @ApiBearerAuth()
 @Controller('forecasts')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequireModule('forecasting')
 export class ForecastsController {
   constructor(private readonly forecastsService: ForecastsService) {}
 

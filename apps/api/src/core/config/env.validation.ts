@@ -61,33 +61,12 @@ function normalizeNodeEnv(value?: string): string {
   return env;
 }
 
-function validateCorsOrigins(corsOrigins: string, nodeEnv: string): string {
-  const origins = corsOrigins
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
-  if (!origins.length) {
-    throw new Error('Environment validation failed: CORS_ORIGINS must include at least one origin');
-  }
-
-  if (nodeEnv === 'production') {
-    const hasLocalhost = origins.some((origin) => /localhost|127\.0\.0\.1/i.test(origin));
-    if (hasLocalhost) {
-      throw new Error('Environment validation failed: CORS_ORIGINS cannot contain localhost in production');
-    }
-  }
-
-  return origins.join(',');
-}
-
 export function validateEnv(env: RawEnv): ValidatedEnv {
   const nodeEnv = normalizeNodeEnv(env.NODE_ENV);
 
   const databaseUrl = requireString(env, 'DATABASE_URL');
   const jwtSecret = requireString(env, 'JWT_SECRET');
   const jwtRefreshSecret = requireString(env, 'JWT_REFRESH_SECRET');
-  const corsOrigins = validateCorsOrigins(requireString(env, 'CORS_ORIGINS'), nodeEnv);
   const frontendUrl = requireString(env, 'FRONTEND_URL');
 
   assertMinLength('JWT_SECRET', jwtSecret, 32);
@@ -102,29 +81,24 @@ export function validateEnv(env: RawEnv): ValidatedEnv {
   }
 
   const apiPort = parsePort(env, 'API_PORT', 3000);
-  const redisPort = parsePort(env, 'REDIS_PORT', 6379);
+  const redisPort = env.REDIS_PORT ? parsePort(env, 'REDIS_PORT', 6379) : 6379;
   const refreshTokenDays = Number(env.REFRESH_TOKEN_DAYS || 7);
-  const allowDemoTenantFallback = parseBooleanFlag(env, 'ALLOW_DEMO_TENANT_FALLBACK', false);
   if (!Number.isInteger(refreshTokenDays) || refreshTokenDays < 1 || refreshTokenDays > 90) {
     throw new Error('Environment validation failed: REFRESH_TOKEN_DAYS must be an integer between 1 and 90');
-  }
-
-  if (nodeEnv === 'production' && allowDemoTenantFallback) {
-    throw new Error('Environment validation failed: ALLOW_DEMO_TENANT_FALLBACK cannot be true in production');
   }
 
   return {
     ...env,
     NODE_ENV: nodeEnv,
     DATABASE_URL: databaseUrl,
-    CORS_ORIGINS: corsOrigins,
     FRONTEND_URL: frontendUrl,
     JWT_SECRET: jwtSecret,
     JWT_REFRESH_SECRET: jwtRefreshSecret,
     API_PORT: apiPort,
-    REDIS_HOST: env.REDIS_HOST?.trim() || 'localhost',
+    REDIS_URL: env.REDIS_URL?.trim() || '',
+    REDIS_HOST: env.REDIS_HOST?.trim() || '',
     REDIS_PORT: redisPort,
+    REDIS_PASSWORD: env.REDIS_PASSWORD?.trim() || '',
     REFRESH_TOKEN_DAYS: refreshTokenDays,
-    ALLOW_DEMO_TENANT_FALLBACK: allowDemoTenantFallback ? 'true' : 'false',
   };
 }

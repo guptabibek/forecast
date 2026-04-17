@@ -26,6 +26,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { RequireModule } from '../platform/require-module.decorator';
 import { DataService } from './data.service';
 import { ActualsQueryDto } from './dto/actuals-query.dto';
 import { CreateDimensionDto } from './dto/create-dimension.dto';
@@ -37,10 +38,11 @@ import { UpdateDimensionDto } from './dto/update-dimension.dto';
 @ApiBearerAuth()
 @Controller('data')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequireModule('data')
 export class DataController {
   constructor(private readonly dataService: DataService) {}
 
-  private static readonly importUploadDir = join(process.cwd(), 'tmp', 'imports');
+  private static readonly importUploadBaseDir = join(process.cwd(), 'tmp', 'imports');
   private static readonly importMaxSizeMb = Number(process.env.IMPORT_FILE_MAX_MB ?? '100');
   private static readonly importMaxSizeBytes = (Number.isFinite(DataController.importMaxSizeMb)
     ? Math.max(1, DataController.importMaxSizeMb)
@@ -52,9 +54,18 @@ export class DataController {
   @Roles('ADMIN', 'PLANNER')
   @UseInterceptors(FileInterceptor('file', {
     storage: diskStorage({
-      destination: (_req, _file, cb) => {
-        mkdirSync(DataController.importUploadDir, { recursive: true });
-        cb(null, DataController.importUploadDir);
+      destination: (req, _file, cb) => {
+        // Tenant-scoped upload directory to isolate file storage per tenant
+        const tenantId = (req as any).tenantId;
+        // Reject uploads without a valid tenant context to prevent path traversal
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!tenantId || !uuidRegex.test(tenantId)) {
+          cb(new Error('Missing tenant context for file upload'), '');
+          return;
+        }
+        const dir = join(DataController.importUploadBaseDir, tenantId);
+        mkdirSync(dir, { recursive: true });
+        cb(null, dir);
       },
       filename: (_req, file, cb) => {
         const ext = extname(file.originalname);

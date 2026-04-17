@@ -44,6 +44,17 @@ export class ForecastQueueProcessor extends WorkerHost {
   }
 
   async process(job: Job<ForecastJobData>): Promise<any> {
+    const { tenantId } = job.data;
+
+    if (!tenantId) {
+      throw new Error('Forecast job missing tenantId — cannot process without tenant context');
+    }
+
+    // Wrap entire job processing in tenant CLS context so Prisma middleware auto-injects tenantId
+    return this.prisma.executeInTenantContext(tenantId, () => this.processInTenantContext(job));
+  }
+
+  private async processInTenantContext(job: Job<ForecastJobData>): Promise<any> {
     const { tenantId, jobId, forecastRunId, planVersionId, scenarioId, forecastModel, isPersistent, dimensions, startPeriod, endPeriod, parameters, periodType, productIds, locationIds } = job.data;
 
     this.logger.log(`Processing forecast job ${jobId} for tenant ${tenantId}`);

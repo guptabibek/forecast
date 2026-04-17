@@ -7,9 +7,11 @@ import { ClsModule } from 'nestjs-cls';
 import { validateEnv } from './core/config/env.validation';
 import { AllExceptionsFilter } from './core/filters/all-exceptions.filter';
 import { TenantGuard } from './core/guards/tenant.guard';
+import { ModuleGuard } from './modules/platform/module.guard';
 
 // Core modules
 import { AuditModule } from './core/audit/audit.module';
+import { CacheModule } from './core/cache/cache.module';
 import { DatabaseModule } from './core/database/database.module';
 import { FxRateModule } from './core/finance/fx-rate.module';
 import { NotificationModule } from './core/notification/notification.module';
@@ -26,7 +28,9 @@ import { ManufacturingModule } from './modules/manufacturing/manufacturing.modul
 import { MargEdeModule } from './modules/marg-ede/marg-ede.module';
 import { NotificationFeatureModule } from './modules/notifications/notification.module';
 import { PlansModule } from './modules/plans/plans.module';
+import { PlatformModule } from './modules/platform/platform.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { RolesModule } from './modules/roles/roles.module';
 import { ScenariosModule } from './modules/scenarios/scenarios.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { UsersModule } from './modules/users/users.module';
@@ -82,8 +86,9 @@ import { AppController } from './app.controller';
     ScheduleModule.forRoot(),
 
     // Core modules
+    CacheModule,
     DatabaseModule,
-    QueueModule,
+    QueueModule.register(),
     WorkflowModule,
     TimeBucketModule,
     FxRateModule,
@@ -106,6 +111,8 @@ import { AppController } from './app.controller';
     AuditFeatureModule,
     NotificationFeatureModule,
     MargEdeModule,
+    PlatformModule,
+    RolesModule,
   ],
   controllers: [AppController],
   providers: [
@@ -123,6 +130,11 @@ import { AppController } from './app.controller';
     {
       provide: APP_GUARD,
       useClass: TenantGuard,
+    },
+    // Global module feature guard – enforces @RequireModule() on controllers
+    {
+      provide: APP_GUARD,
+      useClass: ModuleGuard,
     },
   ],
 })

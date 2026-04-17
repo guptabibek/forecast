@@ -2,6 +2,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    profiles: [redis]
     command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "${REDIS_EXTERNAL_PORT:-6379}:6379"
@@ -19,25 +20,18 @@ services:
       dockerfile: Dockerfile
       target: api-runtime
     restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       API_PORT: 3000
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-forecast_saas}?schema=public}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      REDIS_URL: ${REDIS_URL:-}
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
-      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
       REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-12345678901234567890123456789012}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3080}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3080,http://demo.localhost:3080}
       MAIN_DOMAIN: ${MAIN_DOMAIN:-localhost}
-      ALLOW_DEMO_TENANT_FALLBACK: ${ALLOW_DEMO_TENANT_FALLBACK:-false}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -48,9 +42,9 @@ services:
       SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-false}
       SMTP_IGNORE_TLS: ${SMTP_IGNORE_TLS:-false}
       SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-true}
+      NODE_OPTIONS: "--max-old-space-size=512"
     ports:
       - "${API_EXTERNAL_PORT:-3001}:3000"
-    command: sh -c "npx prisma migrate deploy && node dist/main.js"
 
   web:
     build:

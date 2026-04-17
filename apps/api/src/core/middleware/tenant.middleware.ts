@@ -1,7 +1,9 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
+import { TenantLicenseStatus, TenantStatus } from '@prisma/client';
 import { NextFunction, Request, Response } from 'express';
 import { ClsService } from 'nestjs-cls';
 import { PrismaService } from '../database/prisma.service';
+import { TenantAccessService } from '../database/tenant-access.service';
 
 export interface TenantContext {
   tenantId: string;
@@ -9,36 +11,26 @@ export interface TenantContext {
   tenantTier: string;
 }
 
+interface CachedTenant {
+  id: string;
+  slug: string;
+  tier: string;
+  status: TenantStatus;
+  licenseStatus: TenantLicenseStatus;
+  licenseExpiresAt: Date | null;
+}
+
 @Injectable()
 export class TenantMiddleware implements NestMiddleware {
   constructor(
     private readonly cls: ClsService,
     private readonly prisma: PrismaService,
+    private readonly tenantAccessService: TenantAccessService,
   ) {}
-
-  private isDemoTenantFallbackEnabled(): boolean {
-    const raw = (process.env.ALLOW_DEMO_TENANT_FALLBACK || '').trim().toLowerCase();
-    const enabled = raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
-    return process.env.NODE_ENV !== 'production' && enabled;
-  }
 
   async use(req: Request, res: Response, next: NextFunction) {
     // Extract tenant from various sources
     let tenantId = await this.resolveTenantId(req);
-
-    // Optional local fallback for development only when explicitly enabled
-    if (!tenantId && this.isDemoTenantFallbackEnabled()) {
-      const host = req.headers.host || '';
-      if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) {
-        const demoTenant = await this.prisma.tenant.findUnique({
-          where: { slug: 'demo' },
-          select: { id: true },
-        });
-        if (demoTenant) {
-          tenantId = demoTenant.id;
-        }
-      }
-    }
 
     if (!tenantId) {
       // Don't throw error - let the auth guard handle it
@@ -47,11 +39,8 @@ export class TenantMiddleware implements NestMiddleware {
       return;
     }
 
-    // Validate tenant exists and is active
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { id: true, slug: true, tier: true, status: true },
-    });
+    // Validate tenant exists and is active (with cache)
+    const tenant = await this.tenantAccessService.getTenantSnapshot(tenantId) as CachedTenant | null;
 
     if (!tenant) {
       // Don't throw - proceed without tenant
@@ -59,7 +48,7 @@ export class TenantMiddleware implements NestMiddleware {
       return;
     }
 
-    if (tenant.status !== 'ACTIVE' && tenant.status !== 'TRIAL') {
+    if (this.tenantAccessService.getAccessBlockMessage(tenant)) {
       // Don't throw - proceed without tenant
       next();
       return;
@@ -79,6 +68,8 @@ export class TenantMiddleware implements NestMiddleware {
     next();
   }
 
+  private readonly UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   private async resolveTenantId(req: Request): Promise<string | null> {
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith('Bearer ')) {
@@ -88,7 +79,7 @@ export class TenantMiddleware implements NestMiddleware {
         if (payloadBase64) {
           const json = Buffer.from(payloadBase64, 'base64url').toString('utf8');
           const payload = JSON.parse(json) as { tenantId?: unknown };
-          if (typeof payload.tenantId === 'string' && payload.tenantId) {
+          if (typeof payload.tenantId === 'string' && this.UUID_REGEX.test(payload.tenantId)) {
             return payload.tenantId;
           }
         }
@@ -102,21 +93,23 @@ export class TenantMiddleware implements NestMiddleware {
       return (req as any).user.tenantId;
     }
 
-    // Priority 2: X-Tenant-ID header (for API key auth)
-    const headerTenantId = req.headers['x-tenant-id'] as string;
-    if (headerTenantId) {
-      // Check if the value is a UUID or a slug
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (uuidRegex.test(headerTenantId)) {
-        return headerTenantId;
+    // Priority 2: X-Tenant-ID header (for API key auth only)
+    // Security: only accept this header when no Bearer token is present
+    // to prevent tenant context override on authenticated requests
+    if (!authHeader) {
+      const headerTenantId = req.headers['x-tenant-id'] as string;
+      if (headerTenantId) {
+        if (this.UUID_REGEX.test(headerTenantId)) {
+          return headerTenantId;
+        }
+        // Treat as a slug and look up the tenant
+        const tenantBySlug = await this.prisma.tenant.findUnique({
+          where: { slug: headerTenantId },
+          select: { id: true },
+        });
+        if (tenantBySlug) return tenantBySlug.id;
+        return null;
       }
-      // Treat as a slug and look up the tenant
-      const tenantBySlug = await this.prisma.tenant.findUnique({
-        where: { slug: headerTenantId },
-        select: { id: true },
-      });
-      if (tenantBySlug) return tenantBySlug.id;
-      return null;
     }
 
     // Priority 3: Subdomain-based tenant resolution

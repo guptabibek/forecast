@@ -33,6 +33,17 @@ export class ImportQueueProcessor extends WorkerHost {
   }
 
   async process(job: Job<ImportJobData>): Promise<any> {
+    const { tenantId } = job.data;
+
+    if (!tenantId) {
+      throw new Error('Import job missing tenantId — cannot process without tenant context');
+    }
+
+    // Wrap entire job processing in tenant CLS context so Prisma middleware auto-injects tenantId
+    return this.prisma.executeInTenantContext(tenantId, () => this.processInTenantContext(job));
+  }
+
+  private async processInTenantContext(job: Job<ImportJobData>): Promise<any> {
     const { jobId, tenantId, userId, type, filePath, fileName, mapping } = job.data;
 
     this.logger.log(`Processing import job ${jobId} for tenant ${tenantId}, type: ${type}`);

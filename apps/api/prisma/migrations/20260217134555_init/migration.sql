@@ -1,8 +1,16 @@
 -- CreateExtension
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'pgcrypto extension already exists or requires superuser — skipping';
+END $$;
 
 -- CreateExtension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'uuid-ossp extension already exists or requires superuser — skipping';
+END $$;
 
 -- CreateEnum
 CREATE TYPE "TenantStatus" AS ENUM ('ACTIVE', 'SUSPENDED', 'TRIAL', 'CANCELLED');

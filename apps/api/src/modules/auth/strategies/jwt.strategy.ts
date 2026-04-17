@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../../../core/database/prisma.service';
+import { SUPER_ADMIN_STATIC_ID } from '../../platform/platform.constants';
 
 export interface JwtPayload {
   sub: string;
@@ -11,6 +12,9 @@ export interface JwtPayload {
   tenantSlug: string;
   role: string;
   permissions: string[];
+  moduleAccess?: Record<string, boolean>;
+  roleId?: string | null;
+  roleName?: string;
   iat: number;
   exp: number;
 }
@@ -29,10 +33,23 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload) {
+    // Static super-admin — no DB row exists
+    if (payload.sub === SUPER_ADMIN_STATIC_ID) {
+      return {
+        id: SUPER_ADMIN_STATIC_ID,
+        sub: SUPER_ADMIN_STATIC_ID,
+        email: payload.email,
+        tenantId: payload.tenantId,
+        tenantSlug: payload.tenantSlug,
+        role: 'SUPER_ADMIN',
+        permissions: payload.permissions,
+      };
+    }
+
     // Verify user still exists and is active
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, status: true, tenantId: true },
+      select: { id: true, status: true, tenantId: true, role: true },
     });
 
     if (!user) {
@@ -43,18 +60,20 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User is not active');
     }
 
-    // Verify tenant still matches and is active
+    // Verify tenant still matches and is active (SUPER_ADMIN can access any tenant state)
     if (user.tenantId !== payload.tenantId) {
       throw new UnauthorizedException('Invalid tenant');
     }
 
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: payload.tenantId },
-      select: { status: true },
-    });
+    if (user.role !== 'SUPER_ADMIN') {
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { id: payload.tenantId },
+        select: { status: true },
+      });
 
-    if (!tenant || (tenant.status !== 'ACTIVE' && tenant.status !== 'TRIAL')) {
-      throw new UnauthorizedException('Tenant is not active');
+      if (!tenant || (tenant.status !== 'ACTIVE' && tenant.status !== 'TRIAL')) {
+        throw new UnauthorizedException('Tenant is not active');
+      }
     }
 
     // Return user object with 'id' field (mapped from 'sub') for service compatibility
@@ -66,6 +85,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       tenantSlug: payload.tenantSlug,
       role: payload.role,
       permissions: payload.permissions,
+      moduleAccess: payload.moduleAccess ?? {},
+      roleId: payload.roleId ?? null,
+      roleName: payload.roleName ?? payload.role,
     };
   }
 }

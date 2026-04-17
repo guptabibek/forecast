@@ -156,7 +156,7 @@ export class ScenariosService {
       throw new BadRequestException('Cannot delete locked scenario');
     }
 
-    await this.prisma.scenario.delete({ where: { id } });
+    await this.prisma.scenario.delete({ where: { id, tenantId: user.tenantId } });
     return { success: true };
   }
 
