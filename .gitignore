@@ -83,3 +83,4 @@ dump.rdb
 # Test artifacts
 test-results/
 playwright-report/
+/.vs
