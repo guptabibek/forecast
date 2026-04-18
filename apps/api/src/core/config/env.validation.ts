@@ -67,8 +67,6 @@ export function validateEnv(env: RawEnv): ValidatedEnv {
   const databaseUrl = requireString(env, 'DATABASE_URL');
   const jwtSecret = requireString(env, 'JWT_SECRET');
   const jwtRefreshSecret = requireString(env, 'JWT_REFRESH_SECRET');
-  const frontendUrl = requireString(env, 'FRONTEND_URL');
-
   assertMinLength('JWT_SECRET', jwtSecret, 32);
   assertMinLength('JWT_REFRESH_SECRET', jwtRefreshSecret, 32);
 
@@ -76,8 +74,9 @@ export function validateEnv(env: RawEnv): ValidatedEnv {
   assertNoPlaceholderInProd('JWT_REFRESH_SECRET', jwtRefreshSecret, nodeEnv);
   assertNoPlaceholderInProd('DATABASE_URL', databaseUrl, nodeEnv);
 
-  if (nodeEnv === 'production' && /localhost|127\.0\.0\.1/i.test(frontendUrl)) {
-    throw new Error('Environment validation failed: FRONTEND_URL cannot be localhost in production');
+  const mainDomain = (env.MAIN_DOMAIN || '').trim();
+  if (nodeEnv === 'production' && !mainDomain) {
+    throw new Error('Environment validation failed: MAIN_DOMAIN is required in production');
   }
 
   const apiPort = parsePort(env, 'API_PORT', 3000);
@@ -91,7 +90,7 @@ export function validateEnv(env: RawEnv): ValidatedEnv {
     ...env,
     NODE_ENV: nodeEnv,
     DATABASE_URL: databaseUrl,
-    FRONTEND_URL: frontendUrl,
+    MAIN_DOMAIN: mainDomain,
     JWT_SECRET: jwtSecret,
     JWT_REFRESH_SECRET: jwtRefreshSecret,
     API_PORT: apiPort,

@@ -1,9 +1,9 @@
 import {
-    BadRequestException,
-    ConflictException,
-    Injectable,
-    NotFoundException,
-    ServiceUnavailableException,
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, UserRole, UserStatus } from '@prisma/client';
@@ -447,40 +447,24 @@ export class UsersService {
     subdomain?: string | null;
     domain?: string | null;
   }): string {
-    const configuredFrontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+    const mainDomain = (this.configService.get<string>('MAIN_DOMAIN') || '').trim();
+    const nodeEnv = this.configService.get<string>('NODE_ENV') || 'development';
+    const protocol = nodeEnv === 'production' ? 'https:' : 'http:';
 
-    try {
-      const parsed = new URL(configuredFrontendUrl);
-      const protocol = parsed.protocol || 'https:';
-      const port = parsed.port ? `:${parsed.port}` : '';
-
-      if (tenant.domain?.trim()) {
-        const host = tenant.domain.trim();
-        const includePort = host === 'localhost' || host.endsWith('.localhost');
-        return `${protocol}//${host}${includePort ? port : ''}`;
-      }
-
-      const workspaceSlug = tenant.subdomain?.trim() || tenant.slug;
-      const configuredMainDomain = (this.configService.get<string>('MAIN_DOMAIN') || '').trim();
-
-      if (configuredMainDomain) {
-        return `${protocol}//${workspaceSlug}.${configuredMainDomain}`;
-      }
-
-      const hostname = parsed.hostname.toLowerCase();
-      if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
-        return `${protocol}//${workspaceSlug}.localhost${port}`;
-      }
-
-      const parts = hostname.split('.');
-      if (parts.length >= 3) {
-        return `${protocol}//${workspaceSlug}.${parts.slice(1).join('.')}${port}`;
-      }
-
-      return `${protocol}//${hostname}${port}`;
-    } catch {
-      return configuredFrontendUrl;
+    // Custom domain takes priority
+    if (tenant.domain?.trim()) {
+      return `${protocol}//${tenant.domain.trim()}`;
     }
+
+    const workspaceSlug = tenant.subdomain?.trim() || tenant.slug;
+
+    // Subdomain under the main SaaS domain
+    if (mainDomain) {
+      return `${protocol}//${workspaceSlug}.${mainDomain}`;
+    }
+
+    // Local development fallback
+    return `http://${workspaceSlug}.localhost:3080`;
   }
 
   async updateLastLogin(id: string) {

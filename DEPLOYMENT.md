@@ -35,8 +35,7 @@ Copy `.env.production.example` to `.env` and configure:
 | `JWT_SECRET` | Yes | 32+ char random string |
 | `JWT_REFRESH_SECRET` | Yes | 32+ char random string |
 | `CORS_ORIGINS` | Yes | Comma-separated allowed origins |
-| `FRONTEND_URL` | Yes | Public URL of the web app |
-| `MAIN_DOMAIN` | Yes | Base domain for tenant subdomains |
+| `MAIN_DOMAIN` | Yes | Base domain for tenant subdomains (e.g. `rabbittech.com.np`) |
 | `ENCRYPTION_KEY` | Yes | 32-char hex string for field encryption |
 | `REDIS_HOST` | No | Redis hostname. Omit to disable Redis. |
 | `REDIS_PORT` | No | Redis port (default 6379) |

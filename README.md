@@ -141,7 +141,7 @@ cp .env.production.example .env
 
 # 2. Edit .env with your production values
 # - Set strong passwords for POSTGRES_PASSWORD, JWT_SECRET, JWT_REFRESH_SECRET
-# - Update CORS_ORIGINS and FRONTEND_URL with your domain
+# - Update CORS_ORIGINS and MAIN_DOMAIN with your domain
 # - Add OPENAI_API_KEY for AI forecasting features
 
 # 3. Build and start services
@@ -165,7 +165,7 @@ docker-compose exec api npx prisma db seed
 | `JWT_SECRET` | Yes | JWT signing secret (32+ chars) |
 | `JWT_REFRESH_SECRET` | Yes | Refresh token secret (32+ chars) |
 | `CORS_ORIGINS` | Yes | Allowed frontend origins |
-| `FRONTEND_URL` | Yes | Frontend URL for redirects |
+| `MAIN_DOMAIN` | Yes | Base domain for tenant subdomains |
 | `OPENAI_API_KEY` | No | OpenAI key for AI forecasting |
 
 ### Health Checks

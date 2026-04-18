@@ -151,9 +151,8 @@ export class TenantMiddleware implements NestMiddleware {
     }
     
     // Check if it's a subdomain of our main domain
-    const mainDomain = process.env.MAIN_DOMAIN || 'forecasthub.com';
-    
-    if (hostname.endsWith(`.${mainDomain}`)) {
+    const mainDomain = process.env.MAIN_DOMAIN;
+    if (mainDomain && hostname.endsWith(`.${mainDomain}`)) {
       const subdomain = hostname.replace(`.${mainDomain}`, '');
       // Exclude www and other reserved subdomains
       if (subdomain && !['www', 'api', 'app'].includes(subdomain)) {
