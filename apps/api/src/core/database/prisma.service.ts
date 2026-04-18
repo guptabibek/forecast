@@ -71,12 +71,18 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       switch (params.action) {
         case 'findUnique': {
           params.action = 'findFirst';
-          args.where = this.mergeWhereWithTenant(args.where, tenantId);
+          args.where = this.mergeWhereWithTenant(
+            this.flattenCompositeKeys(args.where),
+            tenantId,
+          );
           break;
         }
         case 'findUniqueOrThrow': {
           params.action = 'findFirstOrThrow';
-          args.where = this.mergeWhereWithTenant(args.where, tenantId);
+          args.where = this.mergeWhereWithTenant(
+            this.flattenCompositeKeys(args.where),
+            tenantId,
+          );
           break;
         }
         case 'findFirst':
@@ -124,6 +130,30 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       ...(where || {}),
       tenantId,
     };
+  }
+
+  /**
+   * Flatten composite unique key objects (e.g. `tenantId_email: { tenantId, email }`)
+   * into individual scalar fields so they work with `findFirst` after the
+   * `findUnique` → `findFirst` conversion the tenant middleware applies.
+   */
+  private flattenCompositeKeys(where: Record<string, unknown> | undefined): Record<string, unknown> {
+    if (!where) return {};
+    const flat: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(where)) {
+      if (
+        value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        key.includes('_') // composite keys use underscore-joined field names
+      ) {
+        // Expand the composite object into its scalar fields
+        Object.assign(flat, value);
+      } else {
+        flat[key] = value;
+      }
+    }
+    return flat;
   }
 
   private mergeDataWithTenant(data: Record<string, unknown> | undefined, tenantId: string) {
