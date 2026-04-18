@@ -270,12 +270,13 @@ export class ForecastsService {
 
         // Persist results atomically
         if (isPersistent && adjustedForecasts.length > 0) {
-          await this.prisma.$transaction(async (tx) => {
+          await this.prisma.$transaction(
+            async (tx) => {
             await tx.forecast.deleteMany({
               where: { tenantId: user.tenantId, planVersionId, scenarioId, forecastModel: modelName },
             });
 
-            const batchSize = 1000;
+            const batchSize = 500;
             for (let i = 0; i < adjustedForecasts.length; i += batchSize) {
               const batch = adjustedForecasts.slice(i, i + batchSize);
               await tx.forecastResult.createMany({
@@ -321,7 +322,9 @@ export class ForecastsService {
                 })),
               });
             }
-          });
+          },
+          { maxWait: 10000, timeout: 60000 },
+          );
         }
 
         // Mark run as completed
@@ -829,7 +832,22 @@ export class ForecastsService {
   }
 
   async getAccuracyMetrics(planVersionId: string, scenarioId: string, user: any) {
-    const run = await this.getLatestCompletedRun(planVersionId, scenarioId, user.tenantId);
+    let run;
+    try {
+      run = await this.getLatestCompletedRun(planVersionId, scenarioId, user.tenantId);
+    } catch (err) {
+      if (err instanceof NotFoundException) {
+        return {
+          planVersionId,
+          scenarioId,
+          forecastRunId: null,
+          metrics: { mape: null, rmse: null, mae: null, bias: null, accuracy: null },
+          dataPoints: 0,
+          actualsAvailable: 0,
+        };
+      }
+      throw err;
+    }
 
     const [results, overrides] = await Promise.all([
       this.prisma.forecastResult.findMany({
@@ -1636,7 +1654,7 @@ export class ForecastsService {
               };
             }
           } catch (e) {
-            this.logger.warn(`Failed to calculate CV metrics for ${run.forecastModel}: ${e.message}`);
+            this.logger.warn(`Failed to calculate CV metrics for ${run.forecastModel}: ${(e as Error).message}`);
           }
         }
       }

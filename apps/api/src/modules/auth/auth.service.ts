@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
+import { ClsService } from 'nestjs-cls';
 import { v4 as uuidv4 } from 'uuid';
 import { PrismaService } from '../../core/database/prisma.service';
 import { TenantAccessService } from '../../core/database/tenant-access.service';
@@ -35,6 +36,7 @@ export class AuthService {
     private readonly emailService: EmailService,
     private readonly rolesService: RolesService,
     private readonly tenantAccessService: TenantAccessService,
+    private readonly cls: ClsService,
   ) {}
 
   async login(dto: LoginDto): Promise<TokenResponse> {
@@ -53,6 +55,12 @@ export class AuthService {
 
     if (!tenant) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Set CLS tenant context so subsequent Prisma calls don't warn about
+    // tenant-scoped models (User, RefreshToken, AuditLog) accessed without context.
+    if (this.cls.isActive()) {
+      this.cls.set('tenantId', tenant.id);
     }
 
     const tenantAccessBlock = this.tenantAccessService.getAccessBlockMessage(tenant);
@@ -173,6 +181,12 @@ export class AuthService {
     }
 
     const { user } = tokenRecord;
+
+    // Set CLS tenant context so subsequent Prisma calls (update, generateTokens)
+    // don't warn about tenant-scoped models accessed without context.
+    if (user.tenantId && this.cls.isActive()) {
+      this.cls.set('tenantId', user.tenantId);
+    }
 
     // Check user and tenant status
     if (user.status !== 'ACTIVE') {

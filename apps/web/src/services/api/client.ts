@@ -34,12 +34,41 @@ function shouldSkipRefresh(path?: string): boolean {
   return AUTH_PATHS.some((authPath) => path.includes(authPath));
 }
 
+// Decode JWT exp without a library — returns epoch seconds or null
+function getTokenExp(token: string): number | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof decoded.exp === 'number' ? decoded.exp : null;
+  } catch {
+    return null;
+  }
+}
+
 // Request interceptor - add auth token + track mutations
 apiClient.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
+  async (config: InternalAxiosRequestConfig) => {
     const { tokens, user } = useAuthStore.getState();
-    if (tokens?.accessToken) {
-      config.headers.Authorization = `Bearer ${tokens.accessToken}`;
+
+    // Proactive token refresh — if the token expires within 60 seconds,
+    // refresh it BEFORE the request to avoid a 401 round-trip.
+    if (tokens?.accessToken && !shouldSkipRefresh(config.url)) {
+      const exp = getTokenExp(tokens.accessToken);
+      if (exp && exp - Date.now() / 1000 < 60) {
+        try {
+          await useAuthStore.getState().refreshToken();
+        } catch {
+          // Refresh failed — let the request proceed with the old token;
+          // the response interceptor will handle the resulting 401.
+        }
+      }
+    }
+
+    // Re-read tokens after potential refresh
+    const currentTokens = useAuthStore.getState().tokens;
+    if (currentTokens?.accessToken) {
+      config.headers.Authorization = `Bearer ${currentTokens.accessToken}`;
     }
 
     if (user?.tenantId) {

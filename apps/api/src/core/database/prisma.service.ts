@@ -244,8 +244,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
    */
   async executeInTransaction<T>(
     callback: (tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>) => Promise<T>,
+    options?: { maxWait?: number; timeout?: number },
   ): Promise<T> {
-    return this.$transaction(callback);
+    return this.$transaction(callback, {
+      maxWait: options?.maxWait ?? 10000,
+      timeout: options?.timeout ?? 120000,
+    });
   }
 
   /**

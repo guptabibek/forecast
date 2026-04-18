@@ -1,3 +1,4 @@
+import { useAuthStore } from '@stores/auth.store';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AuditLogParams, auditService } from '../services/api/audit.service';
 import { NotificationParams, notificationService } from '../services/api/notification.service';
@@ -55,18 +56,22 @@ export function useEntityHistory(entityType: string, entityId: string) {
 // ============================================================================
 
 export function useNotifications(params?: NotificationParams) {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   return useQuery({
     queryKey: notificationKeys.list(params),
     queryFn: () => notificationService.getNotifications(params),
     refetchInterval: 30000, // Poll every 30 seconds
+    enabled: isAuthenticated,
   });
 }
 
 export function useUnreadCount() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   return useQuery({
     queryKey: notificationKeys.unreadCount(),
     queryFn: () => notificationService.getUnreadCount(),
     refetchInterval: 15000, // Poll every 15 seconds
+    enabled: isAuthenticated,
   });
 }
 

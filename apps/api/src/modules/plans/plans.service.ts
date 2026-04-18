@@ -1,5 +1,6 @@
 import {
     BadRequestException,
+    ConflictException,
     Injectable,
     Logger,
     NotFoundException,
@@ -46,6 +47,16 @@ export class PlansService {
     
     // Use transaction to ensure atomic creation
     const planVersion = await this.prisma.$transaction(async (tx) => {
+      // Check for existing plan with same name+version to provide a clear error
+      const existing = await tx.planVersion.findFirst({
+        where: { tenantId: user.tenantId, name: createPlanDto.name, version: 1 },
+        select: { id: true },
+      });
+      if (existing) {
+        throw new ConflictException(
+          `A plan named "${createPlanDto.name}" already exists. Use a different name or update the existing plan.`,
+        );
+      }
       const startDate = new Date(createPlanDto.startDate);
       const fiscalYear = createPlanDto.fiscalYear || this.calculateFiscalYear(startDate);
       

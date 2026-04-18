@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
+import { ClsService } from 'nestjs-cls';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { SUPER_ADMIN_STATIC_ID } from '../../platform/platform.constants';
@@ -24,6 +25,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly cls: ClsService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -33,6 +35,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload) {
+    // Set tenant context early so Prisma middleware doesn't warn about
+    // tenant-scoped models (User, Tenant) accessed without CLS context.
+    if (payload.tenantId && this.cls.isActive()) {
+      this.cls.set('tenantId', payload.tenantId);
+    }
+
     // Static super-admin — no DB row exists
     if (payload.sub === SUPER_ADMIN_STATIC_ID) {
       return {

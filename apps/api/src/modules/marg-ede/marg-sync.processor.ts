@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import { PrismaService } from '../../core/database/prisma.service';
 import { QUEUE_NAMES } from '../../core/queue/queue.constants';
 import { MargEdeService } from './marg-ede.service';
 
@@ -15,12 +16,16 @@ interface MargSyncJobData {
 export class MargSyncProcessor extends WorkerHost {
   private readonly logger = new Logger(MargSyncProcessor.name);
 
-  constructor(private readonly margEdeService: MargEdeService) {
+  constructor(
+    private readonly margEdeService: MargEdeService,
+    private readonly prisma: PrismaService,
+  ) {
     super();
   }
 
   async process(job: Job<MargSyncJobData>): Promise<any> {
     const { configId, tenantId, triggeredBy, fromDate } = job.data;
+    this.prisma.setTenantContext(tenantId);
     this.logger.log(`Starting Marg EDE sync: configId=${configId}, tenantId=${tenantId}${fromDate ? `, fromDate=${fromDate}` : ''}`);
 
     try {

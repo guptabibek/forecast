@@ -10,10 +10,10 @@ export class ForecastQueryDto {
   @IsOptional()
   page?: number = 1;
 
-  @ApiPropertyOptional({ default: 20, maximum: 500 })
+  @ApiPropertyOptional({ default: 20, maximum: 5000 })
   @IsNumber()
   @Min(1)
-  @Max(500)
+  @Max(5000)
   @Type(() => Number)
   @IsOptional()
   pageSize?: number = 20;

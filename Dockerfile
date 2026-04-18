@@ -19,7 +19,11 @@ COPY apps/api/prisma ./prisma
 COPY apps/api ./
 
 RUN npx prisma generate
+
+# Large TS files + NestJS Swagger plugin need extra heap for compilation
+ENV NODE_OPTIONS="--max-old-space-size=1536"
 RUN npm run build
+ENV NODE_OPTIONS=""
 
 FROM node:20-bullseye-slim AS api-runtime
 
@@ -29,18 +33,16 @@ COPY --from=api-builder /workspace/apps/api/package*.json ./
 COPY --from=api-builder /workspace/apps/api/node_modules ./node_modules
 COPY --from=api-builder /workspace/apps/api/dist ./dist
 COPY --from=api-builder /workspace/apps/api/prisma ./prisma
-COPY scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN chmod +x /app/docker-entrypoint.sh && chown -R node:node /app
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
+  && chmod +x /usr/local/bin/docker-entrypoint.sh
+
 
 USER node
 
 EXPOSE 3000
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/api/v1/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
-
-CMD ["/app/docker-entrypoint.sh"]
+CMD ["/bin/sh", "/usr/local/bin/docker-entrypoint.sh"]
 
 ########################
 # Web build/runtime

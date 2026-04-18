@@ -48,6 +48,7 @@ export class MargSyncScheduler {
       if (!this.margSyncQueue) {
         this.logger.warn(`Redis not configured — running scheduled Marg sync inline for config=${config.id}`);
         try {
+          this.prisma.setTenantContext(config.tenantId);
           await this.margEdeService.runSync(config.id, config.tenantId, 'scheduler');
         } catch (error) {
           this.logger.error(

@@ -42,7 +42,7 @@ services:
       SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-false}
       SMTP_IGNORE_TLS: ${SMTP_IGNORE_TLS:-false}
       SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-true}
-      NODE_OPTIONS: "--max-old-space-size=512"
+      NODE_OPTIONS: "--max-old-space-size=1024"
     ports:
       - "${API_EXTERNAL_PORT:-3001}:3000"
 
