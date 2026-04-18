@@ -27,6 +27,7 @@ import { ForecastsModule } from './modules/forecasts/forecasts.module';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
 import { MargEdeModule } from './modules/marg-ede/marg-ede.module';
 import { NotificationFeatureModule } from './modules/notifications/notification.module';
+import { PharmaReportsModule } from './modules/pharma-reports/pharma-reports.module';
 import { PlansModule } from './modules/plans/plans.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -111,6 +112,7 @@ import { AppController } from './app.controller';
     AuditFeatureModule,
     NotificationFeatureModule,
     MargEdeModule,
+    PharmaReportsModule,
     PlatformModule,
     RolesModule,
   ],

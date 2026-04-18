@@ -28,6 +28,7 @@ const CreatePlan = lazy(() => import('@pages/plans/CreatePlan'));
 const PlanDetail = lazy(() => import('@pages/plans/PlanDetail'));
 const Plans = lazy(() => import('@pages/plans/Plans'));
 const Reports = lazy(() => import('@pages/reports/Reports'));
+const PharmaReportsRoutes = lazy(() => import('@pages/pharma-reports/PharmaReportsRoutes'));
 const Scenarios = lazy(() => import('@pages/scenarios/Scenarios'));
 const AuditLog = lazy(() => import('@pages/settings/AuditLog'));
 const Notifications = lazy(() => import('@pages/settings/Notifications'));
@@ -199,6 +200,7 @@ export default function App() {
 
         {/* Reports */}
         <Route path="/reports" element={<Reports />} />
+        <Route path="/pharma-reports/*" element={<PharmaReportsRoutes />} />
 
         {/* Settings */}
         <Route path="/settings" element={<RoleAwareRoute restrictForecastViewer><Settings /></RoleAwareRoute>} />

@@ -24,6 +24,7 @@ export { margEdeService } from './marg-ede.service';
 export { mrpService } from './mrp.service';
 export { notificationService } from './notification.service';
 export { npiService } from './npi.service';
+export { pharmaReportsService } from './pharma-reports.service';
 export { productCategoryService } from './product-category.service';
 export { productCostingService } from './product-costing.service';
 export { downtimeReasonService, downtimeRecordService, productionKpiService, productionLineService, scrapReasonService } from './production.service';

@@ -2,8 +2,11 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import {
     ActualType,
     AuditAction,
+    BatchStatus,
     CustomerType,
     DimensionStatus,
+    InventoryTransactionType,
+    LedgerEntryType,
     LocationType,
     PeriodType,
     Prisma,
@@ -494,6 +497,9 @@ export class MargEdeService {
       await this.transformParties(tenantId);
       await this.transformTransactionsToActuals(tenantId);
       await this.transformStockToInventoryLevels(tenantId);
+      await this.transformStockToBatches(tenantId);
+      await this.transformTransactionsToInventoryTransactions(tenantId);
+      await this.transformTransactionsToInventoryLedger(tenantId);
 
       // Update sync config with latest cursor
       await this.margPrisma.margSyncConfig.update({
@@ -1408,14 +1414,77 @@ export class MargEdeService {
     }
   }
 
-  /** Transform staged Marg stock → InventoryLevel records */
+  /** Transform staged Marg stock → InventoryLevel records (aggregated per product+location) */
   private async transformStockToInventoryLevels(tenantId: string): Promise<void> {
+    // Aggregate all marg_stocks rows per (pid, companyId) to get correct totals.
+    // Multiple batches of the same product exist; the old row-by-row approach
+    // would overwrite with the last batch's individual stock, producing wrong totals.
+    const aggregated = await this.margPrisma.margStock.groupBy({
+      by: ['companyId', 'pid'],
+      where: { tenantId },
+      _sum: { stock: true },
+      _count: true,
+    });
+
+    for (const agg of aggregated) {
+      const productId = await this.resolveProductId(tenantId, agg.companyId, agg.pid);
+      const locationId = await this.resolveLocationId(tenantId, agg.companyId);
+      if (!productId || !locationId) continue;
+
+      const totalQty = agg._sum.stock != null ? Number(agg._sum.stock) : 0;
+
+      // Compute weighted average cost from individual batch rows
+      const batchRows = await this.margPrisma.margStock.findMany({
+        where: { tenantId, companyId: agg.companyId, pid: agg.pid },
+        select: { stock: true, pRate: true },
+      });
+
+      let totalValue = 0;
+      let totalQtyForAvg = 0;
+      for (const br of batchRows) {
+        const q = br.stock != null ? Number(br.stock) : 0;
+        const r = br.pRate != null ? Number(br.pRate) : 0;
+        if (q > 0 && r > 0) {
+          totalValue += q * r;
+          totalQtyForAvg += q;
+        }
+      }
+      const avgCost = totalQtyForAvg > 0 ? totalValue / totalQtyForAvg : null;
+
+      await this.prisma.inventoryLevel.upsert({
+        where: {
+          tenantId_productId_locationId: { tenantId, productId, locationId },
+        },
+        create: {
+          tenantId,
+          productId,
+          locationId,
+          onHandQty: totalQty,
+          availableQty: totalQty,
+          averageCost: avgCost != null ? new Prisma.Decimal(avgCost) : null,
+          inventoryValue: avgCost != null ? new Prisma.Decimal(totalQty * avgCost) : null,
+        },
+        update: {
+          onHandQty: totalQty,
+          availableQty: totalQty,
+          averageCost: avgCost != null ? new Prisma.Decimal(avgCost) : null,
+          inventoryValue: avgCost != null ? new Prisma.Decimal(totalQty * avgCost) : null,
+        },
+      });
+    }
+  }
+
+  // ===================== PHARMA REPORTING TRANSFORMS =====================
+
+  /** Transform staged Marg stock rows → Batch records (pharma batch tracking) */
+  private async transformStockToBatches(tenantId: string): Promise<void> {
     let cursor: string | null = null;
 
     while (true) {
       const staged = await this.margPrisma.margStock.findMany({
         where: {
           tenantId,
+          batch: { not: '_default' },
           ...(cursor ? { id: { gt: cursor } } : {}),
         },
         orderBy: { id: 'asc' },
@@ -1427,32 +1496,269 @@ export class MargEdeService {
       for (const ms of staged) {
         const productId = await this.resolveProductId(tenantId, ms.companyId, ms.pid);
         const locationId = await this.resolveLocationId(tenantId, ms.companyId);
-
         if (!productId || !locationId) continue;
 
-        const onHandQty = ms.stock != null ? Number(ms.stock) : 0;
-        const averageCost = ms.pRate != null ? Number(ms.pRate) : null;
+        const qty = ms.stock != null ? Number(ms.stock) : 0;
+        const costPerUnit = ms.pRate != null ? new Prisma.Decimal(Number(ms.pRate)) : null;
+        const batchNumber = ms.batch.substring(0, 50);
 
-        await this.prisma.inventoryLevel.upsert({
-          where: {
-            tenantId_productId_locationId: { tenantId, productId, locationId },
-          },
-          create: {
-            tenantId,
-            productId,
-            locationId,
-            onHandQty,
-            availableQty: onHandQty,
-            averageCost: averageCost != null ? new Prisma.Decimal(averageCost) : null,
-            inventoryValue: averageCost != null ? new Prisma.Decimal(onHandQty * averageCost) : null,
-          },
-          update: {
-            onHandQty,
-            availableQty: onHandQty,
-            averageCost: averageCost != null ? new Prisma.Decimal(averageCost) : null,
-            inventoryValue: averageCost != null ? new Prisma.Decimal(onHandQty * averageCost) : null,
-          },
+        // Determine status based on expiry and quantity
+        let status: BatchStatus = BatchStatus.AVAILABLE;
+        if (qty <= 0) {
+          status = BatchStatus.CONSUMED;
+        } else if (ms.expiry && new Date(ms.expiry) < new Date()) {
+          status = BatchStatus.EXPIRED;
+        }
+
+        try {
+          const existing = await this.prisma.batch.findFirst({
+            where: { tenantId, batchNumber },
+            select: { id: true },
+          });
+          if (existing) {
+            await this.prisma.batch.update({
+              where: { id: existing.id },
+              data: {
+                quantity: qty,
+                availableQty: qty,
+                status,
+                manufacturingDate: ms.batDate ?? null,
+                expiryDate: ms.expiry ?? null,
+                costPerUnit,
+              },
+            });
+          } else {
+            await this.prisma.batch.create({
+              data: {
+                tenantId,
+                batchNumber,
+                productId,
+                locationId,
+                quantity: qty,
+                availableQty: qty,
+                uom: 'PCS',
+                status,
+                manufacturingDate: ms.batDate ?? null,
+                expiryDate: ms.expiry ?? null,
+                costPerUnit,
+              },
+            });
+          }
+        } catch (err) {
+          // Skip duplicate/constraint errors silently
+          this.logger.debug(`Batch upsert skipped for ${batchNumber}: ${err}`);
+        }
+      }
+
+      cursor = staged[staged.length - 1].id;
+    }
+  }
+
+  /** Transform staged Marg transactions → InventoryTransaction records */
+  private async transformTransactionsToInventoryTransactions(tenantId: string): Promise<void> {
+    // Resolve a system user for createdById (required FK)
+    const systemUser = await this.prisma.user.findFirst({
+      where: { tenantId },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!systemUser) {
+      this.logger.warn('No user found for tenant — skipping inventory transaction transform');
+      return;
+    }
+
+    let cursor: string | null = null;
+
+    while (true) {
+      const staged = await this.margPrisma.margTransaction.findMany({
+        where: {
+          tenantId,
+          qty: { not: null },
+          ...(cursor ? { id: { gt: cursor } } : {}),
+        },
+        orderBy: { id: 'asc' },
+        take: TRANSFORM_BATCH_SIZE,
+      });
+
+      if (staged.length === 0) break;
+
+      for (const mt of staged) {
+        if (!mt.qty || Number(mt.qty) === 0) continue;
+        if (!mt.pid) continue;
+
+        const productId = await this.resolveProductId(tenantId, mt.companyId, mt.pid);
+        const locationId = await this.resolveLocationId(tenantId, mt.companyId);
+        if (!productId || !locationId) continue;
+
+        // Map Marg type → InventoryTransactionType
+        // G=Goods Sent/Challan, S=Sales Invoice, D=Dispatch → ISSUE
+        // P=Purchase → RECEIPT
+        // R=Sales Return → RETURN
+        // X=Purchase Return → ADJUSTMENT_OUT
+        // L=Loss/Breakage → SCRAP
+        // B=Branch Transfer → TRANSFER
+        // V=Voucher, W=Write-off, O=Other → ADJUSTMENT_OUT
+        const typeMap: Record<string, InventoryTransactionType> = {
+          G: InventoryTransactionType.ISSUE,
+          S: InventoryTransactionType.ISSUE,
+          D: InventoryTransactionType.ISSUE,
+          P: InventoryTransactionType.RECEIPT,
+          R: InventoryTransactionType.RETURN,
+          X: InventoryTransactionType.ADJUSTMENT_OUT,
+          L: InventoryTransactionType.SCRAP,
+          B: InventoryTransactionType.TRANSFER,
+          V: InventoryTransactionType.ADJUSTMENT_OUT,
+          W: InventoryTransactionType.SCRAP,
+          O: InventoryTransactionType.ADJUSTMENT_IN,
+        };
+
+        const txType = typeMap[mt.type.toUpperCase()] ?? InventoryTransactionType.ADJUSTMENT_IN;
+        const qty = Math.abs(Number(mt.qty));
+        const unitCost = mt.rate != null ? new Prisma.Decimal(Number(mt.rate)) : null;
+        const totalCost = mt.amount != null ? new Prisma.Decimal(Math.abs(Number(mt.amount))) : null;
+
+        // Resolve batch if present
+        let batchId: string | null = null;
+        if (mt.batch) {
+          const batch = await this.prisma.batch.findFirst({
+            where: { tenantId, batchNumber: mt.batch.substring(0, 50) },
+            select: { id: true },
+          });
+          batchId = batch?.id ?? null;
+        }
+
+        // Use sourceKey as idempotency key via referenceNumber
+        const refNumber = `MARG-${mt.sourceKey}`.substring(0, 50);
+
+        // Check if already transformed (idempotent)
+        const exists = await this.prisma.inventoryTransaction.findFirst({
+          where: { tenantId, referenceNumber: refNumber },
+          select: { id: true },
         });
+        if (exists) continue;
+
+        try {
+          await this.prisma.inventoryTransaction.create({
+            data: {
+              tenantId,
+              transactionType: txType,
+              productId,
+              locationId,
+              quantity: qty,
+              uom: 'PCS',
+              transactionDate: mt.date,
+              referenceType: 'MARG_EDE',
+              referenceNumber: refNumber,
+              batchId,
+              unitCost,
+              totalCost,
+              lotNumber: mt.batch?.substring(0, 50) ?? null,
+              notes: `Marg voucher ${mt.voucher} (${mt.type})`,
+              createdById: systemUser.id,
+            },
+          });
+        } catch (err) {
+          this.logger.debug(`Inventory transaction create skipped: ${err}`);
+        }
+      }
+
+      cursor = staged[staged.length - 1].id;
+    }
+  }
+
+  /** Transform staged Marg transactions → InventoryLedger entries (movement log with running balance) */
+  private async transformTransactionsToInventoryLedger(tenantId: string): Promise<void> {
+    const systemUser = await this.prisma.user.findFirst({
+      where: { tenantId },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    let cursor: string | null = null;
+
+    while (true) {
+      const staged = await this.margPrisma.margTransaction.findMany({
+        where: {
+          tenantId,
+          qty: { not: null },
+          ...(cursor ? { id: { gt: cursor } } : {}),
+        },
+        orderBy: { id: 'asc' },
+        take: TRANSFORM_BATCH_SIZE,
+      });
+
+      if (staged.length === 0) break;
+
+      for (const mt of staged) {
+        if (!mt.qty || Number(mt.qty) === 0) continue;
+        if (!mt.pid) continue;
+
+        const productId = await this.resolveProductId(tenantId, mt.companyId, mt.pid);
+        const locationId = await this.resolveLocationId(tenantId, mt.companyId);
+        if (!productId || !locationId) continue;
+
+        // Map Marg type → LedgerEntryType
+        const ledgerMap: Record<string, LedgerEntryType> = {
+          G: LedgerEntryType.LEDGER_ISSUE,
+          S: LedgerEntryType.LEDGER_ISSUE,
+          D: LedgerEntryType.LEDGER_ISSUE,
+          P: LedgerEntryType.LEDGER_RECEIPT,
+          R: LedgerEntryType.LEDGER_RETURN,
+          X: LedgerEntryType.LEDGER_ADJUSTMENT,
+          L: LedgerEntryType.LEDGER_SCRAP,
+          B: LedgerEntryType.LEDGER_TRANSFER_OUT,
+          V: LedgerEntryType.LEDGER_ADJUSTMENT,
+          W: LedgerEntryType.LEDGER_SCRAP,
+          O: LedgerEntryType.LEDGER_ADJUSTMENT,
+        };
+
+        const entryType = ledgerMap[mt.type.toUpperCase()] ?? LedgerEntryType.LEDGER_ADJUSTMENT;
+        const qty = Number(mt.qty);
+        const unitCost = mt.rate != null ? Number(mt.rate) : 0;
+        const totalCost = mt.amount != null ? Number(mt.amount) : qty * unitCost;
+
+        // Resolve batch if present
+        let batchId: string | null = null;
+        if (mt.batch) {
+          const batch = await this.prisma.batch.findFirst({
+            where: { tenantId, batchNumber: mt.batch.substring(0, 50) },
+            select: { id: true },
+          });
+          batchId = batch?.id ?? null;
+        }
+
+        const refNumber = `MARG-${mt.sourceKey}`.substring(0, 50);
+
+        // Check if already transformed (idempotent)
+        const exists = await this.prisma.inventoryLedger.findFirst({
+          where: { tenantId, referenceNumber: refNumber },
+          select: { id: true },
+        });
+        if (exists) continue;
+
+        try {
+          await this.prisma.inventoryLedger.create({
+            data: {
+              tenantId,
+              transactionDate: mt.date,
+              productId,
+              locationId,
+              batchId,
+              entryType,
+              quantity: Math.abs(qty),
+              uom: 'PCS',
+              unitCost: new Prisma.Decimal(unitCost),
+              totalCost: new Prisma.Decimal(Math.abs(totalCost)),
+              referenceType: 'MARG_EDE',
+              referenceNumber: refNumber,
+              lotNumber: mt.batch?.substring(0, 50) ?? null,
+              createdById: systemUser?.id ?? null,
+              notes: `Marg voucher ${mt.voucher} (${mt.type})`,
+            },
+          });
+        } catch (err) {
+          this.logger.debug(`Inventory ledger create skipped: ${err}`);
+        }
       }
 
       cursor = staged[staged.length - 1].id;
