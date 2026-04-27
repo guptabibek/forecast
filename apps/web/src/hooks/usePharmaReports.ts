@@ -1,6 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { PharmaFilters, pharmaReportsService } from '../services/api/pharma-reports.service';
 
+const dashboardQueryBehavior = {
+  retry: false,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
+} as const;
+
 export const pharmaKeys = {
   all: ['pharma-reports'] as const,
   dashboard: () => [...pharmaKeys.all, 'dashboard'] as const,
@@ -41,6 +47,7 @@ export function useDashboardKPIs(filters?: PharmaFilters) {
   return useQuery({
     queryKey: pharmaKeys.kpis(filters),
     queryFn: () => pharmaReportsService.getDashboardKPIs(filters),
+    ...dashboardQueryBehavior,
   });
 }
 
@@ -48,6 +55,7 @@ export function useExpiryLossTrend(filters?: PharmaFilters) {
   return useQuery({
     queryKey: pharmaKeys.expiryLossTrend(filters),
     queryFn: () => pharmaReportsService.getExpiryLossTrend(filters),
+    ...dashboardQueryBehavior,
   });
 }
 
@@ -55,6 +63,7 @@ export function useInventoryValueTrend() {
   return useQuery({
     queryKey: pharmaKeys.inventoryValueTrend(),
     queryFn: () => pharmaReportsService.getInventoryValueTrend(),
+    ...dashboardQueryBehavior,
   });
 }
 
@@ -184,5 +193,6 @@ export function usePharmaAlerts(config?: { nearExpiryDays?: number; aClassOnly?:
   return useQuery({
     queryKey: pharmaKeys.alerts(config),
     queryFn: () => pharmaReportsService.getAlerts(config),
+    ...dashboardQueryBehavior,
   });
 }

@@ -15,6 +15,18 @@ interface DimensionFilters {
   customerId?: { in: string[] };
 }
 
+type DashboardGranularity = NonNullable<DashboardFilterDto['granularity']>;
+
+interface DashboardDateRange {
+  start: Date;
+  end: Date;
+}
+
+const DEFAULT_DASHBOARD_PERIODS = 6;
+const DEFAULT_ANALYTICS_PERIODS = 12;
+const MAX_DASHBOARD_FORECAST_ROWS = 5000;
+const MAX_DASHBOARD_ACTUAL_ROWS = 10000;
+
 function buildDimensionFilters(filters?: DashboardFilterDto): DimensionFilters {
   const conditions: DimensionFilters = {};
   if (filters?.productIds?.length) {
@@ -29,6 +41,92 @@ function buildDimensionFilters(filters?: DashboardFilterDto): DimensionFilters {
 @Injectable()
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private resolveDashboardDateRange(
+    filters?: DashboardFilterDto,
+    defaultPeriods: number = DEFAULT_DASHBOARD_PERIODS,
+    defaultGranularity: DashboardGranularity = 'monthly',
+  ): DashboardDateRange {
+    const safeEnd = filters?.endDate ? new Date(filters.endDate) : new Date();
+    const end = Number.isNaN(safeEnd.getTime()) ? new Date() : safeEnd;
+    end.setHours(23, 59, 59, 999);
+
+    if (filters?.startDate) {
+      const parsedStart = new Date(filters.startDate);
+      if (!Number.isNaN(parsedStart.getTime())) {
+        parsedStart.setHours(0, 0, 0, 0);
+        return { start: parsedStart, end };
+      }
+    }
+
+    const granularity = filters?.granularity ?? defaultGranularity;
+    const periods = Math.max(1, filters?.periods ?? defaultPeriods);
+    const start = new Date(end);
+
+    switch (granularity) {
+      case 'daily':
+        start.setDate(start.getDate() - (periods - 1));
+        break;
+      case 'weekly':
+        start.setDate(start.getDate() - ((periods * 7) - 1));
+        break;
+      case 'quarterly':
+        start.setMonth(start.getMonth() - (periods * 3) + 1, 1);
+        break;
+      case 'monthly':
+      default:
+        start.setMonth(start.getMonth() - periods + 1, 1);
+        break;
+    }
+
+    start.setHours(0, 0, 0, 0);
+    return { start, end };
+  }
+
+  private buildDashboardComparisonKey(
+    periodDate: Date,
+    productId?: string | null,
+    locationId?: string | null,
+    customerId?: string | null,
+  ): string {
+    return [
+      periodDate.toISOString().split('T')[0],
+      productId || '',
+      locationId || '',
+      customerId || '',
+    ].join('|');
+  }
+
+  private normalizeDashboardPeriod(date: Date, granularity: DashboardGranularity): string {
+    switch (granularity) {
+      case 'daily':
+        return date.toISOString().split('T')[0];
+      case 'weekly': {
+        const weekStart = new Date(date);
+        weekStart.setDate(date.getDate() - date.getDay());
+        return `W${weekStart.toISOString().split('T')[0]}`;
+      }
+      case 'quarterly':
+        return `${date.getFullYear()}-Q${Math.floor(date.getMonth() / 3) + 1}`;
+      case 'monthly':
+      default:
+        return date.toISOString().substring(0, 7);
+    }
+  }
+
+  private formatDashboardPeriodLabel(period: string, granularity: DashboardGranularity): string {
+    switch (granularity) {
+      case 'daily':
+        return new Date(period).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      case 'weekly':
+        return period.replace('W', 'Week ').substring(0, 12);
+      case 'quarterly':
+        return period;
+      case 'monthly':
+      default:
+        return new Date(`${period}-01`).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    }
+  }
 
   // =====================
   // Reports List Methods
@@ -310,34 +408,58 @@ export class ReportsService {
 
   private async calculateAverageAccuracy(tenantId: string, startDate?: Date, endDate?: Date, filters?: DashboardFilterDto) {
     const dimensionFilters = buildDimensionFilters(filters);
+    const dateRange = startDate && endDate
+      ? { start: startDate, end: endDate }
+      : this.resolveDashboardDateRange(filters, DEFAULT_ANALYTICS_PERIODS);
     
     const forecasts = await this.prisma.forecast.findMany({
       where: {
         tenantId,
         ...dimensionFilters,
-        ...(startDate && { periodDate: { gte: startDate } }),
-        ...(endDate && { periodDate: { lt: endDate } }),
+        periodDate: { gte: dateRange.start, lte: dateRange.end },
       },
       select: {
         periodDate: true,
         forecastAmount: true,
         productId: true,
         locationId: true,
+        customerId: true,
       },
       take: 1000,
+      orderBy: { periodDate: 'desc' },
     });
 
     if (forecasts.length === 0) {
       return { mape: 0, rmse: 0 };
     }
 
+    const actualProductIds = [...new Set(forecasts.map((forecast) => forecast.productId).filter((value): value is string => Boolean(value)))];
+    const actualLocationIds = [...new Set(forecasts.map((forecast) => forecast.locationId).filter((value): value is string => Boolean(value)))];
+    const actualCustomerIds = [...new Set(forecasts.map((forecast) => forecast.customerId).filter((value): value is string => Boolean(value)))];
+
     const actuals = await this.prisma.actual.findMany({
-      where: { tenantId },
+      where: {
+        tenantId,
+        ...dimensionFilters,
+        periodDate: { gte: dateRange.start, lte: dateRange.end },
+        ...(actualProductIds.length > 0 ? { productId: { in: actualProductIds } } : {}),
+        ...(actualLocationIds.length > 0 ? { locationId: { in: actualLocationIds } } : {}),
+        ...(actualCustomerIds.length > 0 ? { customerId: { in: actualCustomerIds } } : {}),
+      },
+      select: {
+        periodDate: true,
+        amount: true,
+        productId: true,
+        locationId: true,
+        customerId: true,
+      },
+      take: MAX_DASHBOARD_ACTUAL_ROWS,
+      orderBy: { periodDate: 'desc' },
     });
 
     const actualsMap = new Map<string, number>();
     for (const actual of actuals) {
-      const key = `${actual.periodDate.toISOString().split('T')[0]}-${actual.productId || ''}-${actual.locationId || ''}`;
+      const key = this.buildDashboardComparisonKey(actual.periodDate, actual.productId, actual.locationId, actual.customerId);
       actualsMap.set(key, Number(actual.amount));
     }
 
@@ -345,7 +467,7 @@ export class ReportsService {
     let validComparisons = 0;
 
     for (const forecast of forecasts) {
-      const key = `${forecast.periodDate.toISOString().split('T')[0]}-${forecast.productId || ''}-${forecast.locationId || ''}`;
+      const key = this.buildDashboardComparisonKey(forecast.periodDate, forecast.productId, forecast.locationId, forecast.customerId);
       const actualValue = actualsMap.get(key);
       
       if (actualValue !== undefined && actualValue !== 0) {
@@ -427,33 +549,54 @@ export class ReportsService {
 
   async getModelAccuracyComparison(tenantId: string, filters?: DashboardFilterDto) {
     const dimensionFilters = buildDimensionFilters(filters);
+    const dateRange = this.resolveDashboardDateRange(filters, DEFAULT_ANALYTICS_PERIODS);
     
     const forecasts = await this.prisma.forecast.findMany({
-      where: { tenantId, ...dimensionFilters },
+      where: {
+        tenantId,
+        ...dimensionFilters,
+        periodDate: { gte: dateRange.start, lte: dateRange.end },
+      },
       select: {
         forecastModel: true,
         periodDate: true,
         forecastAmount: true,
         productId: true,
         locationId: true,
+        customerId: true,
       },
+      take: MAX_DASHBOARD_FORECAST_ROWS,
+      orderBy: { periodDate: 'desc' },
     });
 
+    const forecastProductIds = [...new Set(forecasts.map((forecast) => forecast.productId).filter((value): value is string => Boolean(value)))];
+    const forecastLocationIds = [...new Set(forecasts.map((forecast) => forecast.locationId).filter((value): value is string => Boolean(value)))];
+    const forecastCustomerIds = [...new Set(forecasts.map((forecast) => forecast.customerId).filter((value): value is string => Boolean(value)))];
+
     const actuals = await this.prisma.actual.findMany({
-      where: { tenantId, ...dimensionFilters },
-      select: { periodDate: true, amount: true, productId: true, locationId: true },
+      where: {
+        tenantId,
+        ...dimensionFilters,
+        periodDate: { gte: dateRange.start, lte: dateRange.end },
+        ...(forecastProductIds.length > 0 ? { productId: { in: forecastProductIds } } : {}),
+        ...(forecastLocationIds.length > 0 ? { locationId: { in: forecastLocationIds } } : {}),
+        ...(forecastCustomerIds.length > 0 ? { customerId: { in: forecastCustomerIds } } : {}),
+      },
+      select: { periodDate: true, amount: true, productId: true, locationId: true, customerId: true },
+      take: MAX_DASHBOARD_ACTUAL_ROWS,
+      orderBy: { periodDate: 'desc' },
     });
 
     const actualsMap = new Map<string, number>();
     for (const actual of actuals) {
-      const key = `${actual.periodDate.toISOString().split('T')[0]}-${actual.productId || ''}-${actual.locationId || ''}`;
+      const key = this.buildDashboardComparisonKey(actual.periodDate, actual.productId, actual.locationId, actual.customerId);
       actualsMap.set(key, Number(actual.amount));
     }
 
     const modelStats = new Map<string, { totalError: number; count: number }>();
 
     for (const forecast of forecasts) {
-      const key = `${forecast.periodDate.toISOString().split('T')[0]}-${forecast.productId || ''}-${forecast.locationId || ''}`;
+      const key = this.buildDashboardComparisonKey(forecast.periodDate, forecast.productId, forecast.locationId, forecast.customerId);
       const actualValue = actualsMap.get(key);
       
       if (actualValue !== undefined && actualValue !== 0) {
@@ -688,23 +831,43 @@ export class ReportsService {
 
   async getVarianceAlerts(tenantId: string, filters?: DashboardFilterDto) {
     const dimensionFilters = buildDimensionFilters(filters);
+    const dateRange = this.resolveDashboardDateRange(filters, DEFAULT_DASHBOARD_PERIODS);
     
     const forecasts = await this.prisma.forecast.findMany({
-      where: { tenantId, ...dimensionFilters },
+      where: {
+        tenantId,
+        ...dimensionFilters,
+        periodDate: { gte: dateRange.start, lte: dateRange.end },
+      },
       include: {
         product: { select: { name: true } },
         location: { select: { name: true } },
       },
       take: 500,
+      orderBy: { periodDate: 'desc' },
     });
 
+    const forecastProductIds = [...new Set(forecasts.map((forecast) => forecast.productId).filter((value): value is string => Boolean(value)))];
+    const forecastLocationIds = [...new Set(forecasts.map((forecast) => forecast.locationId).filter((value): value is string => Boolean(value)))];
+    const forecastCustomerIds = [...new Set(forecasts.map((forecast) => forecast.customerId).filter((value): value is string => Boolean(value)))];
+
     const actuals = await this.prisma.actual.findMany({
-      where: { tenantId, ...dimensionFilters },
+      where: {
+        tenantId,
+        ...dimensionFilters,
+        periodDate: { gte: dateRange.start, lte: dateRange.end },
+        ...(forecastProductIds.length > 0 ? { productId: { in: forecastProductIds } } : {}),
+        ...(forecastLocationIds.length > 0 ? { locationId: { in: forecastLocationIds } } : {}),
+        ...(forecastCustomerIds.length > 0 ? { customerId: { in: forecastCustomerIds } } : {}),
+      },
+      select: { id: true, periodDate: true, amount: true, productId: true, locationId: true, customerId: true },
+      take: MAX_DASHBOARD_ACTUAL_ROWS,
+      orderBy: { periodDate: 'desc' },
     });
 
     const actualsMap = new Map<string, number>();
     for (const actual of actuals) {
-      const key = `${actual.periodDate.toISOString().split('T')[0]}-${actual.productId || ''}-${actual.locationId || ''}`;
+      const key = this.buildDashboardComparisonKey(actual.periodDate, actual.productId, actual.locationId, actual.customerId);
       actualsMap.set(key, Number(actual.amount));
     }
 
@@ -720,7 +883,7 @@ export class ReportsService {
     }> = [];
 
     for (const forecast of forecasts) {
-      const key = `${forecast.periodDate.toISOString().split('T')[0]}-${forecast.productId || ''}-${forecast.locationId || ''}`;
+      const key = this.buildDashboardComparisonKey(forecast.periodDate, forecast.productId, forecast.locationId, forecast.customerId);
       const actualValue = actualsMap.get(key);
 
       if (actualValue !== undefined) {
@@ -902,76 +1065,49 @@ export class ReportsService {
     }
 
     const [actuals, forecasts] = await Promise.all([
-      this.prisma.actual.findMany({
+      this.prisma.actual.groupBy({
+        by: ['periodDate'],
         where: {
           tenantId,
           periodDate: { gte: rangeStart, lte: rangeEnd },
           ...dimensionFilters,
         },
-        select: { periodDate: true, amount: true },
+        _sum: { amount: true },
+        orderBy: { periodDate: 'asc' },
       }),
-      this.prisma.forecast.findMany({
+      this.prisma.forecast.groupBy({
+        by: ['periodDate'],
         where: {
           tenantId,
           periodDate: { gte: rangeStart, lte: rangeEnd },
           ...dimensionFilters,
         },
-        select: { periodDate: true, forecastAmount: true },
+        _sum: { forecastAmount: true },
+        orderBy: { periodDate: 'asc' },
       }),
     ]);
 
     // Aggregate by period
     const periodData = new Map<string, { actual: number; forecast: number }>();
 
-    const getPeriodKey = (date: Date): string => {
-      switch (granularity) {
-        case 'daily':
-          return date.toISOString().split('T')[0];
-        case 'weekly':
-          const weekStart = new Date(date);
-          weekStart.setDate(date.getDate() - date.getDay());
-          return `W${weekStart.toISOString().split('T')[0]}`;
-        case 'quarterly':
-          const quarter = Math.floor(date.getMonth() / 3) + 1;
-          return `${date.getFullYear()}-Q${quarter}`;
-        case 'monthly':
-        default:
-          return date.toISOString().substring(0, 7);
-      }
-    };
-
-    const getLabel = (key: string): string => {
-      switch (granularity) {
-        case 'daily':
-          return new Date(key).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        case 'weekly':
-          return key.replace('W', 'Week ').substring(0, 12);
-        case 'quarterly':
-          return key;
-        case 'monthly':
-        default:
-          return new Date(key + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-      }
-    };
-
     for (const a of actuals) {
-      const key = getPeriodKey(a.periodDate);
+      const key = this.normalizeDashboardPeriod(a.periodDate, granularity);
       const existing = periodData.get(key) || { actual: 0, forecast: 0 };
-      existing.actual += Number(a.amount);
+      existing.actual += Number(a._sum.amount || 0);
       periodData.set(key, existing);
     }
 
     for (const f of forecasts) {
-      const key = getPeriodKey(f.periodDate);
+      const key = this.normalizeDashboardPeriod(f.periodDate, granularity);
       const existing = periodData.get(key) || { actual: 0, forecast: 0 };
-      existing.forecast += Number(f.forecastAmount);
+      existing.forecast += Number(f._sum.forecastAmount || 0);
       periodData.set(key, existing);
     }
 
     const data = Array.from(periodData.entries())
       .map(([period, values]) => ({
         period,
-        label: getLabel(period),
+        label: this.formatDashboardPeriodLabel(period, granularity),
         actual: values.actual,
         forecast: values.forecast,
         variance: values.actual - values.forecast,
@@ -996,13 +1132,17 @@ export class ReportsService {
     const dimensionFilters = buildDimensionFilters(filters);
 
     const [forecasts, actuals] = await Promise.all([
-      this.prisma.forecast.findMany({
+      this.prisma.forecast.groupBy({
+        by: ['periodDate'],
         where: { tenantId, periodDate: { gte: startDate }, ...dimensionFilters },
-        include: { product: { select: { name: true, category: true } } },
+        _sum: { forecastAmount: true },
+        orderBy: { periodDate: 'asc' },
       }),
-      this.prisma.actual.findMany({
+      this.prisma.actual.groupBy({
+        by: ['periodDate'],
         where: { tenantId, periodDate: { gte: startDate }, ...dimensionFilters },
-        include: { product: { select: { name: true, category: true } } },
+        _sum: { amount: true },
+        orderBy: { periodDate: 'asc' },
       }),
     ]);
 
@@ -1012,14 +1152,14 @@ export class ReportsService {
     for (const f of forecasts) {
       const key = f.periodDate.toISOString().substring(0, 7);
       const existing = monthlyData.get(key) || { demand: 0, supply: 0, gap: 0 };
-      existing.demand += Number(f.forecastAmount);
+      existing.demand += Number(f._sum.forecastAmount || 0);
       monthlyData.set(key, existing);
     }
 
     for (const a of actuals) {
       const key = a.periodDate.toISOString().substring(0, 7);
       const existing = monthlyData.get(key) || { demand: 0, supply: 0, gap: 0 };
-      existing.supply += Number(a.amount);
+      existing.supply += Number(a._sum.amount || 0);
       monthlyData.set(key, existing);
     }
 
@@ -1122,26 +1262,47 @@ export class ReportsService {
 
   async getForecastBiasAnalysis(tenantId: string, filters?: DashboardFilterDto) {
     const dimensionFilters = buildDimensionFilters(filters);
+    const dateRange = this.resolveDashboardDateRange(filters, DEFAULT_ANALYTICS_PERIODS);
     
     const forecasts = await this.prisma.forecast.findMany({
-      where: { tenantId, ...dimensionFilters },
+      where: {
+        tenantId,
+        ...dimensionFilters,
+        periodDate: { gte: dateRange.start, lte: dateRange.end },
+      },
       select: {
         forecastModel: true,
         periodDate: true,
         forecastAmount: true,
         productId: true,
         locationId: true,
+        customerId: true,
       },
+      take: MAX_DASHBOARD_FORECAST_ROWS,
+      orderBy: { periodDate: 'desc' },
     });
 
+    const forecastProductIds = [...new Set(forecasts.map((forecast) => forecast.productId).filter((value): value is string => Boolean(value)))];
+    const forecastLocationIds = [...new Set(forecasts.map((forecast) => forecast.locationId).filter((value): value is string => Boolean(value)))];
+    const forecastCustomerIds = [...new Set(forecasts.map((forecast) => forecast.customerId).filter((value): value is string => Boolean(value)))];
+
     const actuals = await this.prisma.actual.findMany({
-      where: { tenantId, ...dimensionFilters },
-      select: { periodDate: true, amount: true, productId: true, locationId: true },
+      where: {
+        tenantId,
+        ...dimensionFilters,
+        periodDate: { gte: dateRange.start, lte: dateRange.end },
+        ...(forecastProductIds.length > 0 ? { productId: { in: forecastProductIds } } : {}),
+        ...(forecastLocationIds.length > 0 ? { locationId: { in: forecastLocationIds } } : {}),
+        ...(forecastCustomerIds.length > 0 ? { customerId: { in: forecastCustomerIds } } : {}),
+      },
+      select: { periodDate: true, amount: true, productId: true, locationId: true, customerId: true },
+      take: MAX_DASHBOARD_ACTUAL_ROWS,
+      orderBy: { periodDate: 'desc' },
     });
 
     const actualsMap = new Map<string, number>();
     for (const actual of actuals) {
-      const key = `${actual.periodDate.toISOString().split('T')[0]}-${actual.productId || ''}-${actual.locationId || ''}`;
+      const key = this.buildDashboardComparisonKey(actual.periodDate, actual.productId, actual.locationId, actual.customerId);
       actualsMap.set(key, Number(actual.amount));
     }
 
@@ -1154,7 +1315,7 @@ export class ReportsService {
     }>();
 
     for (const forecast of forecasts) {
-      const key = `${forecast.periodDate.toISOString().split('T')[0]}-${forecast.productId || ''}-${forecast.locationId || ''}`;
+      const key = this.buildDashboardComparisonKey(forecast.periodDate, forecast.productId, forecast.locationId, forecast.customerId);
       const actualValue = actualsMap.get(key);
 
       if (actualValue !== undefined) {
@@ -1209,22 +1370,40 @@ export class ReportsService {
     const thresholdA = filters?.thresholdA || 80;
     const thresholdB = filters?.thresholdB || 95;
     const dimensionFilters = buildDimensionFilters(filters);
+    const dateRange = this.resolveDashboardDateRange(filters, DEFAULT_ANALYTICS_PERIODS);
     
-    // Get all actuals with product details (including cost and price for margin calculation)
-    const actuals = await this.prisma.actual.findMany({
-      where: { tenantId, productId: { not: null }, ...dimensionFilters },
-      include: { 
-        product: { 
-          select: { 
-            name: true, 
-            code: true, 
-            category: true,
-            standardCost: true,
-            listPrice: true,
-          } 
-        } 
+    const actuals = await this.prisma.actual.groupBy({
+      by: ['productId'],
+      where: {
+        tenantId,
+        productId: { not: null },
+        periodDate: { gte: dateRange.start, lte: dateRange.end },
+        ...dimensionFilters,
+      },
+      _sum: {
+        amount: true,
+        quantity: true,
+      },
+      orderBy: { _sum: { amount: 'desc' } },
+      take: MAX_DASHBOARD_FORECAST_ROWS,
+    });
+
+    const productIds = actuals.map((actual) => actual.productId).filter((value): value is string => Boolean(value));
+    const products = await this.prisma.product.findMany({
+      where: {
+        tenantId,
+        id: { in: productIds },
+      },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        category: true,
+        standardCost: true,
+        listPrice: true,
       },
     });
+    const productMap = new Map(products.map((product) => [product.id, product]));
 
     // Aggregate metrics by product
     const productMetrics = new Map<string, { 
@@ -1240,12 +1419,13 @@ export class ReportsService {
     }>();
 
     for (const a of actuals) {
-      if (!a.productId || !a.product) continue;
+      const product = a.productId ? productMap.get(a.productId) : null;
+      if (!a.productId || !product) continue;
       
-      const standardCost = Number(a.product.standardCost || 0);
-      const listPrice = Number(a.product.listPrice || 0);
-      const quantity = Number(a.quantity || 1);
-      const amount = Number(a.amount || 0);
+      const standardCost = Number(product.standardCost || 0);
+      const listPrice = Number(product.listPrice || 0);
+      const quantity = Number(a._sum.quantity || 1);
+      const amount = Number(a._sum.amount || 0);
       
       // Calculate margin per unit (listPrice - standardCost)
       // If costs are not available, assume 30% margin as fallback
@@ -1264,9 +1444,9 @@ export class ReportsService {
         existing.totalMargin += marginPerUnit * quantity;
       } else {
         productMetrics.set(a.productId, {
-          name: a.product.name || 'Unknown',
-          code: a.product.code || '',
-          category: a.product.category || 'Uncategorized',
+          name: product.name || 'Unknown',
+          code: product.code || '',
+          category: product.category || 'Uncategorized',
           totalRevenue: amount,
           totalQuantity: quantity,
           standardCost,

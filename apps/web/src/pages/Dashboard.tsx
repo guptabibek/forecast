@@ -665,11 +665,18 @@ const ABCClassificationSection = ({ filterParams }: ABCClassificationProps) => {
     thresholdB: thresholds.thresholdB,
   }), [filterParams, mode, thresholds]);
 
+  const dashboardQueryBehavior = {
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  };
+
   // Fetch ABC analysis data
   const { data: abcData, isLoading, error, refetch } = useQuery({
     queryKey: ['dashboard-abc-analysis', abcParams],
     queryFn: () => reportsService.getABCAnalysis(abcParams),
     staleTime: 30000,
+    ...dashboardQueryBehavior,
   });
 
   // Handle mode change
@@ -1096,53 +1103,67 @@ export default function Dashboard() {
   const productOptions = (productsData || []) as Dimension[];
   const customerOptions = (customersData || []) as Dimension[];
 
+  const dashboardQueryBehavior = {
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  };
+
   // Fetch all dashboard data with filter support
   const { data: statsData, isLoading: statsLoading } = useQuery({
     queryKey: ['dashboard-stats', filterParams],
     queryFn: () => reportsService.getDashboardStats(filterParams),
     staleTime: 30000,
+    ...dashboardQueryBehavior,
   });
 
   const { data: revenueData, isLoading: revenueLoading } = useQuery({
     queryKey: ['dashboard-revenue', filterParams],
     queryFn: () => reportsService.getRevenueMetrics(filterParams),
     staleTime: 30000,
+    ...dashboardQueryBehavior,
   });
 
   const { data: topProducts, isLoading: productsLoading } = useQuery({
     queryKey: ['dashboard-top-products', filterParams],
     queryFn: () => reportsService.getTopProducts({ limit: 5, ...filterParams }),
     staleTime: 60000,
+    ...dashboardQueryBehavior,
   });
 
   const { data: regionalData, isLoading: regionalLoading } = useQuery({
     queryKey: ['dashboard-regional', filterParams],
     queryFn: () => reportsService.getRegionalBreakdown(filterParams),
     staleTime: 60000,
+    ...dashboardQueryBehavior,
   });
 
   const { data: varianceAlerts, isLoading: alertsLoading } = useQuery({
     queryKey: ['dashboard-variance-alerts', filterParams],
     queryFn: () => reportsService.getVarianceAlerts(filterParams),
     staleTime: 30000,
+    ...dashboardQueryBehavior,
   });
 
   const { data: forecastHealth, isLoading: healthLoading } = useQuery({
     queryKey: ['dashboard-forecast-health', filterParams],
     queryFn: () => reportsService.getForecastHealth(filterParams),
     staleTime: 60000,
+    ...dashboardQueryBehavior,
   });
 
   const { data: activityData, isLoading: activityLoading } = useQuery({
     queryKey: ['dashboard-activity'],
     queryFn: () => reportsService.getRecentActivity({ limit: 5 }),
     staleTime: 30000,
+    ...dashboardQueryBehavior,
   });
 
   const { data: modelAccuracy, isLoading: accuracyLoading } = useQuery({
     queryKey: ['dashboard-model-accuracy'],
     queryFn: () => reportsService.getModelAccuracy(),
     staleTime: 60000,
+    ...dashboardQueryBehavior,
   });
 
   // Flexible period trend (with granularity)
@@ -1154,6 +1175,7 @@ export default function Dashboard() {
       ...filterParams,
     }),
     staleTime: 60000,
+    ...dashboardQueryBehavior,
   });
 
   // Demand vs Supply Analysis
@@ -1161,6 +1183,7 @@ export default function Dashboard() {
     queryKey: ['dashboard-demand-supply', filterParams],
     queryFn: () => reportsService.getDemandSupply({ periods: 6, ...filterParams }),
     staleTime: 60000,
+    ...dashboardQueryBehavior,
   });
 
   // Forecast Bias Analysis
@@ -1168,6 +1191,7 @@ export default function Dashboard() {
     queryKey: ['dashboard-forecast-bias', filterParams],
     queryFn: () => reportsService.getForecastBias(filterParams),
     staleTime: 60000,
+    ...dashboardQueryBehavior,
   });
 
   // ABC Analysis is now handled by the ABCClassificationSection component internally

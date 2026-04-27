@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, HttpStatus, Res, SetMetadata } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Res, SetMetadata, VERSION_NEUTRAL } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { TenantCacheService } from './core/cache/tenant-cache.service';
@@ -7,7 +7,7 @@ import { SKIP_TENANT_CHECK } from './core/guards/tenant.guard';
 import { isRedisConfigured } from './core/queue/queue.module';
 
 @ApiTags('Health')
-@Controller()
+@Controller({ version: VERSION_NEUTRAL })
 @SetMetadata(SKIP_TENANT_CHECK, true)
 export class AppController {
   constructor(
