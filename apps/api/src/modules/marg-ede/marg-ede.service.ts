@@ -104,6 +104,10 @@ interface MargAccountingProjectionSummary {
   };
 }
 
+interface MargInventoryProjectionResetResult {
+  affectedLedgerScopes: Set<string>;
+}
+
 interface MargSyncDiagnostics {
   freeQuantityRowCount: number;
   freeOnlyRowCount: number;
@@ -1107,6 +1111,8 @@ export class MargEdeService {
       }
 
       // Step 3: Transform staged data → core tables
+      const shouldResetInventoryProjection = shouldRunInventory && (mode === MARG_SYNC_MODE.REPROJECT || Boolean(dateWindow));
+      let inventoryProjectionReset: MargInventoryProjectionResetResult | null = null;
       if (shouldRunInventory) {
         await this.touchSyncHeartbeat(configId, shouldRunInventory);
         await this.transformBranches(tenantId);
@@ -1122,7 +1128,11 @@ export class MargEdeService {
           this.logger.warn('Supplier projection failed (non-fatal)', err);
         }
         await this.touchSyncHeartbeat(configId, shouldRunInventory);
-        await this.transformTransactionsToActuals(tenantId, dateWindow);
+        if (shouldResetInventoryProjection) {
+          inventoryProjectionReset = await this.resetMargInventoryProjectionWindow(tenantId, dateWindow);
+          await this.touchSyncHeartbeat(configId, shouldRunInventory);
+        }
+        await this.transformTransactionsToActuals(tenantId, dateWindow, shouldResetInventoryProjection);
         if (shouldProcessStockSnapshot) {
           await this.touchSyncHeartbeat(configId, shouldRunInventory);
           await this.transformStockToInventoryLevels(tenantId);
@@ -1130,9 +1140,14 @@ export class MargEdeService {
           await this.transformStockToBatches(tenantId);
         }
         await this.touchSyncHeartbeat(configId, shouldRunInventory);
-        await this.transformTransactionsToInventoryTransactions(tenantId, dateWindow);
+        await this.transformTransactionsToInventoryTransactions(tenantId, dateWindow, shouldResetInventoryProjection);
         await this.touchSyncHeartbeat(configId, shouldRunInventory);
-        await this.transformTransactionsToInventoryLedger(tenantId, dateWindow);
+        await this.transformTransactionsToInventoryLedger(
+          tenantId,
+          dateWindow,
+          shouldResetInventoryProjection,
+          inventoryProjectionReset?.affectedLedgerScopes,
+        );
       }
 
       let accountingProjection: MargAccountingProjectionSummary | null = null;
@@ -2798,6 +2813,64 @@ export class MargEdeService {
     });
   }
 
+  private async resetMargInventoryProjectionWindow(
+    tenantId: string,
+    dateWindow: DateWindow | null,
+  ): Promise<MargInventoryProjectionResetResult> {
+    const dateWhere = this.buildDateWhere(dateWindow);
+    const ledgerRows = await this.prisma.inventoryLedger.findMany({
+      where: {
+        tenantId,
+        referenceType: MARG_SOURCE_SYSTEM,
+        ...(dateWhere ? { transactionDate: dateWhere } : {}),
+      },
+      select: {
+        productId: true,
+        locationId: true,
+      },
+    });
+
+    const affectedLedgerScopes = new Set<string>();
+    for (const row of ledgerRows) {
+      affectedLedgerScopes.add(this.buildInventoryScopeKey(row.productId, row.locationId));
+    }
+
+    await this.margPrisma.margTransaction.updateMany({
+      where: {
+        tenantId,
+        actualId: { not: null },
+        ...(dateWhere ? { date: dateWhere } : {}),
+      },
+      data: { actualId: null },
+    });
+
+    await Promise.all([
+      this.prisma.actual.deleteMany({
+        where: {
+          tenantId,
+          sourceSystem: MARG_SOURCE_SYSTEM,
+          ...(dateWhere ? { periodDate: dateWhere } : {}),
+        },
+      }),
+      this.prisma.inventoryTransaction.deleteMany({
+        where: {
+          tenantId,
+          referenceType: MARG_SOURCE_SYSTEM,
+          ...(dateWhere ? { transactionDate: dateWhere } : {}),
+        },
+      }),
+      this.prisma.inventoryLedger.deleteMany({
+        where: {
+          tenantId,
+          referenceType: MARG_SOURCE_SYSTEM,
+          ...(dateWhere ? { transactionDate: dateWhere } : {}),
+        },
+      }),
+    ]);
+
+    return { affectedLedgerScopes };
+  }
+
   /** Resolve or create a core Product for a Marg PID */
   private async resolveProductId(tenantId: string, companyId: number, pid: string): Promise<string | null> {
     if (!pid) return null;
@@ -2896,7 +2969,11 @@ export class MargEdeService {
   }
 
   /** Transform staged Marg transactions → Actual records (SALES type) */
-  private async transformTransactionsToActuals(tenantId: string, dateWindow: DateWindow | null): Promise<void> {
+  private async transformTransactionsToActuals(
+    tenantId: string,
+    dateWindow: DateWindow | null,
+    projectionWindowReset = false,
+  ): Promise<void> {
     // Step A: Re-link orphaned actuals that were created before their product/customer
     if (!dateWindow) {
       await this.relinkOrphanedActuals(tenantId);
@@ -2970,7 +3047,9 @@ export class MargEdeService {
         });
 
         if (!decision.shouldProjectActual || decision.actualType == null || decision.actualAmount == null || decision.actualAmount === 0) {
-          await this.clearMargActualProjection(tenantId, mt.id, mt.sourceKey);
+          if (!projectionWindowReset) {
+            await this.clearMargActualProjection(tenantId, mt.id, mt.sourceKey);
+          }
           continue;
         }
 
@@ -3285,7 +3364,11 @@ export class MargEdeService {
   }
 
   /** Transform staged Marg transactions → InventoryTransaction records */
-  private async transformTransactionsToInventoryTransactions(tenantId: string, dateWindow: DateWindow | null): Promise<void> {
+  private async transformTransactionsToInventoryTransactions(
+    tenantId: string,
+    dateWindow: DateWindow | null,
+    projectionWindowReset = false,
+  ): Promise<void> {
     // Resolve a system user for createdById (required FK)
     const systemUser = await this.prisma.user.findFirst({
       where: { tenantId },
@@ -3370,11 +3453,15 @@ export class MargEdeService {
           amount: mt.amount,
         });
         if (!mt.pid) {
-          await this.clearMargInventoryTransactionProjection(tenantId, mt.sourceKey);
+          if (!projectionWindowReset) {
+            await this.clearMargInventoryTransactionProjection(tenantId, mt.sourceKey);
+          }
           continue;
         }
         if (!decision.shouldProjectInventory || decision.inventoryTransactionType == null || decision.inventoryQuantity === 0) {
-          await this.clearMargInventoryTransactionProjection(tenantId, mt.sourceKey);
+          if (!projectionWindowReset) {
+            await this.clearMargInventoryTransactionProjection(tenantId, mt.sourceKey);
+          }
           continue;
         }
 
@@ -3444,7 +3531,12 @@ export class MargEdeService {
   }
 
   /** Transform staged Marg transactions → InventoryLedger entries (movement log with running balance) */
-  private async transformTransactionsToInventoryLedger(tenantId: string, dateWindow: DateWindow | null): Promise<void> {
+  private async transformTransactionsToInventoryLedger(
+    tenantId: string,
+    dateWindow: DateWindow | null,
+    projectionWindowReset = false,
+    preAffectedInventoryScopes?: Iterable<string>,
+  ): Promise<void> {
     const systemUser = await this.prisma.user.findFirst({
       where: { tenantId },
       select: { id: true },
@@ -3452,7 +3544,7 @@ export class MargEdeService {
     });
 
     let cursor: string | null = null;
-    const affectedInventoryScopes = new Set<string>();
+    const affectedInventoryScopes = new Set<string>(preAffectedInventoryScopes ?? []);
     const productIdCache = new Map<string, string | null>();
     const locationIdCache = new Map<number, string | null>();
 
@@ -3511,7 +3603,9 @@ export class MargEdeService {
           amount: mt.amount,
         });
         if (!mt.pid) {
-          await this.clearMargInventoryLedgerProjection(tenantId, mt.sourceKey);
+          if (!projectionWindowReset) {
+            await this.clearMargInventoryLedgerProjection(tenantId, mt.sourceKey);
+          }
           continue;
         }
 
@@ -3521,7 +3615,9 @@ export class MargEdeService {
 
         const scopeKey = this.buildInventoryScopeKey(productId, locationId);
         if (!decision.shouldProjectInventory || decision.ledgerEntryType == null || decision.ledgerQuantity === 0) {
-          await this.clearMargInventoryLedgerProjection(tenantId, mt.sourceKey);
+          if (!projectionWindowReset) {
+            await this.clearMargInventoryLedgerProjection(tenantId, mt.sourceKey);
+          }
           affectedInventoryScopes.add(scopeKey);
           continue;
         }
@@ -6440,6 +6536,9 @@ export class MargEdeService {
       accountGroupBalanceCount,
       partyBalanceCount,
       outstandingCount,
+      projectedActualCount,
+      projectedInventoryTransactionCount,
+      projectedJournalEntryCount,
       mappingRuleCount,
       reconciliationCount,
       recentSyncLogs,
@@ -6469,6 +6568,24 @@ export class MargEdeService {
       this.margPrisma.margAccountGroupBalance.count({ where: { tenantId } }),
       this.margPrisma.margPartyBalance.count({ where: { tenantId } }),
       this.margPrisma.margOutstanding.count({ where: { tenantId } }),
+      this.prisma.actual.count({
+        where: {
+          tenantId,
+          sourceSystem: MARG_SOURCE_SYSTEM,
+        },
+      }),
+      this.prisma.inventoryTransaction.count({
+        where: {
+          tenantId,
+          referenceType: MARG_SOURCE_SYSTEM,
+        },
+      }),
+      this.prisma.journalEntry.count({
+        where: {
+          tenantId,
+          referenceType: MARG_ACCOUNTING_REFERENCE_TYPE,
+        },
+      }),
       this.margPrisma.margGLMappingRule.count({ where: { tenantId, isActive: true } }),
       this.margPrisma.margReconciliationResult.count({ where: { tenantId } }),
       this.margPrisma.margSyncLog.findMany({
@@ -6543,6 +6660,11 @@ export class MargEdeService {
         outstandings: outstandingCount,
         glMappingRules: mappingRuleCount,
         reconciliationResults: reconciliationCount,
+      },
+      projectedData: {
+        actuals: projectedActualCount,
+        inventoryTransactions: projectedInventoryTransactionCount,
+        journalEntries: projectedJournalEntryCount,
       },
       diagnostics: {
         recentSyncDiagnostics,

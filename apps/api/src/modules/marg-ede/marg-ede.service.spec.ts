@@ -1187,8 +1187,12 @@ describe('MargEdeService helpers', () => {
       callOrder.push('transformSuppliers');
       return 2;
     });
-    helper.transformTransactionsToActuals = jest.fn().mockImplementation(async () => {
-      callOrder.push('transformTransactionsToActuals');
+    helper.resetMargInventoryProjectionWindow = jest.fn().mockImplementation(async () => {
+      callOrder.push('resetMargInventoryProjectionWindow');
+      return { affectedLedgerScopes: new Set(['product-1:location-1']) };
+    });
+    helper.transformTransactionsToActuals = jest.fn().mockImplementation(async (_tenantId: string, _dateWindow: unknown, projectionWindowReset: boolean) => {
+      callOrder.push(`transformTransactionsToActuals:${projectionWindowReset}`);
     });
     helper.transformStockToInventoryLevels = jest.fn().mockImplementation(async () => {
       callOrder.push('transformStockToInventoryLevels');
@@ -1196,11 +1200,20 @@ describe('MargEdeService helpers', () => {
     helper.transformStockToBatches = jest.fn().mockImplementation(async () => {
       callOrder.push('transformStockToBatches');
     });
-    helper.transformTransactionsToInventoryTransactions = jest.fn().mockImplementation(async () => {
-      callOrder.push('transformTransactionsToInventoryTransactions');
+    helper.transformTransactionsToInventoryTransactions = jest.fn().mockImplementation(async (
+      _tenantId: string,
+      _dateWindow: unknown,
+      projectionWindowReset: boolean,
+    ) => {
+      callOrder.push(`transformTransactionsToInventoryTransactions:${projectionWindowReset}`);
     });
-    helper.transformTransactionsToInventoryLedger = jest.fn().mockImplementation(async () => {
-      callOrder.push('transformTransactionsToInventoryLedger');
+    helper.transformTransactionsToInventoryLedger = jest.fn().mockImplementation(async (
+      _tenantId: string,
+      _dateWindow: unknown,
+      projectionWindowReset: boolean,
+      affectedInventoryScopes: Set<string>,
+    ) => {
+      callOrder.push(`transformTransactionsToInventoryLedger:${projectionWindowReset}:${affectedInventoryScopes.size}`);
     });
     helper.transformAccountPostingsToJournalEntries = jest.fn().mockImplementation(async () => {
       callOrder.push('transformAccountPostingsToJournalEntries');
@@ -1235,11 +1248,12 @@ describe('MargEdeService helpers', () => {
       'transformProducts',
       'transformParties',
       'transformSuppliers',
-      'transformTransactionsToActuals',
+      'resetMargInventoryProjectionWindow',
+      'transformTransactionsToActuals:true',
       'transformStockToInventoryLevels',
       'transformStockToBatches',
-      'transformTransactionsToInventoryTransactions',
-      'transformTransactionsToInventoryLedger',
+      'transformTransactionsToInventoryTransactions:true',
+      'transformTransactionsToInventoryLedger:true:1',
       'transformAccountPostingsToJournalEntries',
       `runPostSyncReconciliations:${MARG_SYNC_SCOPE.FULL}`,
     ]);

@@ -102,6 +102,11 @@ export interface MargSyncOverview {
     glMappingRules: number;
     reconciliationResults: number;
   };
+  projectedData: {
+    actuals: number;
+    inventoryTransactions: number;
+    journalEntries: number;
+  };
 }
 
 export interface PaginatedResponse<T> {

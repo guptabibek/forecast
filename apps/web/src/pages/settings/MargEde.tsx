@@ -646,7 +646,7 @@ export default function MargEdePage() {
     },
     {
       key: 'records',
-      header: 'Records Synced',
+      header: 'Logged Counters',
       accessor: (row) => formatNumber(buildLogRecordTotal(row)),
       align: 'right',
     },
@@ -1169,7 +1169,7 @@ export default function MargEdePage() {
       {isOverviewError && <QueryErrorBanner error={overviewError} onRetry={() => refetchOverview()} />}
       {isConfigsError && <QueryErrorBanner error={configsError} onRetry={() => refetchConfigs()} />}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8 gap-4">
         <Card padding="sm">
           <p className="text-sm text-secondary-500">Total Configs</p>
           <p className="text-2xl font-bold mt-1">{isOverviewLoading ? '-' : formatNumber(overview?.configs.length || 0)}</p>
@@ -1179,20 +1179,28 @@ export default function MargEdePage() {
           <p className="text-2xl font-bold mt-1">{isOverviewLoading ? '-' : formatNumber(activeConfigCount)}</p>
         </Card>
         <Card padding="sm">
-          <p className="text-sm text-secondary-500">Staged Transactions</p>
+          <p className="text-sm text-secondary-500">Live Staged Transactions</p>
           <p className="text-2xl font-bold mt-1">{isOverviewLoading ? '-' : formatNumber(overview?.stagedData.transactions || 0)}</p>
         </Card>
         <Card padding="sm">
-          <p className="text-sm text-secondary-500">Staged Account Rows</p>
+          <p className="text-sm text-secondary-500">Live Staged Account Rows</p>
           <p className="text-2xl font-bold mt-1">{isOverviewLoading ? '-' : formatNumber(overview?.stagedData.accountPostings || 0)}</p>
+        </Card>
+        <Card padding="sm">
+          <p className="text-sm text-secondary-500">Live Projected Actuals</p>
+          <p className="text-2xl font-bold mt-1">{isOverviewLoading ? '-' : formatNumber(overview?.projectedData.actuals || 0)}</p>
+        </Card>
+        <Card padding="sm">
+          <p className="text-sm text-secondary-500">Live Inventory Movements</p>
+          <p className="text-2xl font-bold mt-1">{isOverviewLoading ? '-' : formatNumber(overview?.projectedData.inventoryTransactions || 0)}</p>
+        </Card>
+        <Card padding="sm">
+          <p className="text-sm text-secondary-500">Live Posted Journals</p>
+          <p className="text-2xl font-bold mt-1">{isOverviewLoading ? '-' : formatNumber(overview?.projectedData.journalEntries || 0)}</p>
         </Card>
         <Card padding="sm">
           <p className="text-sm text-secondary-500">Active GL Rules</p>
           <p className="text-2xl font-bold mt-1">{isOverviewLoading ? '-' : formatNumber(overview?.stagedData.glMappingRules || 0)}</p>
-        </Card>
-        <Card padding="sm">
-          <p className="text-sm text-secondary-500">Reconciliation Results</p>
-          <p className="text-2xl font-bold mt-1">{isOverviewLoading ? '-' : formatNumber(overview?.stagedData.reconciliationResults || 0)}</p>
         </Card>
       </div>
 
