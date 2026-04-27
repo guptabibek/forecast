@@ -19,6 +19,8 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { StockOutFilterDto, SupplierPerformanceFilterDto } from '../pharma-reports/dto';
+import { ProcurementReportsService } from '../pharma-reports/services';
 import { RequireModule } from '../platform/require-module.decorator';
 import {
     ABCAnalysisDto,
@@ -36,7 +38,10 @@ import { ReportsService } from './reports.service';
 @RequireModule('reports')
 @Controller('reports')
 export class ReportsController {
-  constructor(private readonly reportsService: ReportsService) {}
+  constructor(
+    private readonly reportsService: ReportsService,
+    private readonly procurementReports: ProcurementReportsService,
+  ) {}
 
   // =====================
   // Dashboard Endpoints (MUST be before :id routes)
@@ -197,6 +202,28 @@ export class ReportsController {
   @ApiResponse({ status: 200, description: 'Summary report retrieved' })
   async getSummaryReport(@CurrentUser() user: any) {
     return this.reportsService.generateSummaryReport(user.tenantId);
+  }
+
+  @Get('supplier-performance')
+  @Roles('ADMIN', 'PLANNER', 'FINANCE', 'VIEWER')
+  @ApiOperation({ summary: 'Get supplier performance report with Marg sync analysis' })
+  @ApiResponse({ status: 200, description: 'Supplier performance report retrieved' })
+  async getSupplierPerformanceReport(
+    @CurrentUser() user: any,
+    @Query() filters: SupplierPerformanceFilterDto,
+  ) {
+    return this.procurementReports.getSupplierPerformanceReport(user.tenantId, filters);
+  }
+
+  @Get('stock-out')
+  @Roles('ADMIN', 'PLANNER', 'FINANCE', 'VIEWER')
+  @ApiOperation({ summary: 'Get stock-out report with Marg sync analysis' })
+  @ApiResponse({ status: 200, description: 'Stock-out report retrieved' })
+  async getStockOutReport(
+    @CurrentUser() user: any,
+    @Query() filters: StockOutFilterDto,
+  ) {
+    return this.procurementReports.getStockOutReport(user.tenantId, filters);
   }
 
   // =====================

@@ -82,19 +82,14 @@ export const useAuthStore = create<AuthState>()(
         refreshInFlight = (async () => {
           try {
             const response = await authService.refreshToken();
-            const partial: Partial<AuthState> = {
+            set((state) => ({
+              user: response.user ?? state.user,
               tokens: {
                 accessToken: response.accessToken,
                 expiresIn: response.expiresIn,
               },
-            };
-            // Populate user from refresh response so reload doesn't flash to login
-            const u = (response as unknown as Record<string, unknown>).user;
-            if (u && typeof u === 'object' && 'id' in u) {
-              partial.user = u as User;
-              partial.isAuthenticated = true;
-            }
-            set(partial);
+              isAuthenticated: true,
+            }));
           } catch (error) {
             // Refresh failed, log out
             set({

@@ -45,6 +45,7 @@ import {
 import { dataService, reportsService } from '../services/api';
 import type { ABCAnalysisParams } from '../services/api/report.service';
 import type { Dimension } from '../types';
+import PharmaExecutiveOverview from './pharma-reports/PharmaExecutiveOverview';
 
 // =====================
 // Types
@@ -1341,6 +1342,8 @@ export default function Dashboard() {
           isLoading={healthLoading}
         />
       </div>
+
+      <PharmaExecutiveOverview />
 
       {/* Main Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

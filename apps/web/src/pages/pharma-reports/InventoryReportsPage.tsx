@@ -31,9 +31,9 @@ const tabs: { key: Tab; label: string }[] = [
 const exportMap: Record<Tab, string> = {
   current: 'current-stock',
   batch: 'batch-inventory',
-  ledger: 'current-stock',
+  ledger: 'movement-ledger',
   reorder: 'reorder',
-  ageing: 'current-stock',
+  ageing: 'stock-ageing',
 };
 
 export default function InventoryReportsPage() {

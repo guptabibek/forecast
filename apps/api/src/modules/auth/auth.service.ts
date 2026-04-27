@@ -1,7 +1,7 @@
 import {
-  BadRequestException,
-  Injectable,
-  UnauthorizedException,
+    BadRequestException,
+    Injectable,
+    UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -13,16 +13,16 @@ import { PrismaService } from '../../core/database/prisma.service';
 import { TenantAccessService } from '../../core/database/tenant-access.service';
 import { EmailService } from '../../core/notification/email.service';
 import {
-  SUPER_ADMIN_STATIC_ID,
-  SUPER_ADMIN_TENANT,
+    SUPER_ADMIN_STATIC_ID,
+    SUPER_ADMIN_TENANT,
 } from '../platform/platform.constants';
 import { RolesService } from '../roles/roles.service';
 import {
-  ForgotPasswordDto,
-  LoginDto,
-  RefreshTokenDto,
-  ResetPasswordDto,
-  TokenResponse,
+    ForgotPasswordDto,
+    LoginDto,
+    RefreshTokenDto,
+    ResetPasswordDto,
+    TokenResponse,
 } from './dto/auth.dto';
 
 @Injectable()
@@ -513,6 +513,7 @@ export class AuthService {
         firstName: 'Super',
         lastName: 'Admin',
         role: 'SUPER_ADMIN',
+        tenantId: SUPER_ADMIN_TENANT.id,
         status: 'ACTIVE',
         tenant: SUPER_ADMIN_TENANT,
         createdAt: new Date('2026-01-01'),
@@ -554,6 +555,7 @@ export class AuthService {
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
+      tenantId: user.tenantId,
       status: user.status,
       tenant: user.tenant,
       createdAt: user.createdAt,
@@ -667,6 +669,7 @@ export class AuthService {
         firstName: 'Super',
         lastName: 'Admin',
         role: 'SUPER_ADMIN',
+        tenantId: SUPER_ADMIN_TENANT.id,
         permissions: saPermissions,
         moduleAccess: saModuleAccess,
         roleId: null,
@@ -729,6 +732,7 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        tenantId: tenant.id,
         permissions: effectiveRole?.permissions ?? [],
         moduleAccess: effectiveRole?.moduleAccess ?? {},
         roleId: effectiveRole?.roleId ?? null,

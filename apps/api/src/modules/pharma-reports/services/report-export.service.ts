@@ -191,6 +191,10 @@ export class ReportExportService {
         return this.currentStockExportQuery(tenantId, filters);
       case 'batch-inventory':
         return this.batchInventoryExportQuery(tenantId, filters);
+      case 'movement-ledger':
+        return this.movementLedgerExportQuery(tenantId, filters);
+      case 'stock-ageing':
+        return this.stockAgeingExportQuery(tenantId, filters);
       case 'near-expiry':
         return this.nearExpiryExportQuery(tenantId, filters);
       case 'expired-stock':
@@ -205,6 +209,8 @@ export class ReportExportService {
         return this.supplierPerformanceExportQuery(tenantId, filters);
       case 'abc-analysis':
         return this.abcAnalysisExportQuery(tenantId, filters);
+      case 'xyz-analysis':
+        return this.xyzAnalysisExportQuery(tenantId, filters);
       case 'inventory-turnover':
         return this.turnoverExportQuery(tenantId, filters);
       default:
@@ -219,7 +225,7 @@ export class ReportExportService {
   ) {
     const extraConds = this.buildProductLocationConds(filters);
     const where = this.buildWhere(
-      Prisma.sql`il.tenant_id = ${tenantId}::uuid`,
+      Prisma.sql`il.tenant_id = ${tenantId}::uuid AND il.on_hand_qty != 0`,
       extraConds,
     );
 
@@ -305,6 +311,82 @@ export class ReportExportService {
         JOIN locations l ON l.id = b.location_id AND l.tenant_id = b.tenant_id
         WHERE ${where}
         ORDER BY p.code, b.expiry_date ASC NULLS LAST
+      `,
+    };
+  }
+
+  // ── MOVEMENT LEDGER ────────────────────────────────────────────────────
+  private movementLedgerExportQuery(
+    tenantId: string,
+    filters: Record<string, unknown>,
+  ) {
+    const conds: Prisma.Sql[] = [];
+    const productIds = filters.productIds as string[] | undefined;
+    const locationIds = filters.locationIds as string[] | undefined;
+    const batchIds = filters.batchIds as string[] | undefined;
+    const startDate = filters.startDate as string | undefined;
+    const endDate = filters.endDate as string | undefined;
+
+    if (productIds?.length) {
+      conds.push(Prisma.sql`il.product_id = ANY(${productIds}::uuid[])`);
+    }
+    if (locationIds?.length) {
+      conds.push(Prisma.sql`il.location_id = ANY(${locationIds}::uuid[])`);
+    }
+    if (batchIds?.length) {
+      conds.push(Prisma.sql`il.batch_id = ANY(${batchIds}::uuid[])`);
+    }
+    if (startDate) {
+      conds.push(Prisma.sql`il.transaction_date >= ${startDate}::timestamp`);
+    }
+    if (endDate) {
+      conds.push(Prisma.sql`il.transaction_date <= ${endDate}::timestamp`);
+    }
+
+    const where = this.buildWhere(
+      Prisma.sql`il.tenant_id = ${tenantId}::uuid`,
+      conds,
+    );
+
+    return {
+      columns: [
+        { key: 'sequence_number', header: 'Sequence', width: 12 },
+        { key: 'transaction_date', header: 'Date', width: 16 },
+        { key: 'sku', header: 'SKU', width: 15 },
+        { key: 'product_name', header: 'Product', width: 30 },
+        { key: 'location_code', header: 'Location', width: 15 },
+        { key: 'batch_number', header: 'Batch', width: 18 },
+        { key: 'entry_type', header: 'Type', width: 18 },
+        { key: 'quantity', header: 'Qty', width: 10 },
+        { key: 'unit_cost', header: 'Unit Cost', width: 12 },
+        { key: 'total_cost', header: 'Value', width: 14 },
+        { key: 'running_balance', header: 'Balance', width: 12 },
+        { key: 'reference_type', header: 'Reference Type', width: 16 },
+        { key: 'reference_number', header: 'Reference No.', width: 22 },
+        { key: 'notes', header: 'Notes', width: 32 },
+      ],
+      query: Prisma.sql`
+        SELECT
+          il.sequence_number::text AS sequence_number,
+          il.transaction_date,
+          p.code AS sku,
+          p.name AS product_name,
+          l.code AS location_code,
+          bat.batch_number,
+          il.entry_type::text AS entry_type,
+          il.quantity::float8 AS quantity,
+          COALESCE(il.unit_cost, 0)::float8 AS unit_cost,
+          COALESCE(il.total_cost, 0)::float8 AS total_cost,
+          COALESCE(il.running_balance, 0)::float8 AS running_balance,
+          il.reference_type,
+          il.reference_number,
+          il.notes
+        FROM inventory_ledger il
+        JOIN products p ON p.id = il.product_id AND p.tenant_id = il.tenant_id
+        JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
+        LEFT JOIN batches bat ON bat.id = il.batch_id
+        WHERE ${where}
+        ORDER BY il.sequence_number DESC
       `,
     };
   }
@@ -498,9 +580,9 @@ export class ReportExportService {
         LEFT JOIN daily_sales ds ON ds.product_id = il.product_id AND ds.location_id = il.location_id
         WHERE ${where}
           AND (COALESCE(il.on_hand_qty,0) <= COALESCE(ip.reorder_point,0)
-               OR COALESCE(il.on_hand_qty,0) <= COALESCE(ip.safety_stock_qty,0)
-               OR ip.id IS NULL)
-        ORDER BY suggested_order_qty DESC
+               OR COALESCE(il.on_hand_qty,0) <= COALESCE(ip.safety_stock_qty,0))
+        ORDER BY CASE ip.abc_class WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 ELSE 4 END,
+          suggested_order_qty DESC
       `,
     };
   }
@@ -665,6 +747,156 @@ export class ReportExportService {
           r.on_hand_qty, r.inventory_value
         FROM ranked r
         ORDER BY r.consumption_value DESC
+      `,
+    };
+  }
+
+  // ── XYZ ANALYSIS ────────────────────────────────────────────────────────
+  private xyzAnalysisExportQuery(
+    tenantId: string,
+    filters: Record<string, unknown>,
+  ) {
+    const periodMonths = Number(filters.periodMonths) || 12;
+    const thresholdX = Number(filters.thresholdX) || 0.5;
+    const thresholdY = Number(filters.thresholdY) || 1.0;
+    const extraConds = this.buildProductLocationConds(filters);
+    const prodFilter = extraConds.length
+      ? Prisma.sql`AND ${Prisma.join(extraConds, ' AND ')}`
+      : Prisma.empty;
+
+    return {
+      columns: [
+        { key: 'sku', header: 'SKU', width: 15 },
+        { key: 'product_name', header: 'Product', width: 30 },
+        { key: 'avg_monthly_demand', header: 'Avg Demand/Mo', width: 14 },
+        { key: 'stddev_monthly_demand', header: 'Std Dev', width: 12 },
+        { key: 'coefficient_of_variation', header: 'CV', width: 12 },
+        { key: 'xyz_class', header: 'XYZ Class', width: 10 },
+        { key: 'months_analyzed', header: 'Months', width: 10 },
+      ],
+      query: Prisma.sql`
+        WITH month_series AS (
+          SELECT generate_series(
+            DATE_TRUNC('month', CURRENT_DATE - (${periodMonths}::int || ' months')::interval),
+            DATE_TRUNC('month', CURRENT_DATE),
+            '1 month'::interval
+          )::date AS month_start
+        ),
+        active_products AS (
+          SELECT id AS product_id
+          FROM products
+          WHERE tenant_id = ${tenantId}::uuid AND status = 'ACTIVE'
+        ),
+        product_months AS (
+          SELECT ap.product_id, ms.month_start
+          FROM active_products ap
+          CROSS JOIN month_series ms
+        ),
+        monthly_demand AS (
+          SELECT
+            pm.product_id,
+            pm.month_start,
+            COALESCE(SUM(it.quantity), 0)::float8 AS demand
+          FROM product_months pm
+          LEFT JOIN inventory_transactions it
+            ON it.product_id = pm.product_id
+            AND it.tenant_id = ${tenantId}::uuid
+            AND it.transaction_type IN ('ISSUE', 'PRODUCTION_ISSUE')
+            AND DATE_TRUNC('month', it.transaction_date) = pm.month_start
+          GROUP BY pm.product_id, pm.month_start
+        ),
+        product_stats AS (
+          SELECT
+            md.product_id,
+            AVG(md.demand)::float8 AS avg_monthly_demand,
+            STDDEV_POP(md.demand)::float8 AS stddev_monthly_demand,
+            COUNT(md.month_start)::int AS months_analyzed
+          FROM monthly_demand md
+          GROUP BY md.product_id
+        )
+        SELECT
+          p.code AS sku,
+          p.name AS product_name,
+          COALESCE(ps.avg_monthly_demand, 0)::float8 AS avg_monthly_demand,
+          COALESCE(ps.stddev_monthly_demand, 0)::float8 AS stddev_monthly_demand,
+          CASE
+            WHEN COALESCE(ps.avg_monthly_demand, 0) > 0
+            THEN (COALESCE(ps.stddev_monthly_demand, 0) / ps.avg_monthly_demand)::float8
+            ELSE 0
+          END AS coefficient_of_variation,
+          CASE
+            WHEN COALESCE(ps.avg_monthly_demand, 0) = 0 THEN 'Z'
+            WHEN (COALESCE(ps.stddev_monthly_demand, 0) / ps.avg_monthly_demand) <= ${thresholdX}::float8 THEN 'X'
+            WHEN (COALESCE(ps.stddev_monthly_demand, 0) / ps.avg_monthly_demand) <= ${thresholdY}::float8 THEN 'Y'
+            ELSE 'Z'
+          END AS xyz_class,
+          COALESCE(ps.months_analyzed, 0)::int AS months_analyzed
+        FROM products p
+        LEFT JOIN product_stats ps ON ps.product_id = p.id
+        WHERE p.tenant_id = ${tenantId}::uuid
+          AND p.status = 'ACTIVE'
+          ${prodFilter}
+        ORDER BY coefficient_of_variation ASC
+      `,
+    };
+  }
+
+  // ── STOCK AGEING ───────────────────────────────────────────────────────
+  private stockAgeingExportQuery(
+    tenantId: string,
+    filters: Record<string, unknown>,
+  ) {
+    const bucketValues = Array.isArray(filters.bucketDays)
+      ? (filters.bucketDays as Array<string | number>).map((value) => Number(value)).filter((value) => Number.isFinite(value))
+      : [];
+    const b0 = bucketValues[0] ?? 90;
+    const b1 = bucketValues[1] ?? 180;
+    const b2 = bucketValues[2] ?? 365;
+    const extraConds = this.buildProductLocationConds(filters, 'b');
+    const where = this.buildWhere(
+      Prisma.sql`b.tenant_id = ${tenantId}::uuid AND b.quantity > 0 AND b.status NOT IN ('CONSUMED','RECALLED')`,
+      extraConds,
+      'b',
+    );
+
+    return {
+      columns: [
+        { key: 'sku', header: 'SKU', width: 15 },
+        { key: 'product_name', header: 'Product', width: 30 },
+        { key: 'batch_number', header: 'Batch', width: 18 },
+        { key: 'location_code', header: 'Location', width: 15 },
+        { key: 'inward_date', header: 'Inward Date', width: 14 },
+        { key: 'age_days', header: 'Age (Days)', width: 12 },
+        { key: 'age_bucket', header: 'Bucket', width: 12 },
+        { key: 'quantity', header: 'Qty', width: 10 },
+        { key: 'batch_value', header: 'Value', width: 14 },
+      ],
+      query: Prisma.sql`
+        SELECT
+          p.code AS sku,
+          p.name AS product_name,
+          b.batch_number,
+          l.code AS location_code,
+          b.manufacturing_date AS inward_date,
+          CASE
+            WHEN b.manufacturing_date IS NULL THEN -1
+            ELSE (CURRENT_DATE - b.manufacturing_date::date)
+          END AS age_days,
+          CASE
+            WHEN b.manufacturing_date IS NULL THEN 'UNKNOWN'
+            WHEN (CURRENT_DATE - b.manufacturing_date::date) < 0 THEN 'UNKNOWN'
+            WHEN (CURRENT_DATE - b.manufacturing_date::date) <= ${b0} THEN ${`0-${b0}d`}
+            WHEN (CURRENT_DATE - b.manufacturing_date::date) <= ${b1} THEN ${`${b0 + 1}-${b1}d`}
+            WHEN (CURRENT_DATE - b.manufacturing_date::date) <= ${b2} THEN ${`${b1 + 1}-${b2}d`}
+            ELSE ${`>${b2}d`}
+          END AS age_bucket,
+          b.quantity::float8 AS quantity,
+          (COALESCE(b.quantity, 0) * COALESCE(b.cost_per_unit, 0))::float8 AS batch_value
+        FROM batches b
+        JOIN products p ON p.id = b.product_id AND p.tenant_id = b.tenant_id
+        JOIN locations l ON l.id = b.location_id AND l.tenant_id = b.tenant_id
+        WHERE ${where}
+        ORDER BY age_days DESC NULLS LAST
       `,
     };
   }

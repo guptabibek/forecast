@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../core/database/database.module';
 import { isRedisConfigured } from '../../core/queue/queue.module';
+import { ManufacturingModule } from '../manufacturing/manufacturing.module';
 import { MargEdeController } from './marg-ede.controller';
 import { MargEdeService } from './marg-ede.service';
 import { MargSyncProcessor } from './marg-sync.processor';
@@ -12,7 +13,7 @@ const providers = isRedisConfigured()
   : [MargEdeService, MargSyncScheduler];
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, ManufacturingModule],
   controllers: [MargEdeController],
   providers,
   exports: [MargEdeService],

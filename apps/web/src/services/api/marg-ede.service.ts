@@ -2,6 +2,9 @@ import { apiClient } from './client';
 
 export type MargSyncFrequency = 'HOURLY' | 'DAILY' | 'WEEKLY';
 export type MargSyncStatus = 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+export type MargSyncScope = 'full' | 'accounting';
+export type MargReconciliationType = 'STOCK' | 'AR_AGING' | 'ACCOUNTING_BALANCE';
+export type MargReconciliationStatus = 'PASSED' | 'WARNING' | 'FAILED';
 
 export interface MargSyncLog {
   id: string;
@@ -15,6 +18,14 @@ export interface MargSyncLog {
   transactionsSynced: number;
   stockSynced: number;
   branchesSynced: number;
+  vouchersSynced?: number;
+  saleTypesSynced?: number;
+  accountGroupsSynced?: number;
+  accountPostingsSynced?: number;
+  accountGroupBalancesSynced?: number;
+  partyBalancesSynced?: number;
+  outstandingsSynced?: number;
+  journalEntriesSynced?: number;
   errors: unknown;
   syncIndex?: number | null;
   syncDatetime?: string | null;
@@ -33,6 +44,10 @@ export interface MargSyncConfig {
   lastSyncStatus: MargSyncStatus;
   lastSyncIndex: number;
   lastSyncDatetime?: string | null;
+  lastAccountingSyncAt?: string | null;
+  lastAccountingSyncStatus: MargSyncStatus;
+  lastAccountingSyncIndex?: number | null;
+  lastAccountingSyncDatetime?: string | null;
   createdAt: string;
   updatedAt: string;
   margKeyMasked: string;
@@ -65,6 +80,8 @@ export interface MargSyncOverviewConfig {
   isActive: boolean;
   lastSyncAt?: string | null;
   lastSyncStatus: MargSyncStatus;
+  lastAccountingSyncAt?: string | null;
+  lastAccountingSyncStatus: MargSyncStatus;
   syncFrequency: MargSyncFrequency;
 }
 
@@ -76,6 +93,14 @@ export interface MargSyncOverview {
     parties: number;
     transactions: number;
     stock: number;
+    deletedStock: number;
+    accountGroups: number;
+    accountPostings: number;
+    accountGroupBalances: number;
+    partyBalances: number;
+    outstandings: number;
+    glMappingRules: number;
+    reconciliationResults: number;
   };
 }
 
@@ -144,20 +169,184 @@ export interface MargStagedStock {
   stock?: number | null;
   mrp?: number | null;
   expiry?: string | null;
+  sourceDeleted?: boolean;
   updatedAt: string;
   [key: string]: unknown;
 }
 
+export interface MargStagedAccountPosting {
+  id: string;
+  tenantId: string;
+  companyId: number;
+  margId: string;
+  date: string;
+  book?: string | null;
+  voucher?: string | null;
+  gCode?: string | null;
+  code?: string | null;
+  code1?: string | null;
+  amount?: number | null;
+  remark?: string | null;
+  createdAt?: string;
+  updatedAt: string;
+  [key: string]: unknown;
+}
+
+export interface MargStagedAccountGroup {
+  id: string;
+  tenantId: string;
+  companyId: number;
+  margId: string;
+  aid: string;
+  name?: string | null;
+  parentCode?: string | null;
+  updatedAt: string;
+  [key: string]: unknown;
+}
+
+export interface MargStagedAccountGroupBalance {
+  id: string;
+  tenantId: string;
+  companyId: number;
+  margId: string;
+  aid: string;
+  opening?: number | null;
+  balance?: number | null;
+  updatedAt: string;
+  [key: string]: unknown;
+}
+
+export interface MargStagedPartyBalance {
+  id: string;
+  tenantId: string;
+  companyId: number;
+  margId: string;
+  cid: string;
+  opening?: number | null;
+  balance?: number | null;
+  updatedAt: string;
+  [key: string]: unknown;
+}
+
+export interface MargStagedOutstanding {
+  id: string;
+  tenantId: string;
+  companyId: number;
+  margId: string;
+  ord: string;
+  date: string;
+  days: number;
+  voucher?: string | null;
+  sVoucher?: string | null;
+  balance?: number | null;
+  finalAmt?: number | null;
+  groupCode?: string | null;
+  updatedAt: string;
+  [key: string]: unknown;
+}
+
+export interface MargGlAccount {
+  id: string;
+  accountNumber: string;
+  name: string;
+  accountType: string;
+  normalBalance: string;
+}
+
+export interface MargGlMappingRule {
+  id: string;
+  tenantId: string;
+  ruleName: string;
+  companyId?: number | null;
+  bookCode?: string | null;
+  groupCode?: string | null;
+  partyCode?: string | null;
+  counterpartyCode?: string | null;
+  remarkContains?: string | null;
+  glAccountId: string;
+  isReceivableControl: boolean;
+  priority: number;
+  description?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  glAccount?: {
+    id: string;
+    accountNumber: string;
+    name: string;
+    accountType: string;
+  };
+}
+
+export interface CreateMargGlMappingRuleDto {
+  ruleName: string;
+  companyId?: number;
+  bookCode?: string;
+  groupCode?: string;
+  partyCode?: string;
+  counterpartyCode?: string;
+  remarkContains?: string;
+  glAccountId: string;
+  isReceivableControl?: boolean;
+  priority?: number;
+  description?: string;
+}
+
+export interface UpdateMargGlMappingRuleDto extends Partial<CreateMargGlMappingRuleDto> {}
+
+export interface MargReconciliationResult {
+  id: string;
+  tenantId: string;
+  syncLogId: string;
+  reconciliationType: MargReconciliationType;
+  status: MargReconciliationStatus;
+  issueCount: number;
+  summary?: Record<string, unknown> | null;
+  issues?: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TriggerSyncParams {
+  fromDate?: string;
+  endDate?: string;
+}
+
 export interface TriggerSyncResponse {
-  jobId: string | number;
-  status: 'queued' | string;
+  jobId?: string | number;
+  syncLogId?: string;
+  scope?: MargSyncScope;
+  status: 'queued' | 'completed' | string;
   message: string;
+}
+
+export interface MargConnectionProbeSummary {
+  apiType: '1' | '2';
+  index: number;
+  dataStatus: number;
+  dateTime: string;
+  rowCounts: {
+    details: number;
+    masters: number;
+    vouchers: number;
+    parties: number;
+    products: number;
+    saleTypes: number;
+    stock: number;
+    accountGroups: number;
+    accounts: number;
+    accountGroupBalances: number;
+    partyBalances: number;
+    outstandings: number;
+  };
 }
 
 export interface TestConnectionResponse {
   success: boolean;
   message: string;
   branches: unknown[];
+  inventoryProbe?: MargConnectionProbeSummary;
+  accountingProbe?: MargConnectionProbeSummary;
 }
 
 const BASE_PATH = '/marg-ede';
@@ -192,8 +381,17 @@ export const margEdeService = {
     return data;
   },
 
-  async triggerSync(configId: string): Promise<TriggerSyncResponse> {
-    const { data } = await apiClient.post<TriggerSyncResponse>(`${BASE_PATH}/configs/${configId}/sync`);
+  async triggerSync(configId: string, params?: TriggerSyncParams): Promise<TriggerSyncResponse> {
+    const { data } = await apiClient.post<TriggerSyncResponse>(`${BASE_PATH}/configs/${configId}/sync`, undefined, {
+      params,
+    });
+    return data;
+  },
+
+  async triggerAccountingSync(configId: string, params?: TriggerSyncParams): Promise<TriggerSyncResponse> {
+    const { data } = await apiClient.post<TriggerSyncResponse>(`${BASE_PATH}/configs/${configId}/sync/accounting`, undefined, {
+      params,
+    });
     return data;
   },
 
@@ -204,6 +402,41 @@ export const margEdeService = {
 
   async getOverview(): Promise<MargSyncOverview> {
     const { data } = await apiClient.get<MargSyncOverview>(`${BASE_PATH}/overview`);
+    return data;
+  },
+
+  async getGlAccounts(): Promise<MargGlAccount[]> {
+    const { data } = await apiClient.get<MargGlAccount[]>(`${BASE_PATH}/gl-accounts`);
+    return data;
+  },
+
+  async getGlMappingRules(params?: { companyId?: number; isActive?: boolean }): Promise<MargGlMappingRule[]> {
+    const { data } = await apiClient.get<MargGlMappingRule[]>(`${BASE_PATH}/gl-mapping-rules`, { params });
+    return data;
+  },
+
+  async createGlMappingRule(dto: CreateMargGlMappingRuleDto): Promise<MargGlMappingRule> {
+    const { data } = await apiClient.post<MargGlMappingRule>(`${BASE_PATH}/gl-mapping-rules`, dto);
+    return data;
+  },
+
+  async updateGlMappingRule(ruleId: string, dto: UpdateMargGlMappingRuleDto): Promise<MargGlMappingRule> {
+    const { data } = await apiClient.patch<MargGlMappingRule>(`${BASE_PATH}/gl-mapping-rules/${ruleId}`, dto);
+    return data;
+  },
+
+  async deleteGlMappingRule(ruleId: string): Promise<void> {
+    await apiClient.delete(`${BASE_PATH}/gl-mapping-rules/${ruleId}`);
+  },
+
+  async getReconciliationResults(params?: {
+    configId?: string;
+    syncLogId?: string;
+    type?: MargReconciliationType;
+    status?: MargReconciliationStatus;
+    take?: number;
+  }): Promise<MargReconciliationResult[]> {
+    const { data } = await apiClient.get<MargReconciliationResult[]>(`${BASE_PATH}/reconciliation-results`, { params });
     return data;
   },
 
@@ -229,6 +462,31 @@ export const margEdeService = {
 
   async getStagedStock(params?: { page?: number; pageSize?: number }): Promise<PaginatedResponse<MargStagedStock>> {
     const { data } = await apiClient.get<PaginatedResponse<MargStagedStock>>(`${BASE_PATH}/staged/stock`, { params });
+    return data;
+  },
+
+  async getStagedAccountPostings(params?: { page?: number; pageSize?: number }): Promise<PaginatedResponse<MargStagedAccountPosting>> {
+    const { data } = await apiClient.get<PaginatedResponse<MargStagedAccountPosting>>(`${BASE_PATH}/staged/account-postings`, { params });
+    return data;
+  },
+
+  async getStagedAccountGroups(params?: { page?: number; pageSize?: number }): Promise<PaginatedResponse<MargStagedAccountGroup>> {
+    const { data } = await apiClient.get<PaginatedResponse<MargStagedAccountGroup>>(`${BASE_PATH}/staged/account-groups`, { params });
+    return data;
+  },
+
+  async getStagedAccountGroupBalances(params?: { page?: number; pageSize?: number }): Promise<PaginatedResponse<MargStagedAccountGroupBalance>> {
+    const { data } = await apiClient.get<PaginatedResponse<MargStagedAccountGroupBalance>>(`${BASE_PATH}/staged/account-group-balances`, { params });
+    return data;
+  },
+
+  async getStagedPartyBalances(params?: { page?: number; pageSize?: number }): Promise<PaginatedResponse<MargStagedPartyBalance>> {
+    const { data } = await apiClient.get<PaginatedResponse<MargStagedPartyBalance>>(`${BASE_PATH}/staged/party-balances`, { params });
+    return data;
+  },
+
+  async getStagedOutstandings(params?: { page?: number; pageSize?: number }): Promise<PaginatedResponse<MargStagedOutstanding>> {
+    const { data } = await apiClient.get<PaginatedResponse<MargStagedOutstanding>>(`${BASE_PATH}/staged/outstandings`, { params });
     return data;
   },
 };

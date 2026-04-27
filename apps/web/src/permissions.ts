@@ -8,6 +8,11 @@ const FORECAST_ONLY_MENU_PATHS = new Set([
   '/reports',
 ]);
 
+const FINANCE_ONLY_MENU_PATHS = new Set([
+  '/manufacturing/gl-accounts',
+  '/manufacturing/journal-entries',
+]);
+
 const ROLE_LABELS: Record<UserRole, string> = {
   SUPER_ADMIN: 'Super Admin',
   ADMIN: 'Admin',
@@ -70,6 +75,10 @@ export function canShowSidebarHref(role: UserRole | null | undefined, href: stri
   }
 
   if (isForecastPlannerRole(role) && href.startsWith('/manufacturing')) {
+    return false;
+  }
+
+  if (FINANCE_ONLY_MENU_PATHS.has(href) && !roleMatches(role, 'ADMIN', 'FINANCE')) {
     return false;
   }
 

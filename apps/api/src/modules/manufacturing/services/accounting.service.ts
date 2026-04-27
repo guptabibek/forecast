@@ -17,6 +17,14 @@ import { SequenceService } from './sequence.service';
 @Injectable()
 export class AccountingService {
   private readonly logger = new Logger(AccountingService.name);
+  private readonly fiscalCalendarIdCache = new Map<string, string | null>();
+  private readonly fiscalPeriodCache = new Map<string, {
+    id: string;
+    isLocked: boolean;
+    isClosed: boolean;
+    periodName: string;
+  } | null>();
+  private readonly missingFiscalPeriodWarningCache = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -757,10 +765,14 @@ export class AccountingService {
     // Find fiscal period containing this date
     const period = await this.findFiscalPeriod(tx, tenantId, entryDate);
     if (!period) {
-      this.logger.warn(
-        `No fiscal period found for date ${entryDate.toISOString()} in tenant ${tenantId}. ` +
-        `Journal entry will be posted without a fiscal period. Configure a FiscalCalendar to enable period controls.`,
-      );
+      const warningKey = `${tenantId}:${entryDate.toISOString().slice(0, 10)}`;
+      if (!this.missingFiscalPeriodWarningCache.has(warningKey)) {
+        this.missingFiscalPeriodWarningCache.add(warningKey);
+        this.logger.warn(
+          `No fiscal period found for date ${entryDate.toISOString()} in tenant ${tenantId}. ` +
+          `Journal entry will be posted without a fiscal period. Configure a FiscalCalendar to enable period controls.`,
+        );
+      }
       return;
     }
     if (period?.isLocked) {
@@ -780,18 +792,38 @@ export class AccountingService {
     tenantId: string,
     entryDate: Date,
   ) {
-    const calendar = await tx.fiscalCalendar.findFirst({
-      where: { tenantId, isDefault: true },
-    });
+    let calendarId = this.fiscalCalendarIdCache.get(tenantId);
+    if (calendarId === undefined) {
+      const calendar = await tx.fiscalCalendar.findFirst({
+        where: { tenantId, isDefault: true },
+        select: { id: true },
+      });
+      calendarId = calendar?.id ?? null;
+      this.fiscalCalendarIdCache.set(tenantId, calendarId);
+    }
 
-    if (!calendar) return null;
+    if (!calendarId) return null;
 
-    return tx.fiscalPeriod.findFirst({
+    const periodCacheKey = `${tenantId}:${entryDate.toISOString().slice(0, 10)}`;
+    if (this.fiscalPeriodCache.has(periodCacheKey)) {
+      return this.fiscalPeriodCache.get(periodCacheKey) ?? null;
+    }
+
+    const period = await tx.fiscalPeriod.findFirst({
       where: {
-        calendarId: calendar.id,
+        calendarId,
         startDate: { lte: entryDate },
         endDate: { gte: entryDate },
       },
+      select: {
+        id: true,
+        isLocked: true,
+        isClosed: true,
+        periodName: true,
+      },
     });
+
+    this.fiscalPeriodCache.set(periodCacheKey, period ?? null);
+    return period;
   }
 }

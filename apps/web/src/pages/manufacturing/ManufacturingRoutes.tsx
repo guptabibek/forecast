@@ -1,5 +1,7 @@
+import { getFallbackPathForRole, isSuperAdmin, roleMatches } from '@/permissions';
+import { useAuthStore } from '@stores/auth.store';
 import { lazy, Suspense } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 const BatchManagementPage = lazy(() => import('./BatchManagement'));
 const BOMPage = lazy(() => import('./BOM'));
 const CapacityPage = lazy(() => import('./Capacity'));
@@ -7,7 +9,9 @@ const CapacityPlansPage = lazy(() => import('./CapacityPlansPage'));
 const CostingEnginePage = lazy(() => import('./CostingEngine'));
 const FiscalCalendarPage = lazy(() => import('./FiscalCalendar'));
 const ForecastAccuracyPage = lazy(() => import('./ForecastAccuracy'));
+const GLAccountsPage = lazy(() => import('./GLAccounts'));
 const InventoryPage = lazy(() => import('./Inventory'));
+const JournalEntriesPage = lazy(() => import('./JournalEntries'));
 const LocationHierarchyPage = lazy(() => import('./LocationHierarchyPage'));
 const ManufacturingDashboard = lazy(() => import('./ManufacturingDashboard').then((module) => ({ default: module.ManufacturingDashboard })));
 const MRPPage = lazy(() => import('./MRP'));
@@ -22,10 +26,21 @@ const QualityInspectionsPage = lazy(() => import('./QualityInspections'));
 const SOPPage = lazy(() => import('./SOP'));
 const SOPGapAnalysisPage = lazy(() => import('./SOPGapAnalysis'));
 const SuppliersPage = lazy(() => import('./Suppliers'));
+const TrialBalancePage = lazy(() => import('./TrialBalance'));
 const UomConversionsPage = lazy(() => import('./UomConversions'));
 const UomMasterPage = lazy(() => import('./UomMaster'));
 const WorkflowPage = lazy(() => import('./Workflow'));
 const WorkOrdersPage = lazy(() => import('./WorkOrders'));
+
+function FinanceOnlyManufacturingRoute({ children }: { children: React.ReactNode }) {
+  const role = useAuthStore((state) => state.user?.role);
+
+  if (isSuperAdmin(role) || roleMatches(role, 'ADMIN', 'FINANCE')) {
+    return <>{children}</>;
+  }
+
+  return <Navigate to={getFallbackPathForRole(role)} replace />;
+}
 
 function ManufacturingRouteFallback() {
   return (
@@ -56,6 +71,9 @@ export default function ManufacturingRoutes() {
       <Route path="forecast-accuracy" element={<ForecastAccuracyPage />} />
       <Route path="product-costing" element={<ProductCostingPage />} />
       <Route path="costing-engine" element={<CostingEnginePage />} />
+      <Route path="gl-accounts" element={<FinanceOnlyManufacturingRoute><GLAccountsPage /></FinanceOnlyManufacturingRoute>} />
+      <Route path="journal-entries" element={<FinanceOnlyManufacturingRoute><JournalEntriesPage /></FinanceOnlyManufacturingRoute>} />
+      <Route path="trial-balance" element={<TrialBalancePage />} />
       <Route path="purchase-contracts" element={<PurchaseContractsPage />} />
       <Route path="uom-master" element={<UomMasterPage />} />
       <Route path="product-categories" element={<ProductCategoryMasterPage />} />

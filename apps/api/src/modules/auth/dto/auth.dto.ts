@@ -137,6 +137,7 @@ export class TokenResponse {
     firstName: string;
     lastName: string;
     role: string;
+    tenantId: string;
     permissions?: string[];
     moduleAccess?: Record<string, boolean>;
     roleId?: string | null;

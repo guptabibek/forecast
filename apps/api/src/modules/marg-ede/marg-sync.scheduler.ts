@@ -6,6 +6,7 @@ import { Queue } from 'bullmq';
 import { PrismaService } from '../../core/database/prisma.service';
 import { QUEUE_NAMES } from '../../core/queue/queue.constants';
 import { MargEdeService } from './marg-ede.service';
+import { MARG_SYNC_SCOPE } from './marg-sync.types';
 
 @Injectable()
 export class MargSyncScheduler {
@@ -20,16 +21,19 @@ export class MargSyncScheduler {
   /** Run every hour. Configs are checked against their syncFrequency. */
   @Cron(CronExpression.EVERY_HOUR)
   async scheduleActiveSyncs(): Promise<void> {
-    // Recover stale locks: if a sync has been RUNNING for over 2 hours,
-    // it likely crashed without the error handler executing. Reset to FAILED
-    // so the next scheduled cycle can retry.
+    // Recover stale locks based on the config heartbeat/update timestamp, not
+    // lastSyncAt. lastSyncAt tracks the most recent successful sync and can be
+    // hours or days old while a healthy sync is currently running.
     const staleCutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const staleReset = await this.prisma.margSyncConfig.updateMany({
       where: {
         lastSyncStatus: MargSyncStatus.RUNNING,
-        lastSyncAt: { lt: staleCutoff },
+        updatedAt: { lt: staleCutoff },
       },
-      data: { lastSyncStatus: MargSyncStatus.FAILED },
+      data: {
+        lastSyncStatus: MargSyncStatus.FAILED,
+        lastAccountingSyncStatus: MargSyncStatus.FAILED,
+      },
     });
     if (staleReset.count > 0) {
       this.logger.warn(`Reset ${staleReset.count} stale RUNNING Marg sync config(s) to FAILED`);
@@ -49,7 +53,14 @@ export class MargSyncScheduler {
         this.logger.warn(`Redis not configured — running scheduled Marg sync inline for config=${config.id}`);
         try {
           this.prisma.setTenantContext(config.tenantId);
-          await this.margEdeService.runSync(config.id, config.tenantId, 'scheduler');
+          await this.margEdeService.runSync(
+            config.id,
+            config.tenantId,
+            'scheduler',
+            undefined,
+            undefined,
+            MARG_SYNC_SCOPE.FULL,
+          );
         } catch (error) {
           this.logger.error(
             `Inline scheduled Marg sync failed for config=${config.id}: ${(error as Error).message}`,
@@ -67,6 +78,7 @@ export class MargSyncScheduler {
           configId: config.id,
           tenantId: config.tenantId,
           triggeredBy: 'scheduler',
+          scope: MARG_SYNC_SCOPE.FULL,
         },
         {
           attempts: 1,

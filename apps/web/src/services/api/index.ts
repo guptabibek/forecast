@@ -53,6 +53,7 @@ export type * from './fiscal-calendar.service';
 export type * from './forecast-accuracy.service';
 export type * from './inventory.service';
 export type * from './location-hierarchy.service';
+export type * from './manufacturing.service';
 export type * from './marg-ede.service';
 export type * from './mrp.service';
 export type * from './notification.service';

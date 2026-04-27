@@ -245,41 +245,84 @@ export interface SuggestedPurchaseRow {
 }
 
 export interface SupplierPerformanceRow {
-  supplier_id: string;
-  supplier_code: string;
+  supplier_key: string;
   supplier_name: string;
+  supplier_code: string | null;
   total_orders: number;
-  received_orders: number;
-  avg_lead_time_days: number;
-  min_lead_time_days: number;
-  max_lead_time_days: number;
-  on_time_count: number;
-  on_time_pct: number;
-  total_order_value: number;
-  quality_rating: number | null;
-  last_order_date: string | null;
+  on_time_delivery_pct: number | null;
+  avg_lead_time_days: number | null;
+  fulfillment_rate_pct: number | null;
+  rejection_rate_pct: number | null;
+  total_spend: number | null;
+  has_explicit_marg_mapping: boolean;
+  mapping_status: 'EXPLICIT_MARG_MAPPING' | 'LOCAL_ONLY_UNMAPPED' | 'MARG_ONLY_UNMAPPED';
+  order_source: string;
+  lead_time_source: string;
+  spend_source: string;
+  spend_note: string | null;
+  rejection_source: string;
+  last_activity_date: string | null;
 }
 
 export interface StockOutRow {
   product_id: string;
   sku: string;
-  product_name: string;
-  location_code: string;
-  stockout_start: string;
-  stockout_end: string | null;
-  stockout_days: number;
-  is_currently_out: boolean;
+  item_name: string;
+  stock_out_count: number;
+  total_duration_days: number;
+  last_stock_out_date: string | null;
+  current_stock: number;
+  marg_current_stock: number;
+  current_stock_delta: number;
+  current_stock_source: 'ALIGNED_WITH_MARG' | 'DIVERGES_FROM_MARG';
+}
+
+export interface ProcurementDataAvailability {
+  syncedFromMarg: boolean;
+  margRecordCount: number;
+  localRecordCount: number;
+  tables: string[];
+  notes: string[];
+}
+
+export interface ProcurementDataSyncAnalysis {
+  purchaseOrders: ProcurementDataAvailability;
+  purchaseInvoices: ProcurementDataAvailability;
+  goodsReceipts: ProcurementDataAvailability;
+  stockTransactions: ProcurementDataAvailability;
+  sourceOfTruth: {
+    supplierPerformanceMetrics: string;
+    leadTimeCalculation: string;
+    spendCalculation: string;
+  };
+  risks: string[];
+  fallbackLogic: string[];
+  syncImprovements: string[];
+}
+
+export interface SupplierPerformanceReportResponse {
+  analysis: ProcurementDataSyncAnalysis;
+  data: SupplierPerformanceRow[];
+  total: number;
+}
+
+export interface StockOutReportResponse {
+  analysis: ProcurementDataSyncAnalysis;
+  data: StockOutRow[];
+  total: number;
 }
 
 export interface DashboardKPIs {
-  total_products: number;
   total_inventory_value: number;
-  expired_value: number;
-  near_expiry_value: number;
-  low_stock_count: number;
-  dead_stock_value: number;
-  avg_turnover_ratio: number;
-  stockout_count: number;
+  total_sku_count: number;
+  total_batch_count: number;
+  total_location_count: number;
+  turnover_ratio: number | null;
+  pct_near_expiry_90d: number;
+  pct_dead_stock: number;
+  days_of_inventory: number | null;
+  avg_days_to_expiry: number | null;
+  negative_stock_count: number;
 }
 
 export interface AlertItem {
@@ -296,9 +339,10 @@ export interface AlertItem {
 }
 
 export interface InventoryValueTrendPoint {
-  month: string;
+  date: string;
   total_value: number;
-  batch_count: number;
+  receipt_value: number;
+  issue_value: number;
 }
 
 export interface ExpiryLossTrendPoint {
@@ -306,6 +350,7 @@ export interface ExpiryLossTrendPoint {
   expired_value: number;
   expired_qty: number;
   batch_count: number;
+  cumulative_loss: number;
 }
 
 // ── API Service ────────────────────────────────────────────────────────────
@@ -385,10 +430,10 @@ export const pharmaReportsService = {
     apiClient.get<PaginatedResponse<SuggestedPurchaseRow>>(`${BASE}/procurement/suggested-purchase`, { params: toParams(filters ?? {}) }).then((r) => r.data),
 
   getSupplierPerformance: (filters?: PharmaFilters & { supplierIds?: string[] }) =>
-    apiClient.get<PaginatedResponse<SupplierPerformanceRow>>(`${BASE}/procurement/supplier-performance`, { params: toParams(filters ?? {}) }).then((r) => r.data),
+    apiClient.get<SupplierPerformanceReportResponse>('/reports/supplier-performance', { params: toParams(filters ?? {}) }).then((r) => r.data),
 
   getStockOuts: (filters?: PharmaFilters) =>
-    apiClient.get<PaginatedResponse<StockOutRow>>(`${BASE}/procurement/stockouts`, { params: toParams(filters ?? {}) }).then((r) => r.data),
+    apiClient.get<StockOutReportResponse>('/reports/stock-out', { params: toParams(filters ?? {}) }).then((r) => r.data),
 
   // ── Alerts ─────────────────────────────────────────────────────────────
   getAlerts: (config?: { nearExpiryDays?: number; aClassOnly?: boolean; alertLimit?: number }) =>

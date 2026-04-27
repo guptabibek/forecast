@@ -1,5 +1,6 @@
 import { getFallbackPathForRole, isForecastViewerRole, isManufacturingBlockedRole, isSuperAdmin } from '@/permissions';
 import { ErrorBoundary } from '@components/common/ErrorBoundary';
+import { useSettings } from '@hooks/useSettings';
 import { useAuthStore } from '@stores/auth.store';
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
@@ -91,13 +92,16 @@ function HomeRoute() {
 function RoleAwareRoute({
   restrictForecastViewer = false,
   restrictManufacturing = false,
+  requiredModule,
   children,
 }: {
   restrictForecastViewer?: boolean;
   restrictManufacturing?: boolean;
+  requiredModule?: string;
   children: React.ReactNode;
 }) {
   const role = useAuthStore((s) => s.user?.role);
+  const { data: settings, isLoading: isSettingsLoading } = useSettings();
 
   // SUPER_ADMIN is never blocked
   if (isSuperAdmin(role)) return <>{children}</>;
@@ -106,7 +110,17 @@ function RoleAwareRoute({
     (restrictForecastViewer && isForecastViewerRole(role)) ||
     (restrictManufacturing && isManufacturingBlockedRole(role));
 
-  if (blocked) {
+  if (!blocked && requiredModule && isSettingsLoading) {
+    return <RouteFallback />;
+  }
+
+  const moduleDisabled = Boolean(
+    requiredModule &&
+    settings?.enabledModules &&
+    settings.enabledModules[requiredModule as keyof NonNullable<typeof settings.enabledModules>] === false,
+  );
+
+  if (blocked || moduleDisabled) {
     return <Navigate to={getFallbackPathForRole(role)} replace />;
   }
 
@@ -192,27 +206,27 @@ export default function App() {
         <Route path="/scenarios" element={<Scenarios />} />
 
         {/* Data Management */}
-        <Route path="/data/import" element={<RoleAwareRoute restrictForecastViewer><DataImport /></RoleAwareRoute>} />
-        <Route path="/data/actuals" element={<RoleAwareRoute restrictForecastViewer><Actuals /></RoleAwareRoute>} />
-        <Route path="/data/dimensions" element={<RoleAwareRoute restrictForecastViewer><Dimensions /></RoleAwareRoute>} />
-        <Route path="/data/products" element={<RoleAwareRoute restrictForecastViewer><ProductMaster /></RoleAwareRoute>} />
-        <Route path="/data/locations" element={<RoleAwareRoute restrictForecastViewer><Locations /></RoleAwareRoute>} />
+        <Route path="/data/import" element={<RoleAwareRoute restrictForecastViewer requiredModule="data"><DataImport /></RoleAwareRoute>} />
+        <Route path="/data/actuals" element={<RoleAwareRoute restrictForecastViewer requiredModule="data"><Actuals /></RoleAwareRoute>} />
+        <Route path="/data/dimensions" element={<RoleAwareRoute restrictForecastViewer requiredModule="data"><Dimensions /></RoleAwareRoute>} />
+        <Route path="/data/products" element={<RoleAwareRoute restrictForecastViewer requiredModule="data"><ProductMaster /></RoleAwareRoute>} />
+        <Route path="/data/locations" element={<RoleAwareRoute restrictForecastViewer requiredModule="data"><Locations /></RoleAwareRoute>} />
 
         {/* Reports */}
         <Route path="/reports" element={<Reports />} />
-        <Route path="/pharma-reports/*" element={<PharmaReportsRoutes />} />
+        <Route path="/pharma-reports/*" element={<RoleAwareRoute requiredModule="reports"><PharmaReportsRoutes /></RoleAwareRoute>} />
 
         {/* Settings */}
         <Route path="/settings" element={<RoleAwareRoute restrictForecastViewer><Settings /></RoleAwareRoute>} />
         <Route path="/settings/users" element={<RoleAwareRoute restrictForecastViewer><Users /></RoleAwareRoute>} />
         <Route path="/settings/roles" element={<RoleAwareRoute restrictForecastViewer><Roles /></RoleAwareRoute>} />
-        <Route path="/settings/marg-ede" element={<RoleAwareRoute restrictForecastViewer><MargEde /></RoleAwareRoute>} />
+        <Route path="/settings/marg-ede" element={<RoleAwareRoute restrictForecastViewer requiredModule="marg-ede"><MargEde /></RoleAwareRoute>} />
         <Route path="/settings/profile" element={<Profile />} />
         <Route path="/settings/audit-log" element={<RoleAwareRoute restrictForecastViewer><AuditLog /></RoleAwareRoute>} />
         <Route path="/notifications" element={<Notifications />} />
 
         {/* Manufacturing */}
-        <Route path="/manufacturing/*" element={<RoleAwareRoute restrictManufacturing><ManufacturingRoutes /></RoleAwareRoute>} />
+        <Route path="/manufacturing/*" element={<RoleAwareRoute restrictManufacturing requiredModule="manufacturing"><ManufacturingRoutes /></RoleAwareRoute>} />
       </Route>
 
       <Route

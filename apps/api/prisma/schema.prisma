@@ -450,6 +450,7 @@ model Actual {
   @@index([tenantId, customerId, periodDate])
   @@index([tenantId, accountId, periodDate])
   @@index([importId])
+  @@unique([tenantId, sourceSystem, sourceReference])
   @@map("actuals")
 }
 
@@ -1957,6 +1958,7 @@ model InventoryTransaction {
   referenceType   String?                  @map("reference_type") @db.VarChar(50)
   referenceId     String?                  @map("reference_id") @db.Uuid
   referenceNumber String?                  @map("reference_number") @db.VarChar(50)
+  idempotencyKey  String?                  @map("idempotency_key") @db.VarChar(100)
   lotNumber       String?                  @map("lot_number") @db.VarChar(50)
   batchId         String?                  @map("batch_id") @db.Uuid
   toLocationId    String?                  @map("to_location_id") @db.Uuid
@@ -1976,6 +1978,7 @@ model InventoryTransaction {
   @@index([tenantId, transactionDate])
   @@index([tenantId, transactionType])
   @@index([tenantId, productId, transactionDate])
+  @@unique([tenantId, idempotencyKey])
   @@map("inventory_transactions")
 }
 
@@ -2464,6 +2467,10 @@ model MargSyncConfig {
   lastSyncStatus  MargSyncStatus  @default(IDLE) @map("last_sync_status")
   lastSyncIndex   Int             @default(0) @map("last_sync_index")
   lastSyncDatetime String?        @map("last_sync_datetime") @db.VarChar(50)
+  lastAccountingSyncAt DateTime?  @map("last_accounting_sync_at")
+  lastAccountingSyncStatus MargSyncStatus @default(IDLE) @map("last_accounting_sync_status")
+  lastAccountingSyncIndex Int     @default(0) @map("last_accounting_sync_index")
+  lastAccountingSyncDatetime String? @map("last_accounting_sync_datetime") @db.VarChar(50)
   createdAt       DateTime        @default(now()) @map("created_at")
   updatedAt       DateTime        @updatedAt @map("updated_at")
   syncLogs        MargSyncLog[]
@@ -2488,6 +2495,12 @@ model MargSyncLog {
   branchesSynced   Int             @default(0) @map("branches_synced")
   vouchersSynced   Int             @default(0) @map("vouchers_synced")
   saleTypesSynced  Int             @default(0) @map("sale_types_synced")
+  accountGroupsSynced Int          @default(0) @map("account_groups_synced")
+  accountPostingsSynced Int        @default(0) @map("account_postings_synced")
+  accountGroupBalancesSynced Int   @default(0) @map("account_group_balances_synced")
+  partyBalancesSynced Int          @default(0) @map("party_balances_synced")
+  outstandingsSynced Int           @default(0) @map("outstandings_synced")
+  journalEntriesSynced Int         @default(0) @map("journal_entries_synced")
   errors           Json            @default("[]")
   syncIndex        Int?            @map("sync_index")
   syncDatetime     String?         @map("sync_datetime") @db.VarChar(50)
@@ -2705,13 +2718,208 @@ model MargStock {
   rateB       Decimal? @map("rate_b") @db.Decimal(18, 4)
   rateC       Decimal? @map("rate_c") @db.Decimal(18, 4)
   addField    String?  @map("add_field")
+  sourceDeleted Boolean @default(false) @map("source_deleted")
+  lastSeenSyncLogId String? @map("last_seen_sync_log_id") @db.Uuid
   rawData     Json?    @map("raw_data")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@unique([tenantId, companyId, pid, batch])
   @@index([tenantId])
+  @@index([tenantId, sourceDeleted])
+  @@index([lastSeenSyncLogId])
   @@map("marg_stocks")
+}
+
+/// Staged Marg accounting groups from API type 1
+model MargAccountGroup {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      BigInt   @map("marg_id")
+  companyId   Int      @map("company_id")
+  aid         String   @db.VarChar(20)
+  name        String   @db.VarChar(255)
+  under       String?  @db.VarChar(20)
+  addField    String?  @map("add_field")
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, aid])
+  @@index([tenantId])
+  @@map("marg_account_groups")
+}
+
+/// Staged Marg accounting postings from API type 1
+model MargAccountPosting {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      BigInt   @map("marg_id")
+  companyId   Int      @map("company_id")
+  voucher     String?  @db.VarChar(50)
+  date        DateTime @db.Date
+  code        String?  @db.VarChar(20)
+  amount      Decimal  @db.Decimal(18, 4)
+  book        String   @db.VarChar(20)
+  code1       String?  @db.VarChar(20)
+  gCode       String?  @map("g_code") @db.VarChar(20)
+  remark      String?  @db.VarChar(255)
+  addField    String?  @map("add_field")
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, margId])
+  @@index([tenantId, date])
+  @@index([tenantId, companyId, voucher])
+  @@index([tenantId, companyId, gCode])
+  @@map("marg_account_postings")
+}
+
+/// Staged Marg account group balances from API type 1
+model MargAccountGroupBalance {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      BigInt   @map("marg_id")
+  companyId   Int      @map("company_id")
+  aid         String   @db.VarChar(20)
+  opening     Decimal? @db.Decimal(18, 4)
+  balance     Decimal? @db.Decimal(18, 4)
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, aid])
+  @@index([tenantId])
+  @@map("marg_account_group_balances")
+}
+
+/// Staged Marg party balances from API type 1
+model MargPartyBalance {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      BigInt   @map("marg_id")
+  companyId   Int      @map("company_id")
+  cid         String   @db.VarChar(20)
+  opening     Decimal? @db.Decimal(18, 4)
+  balance     Decimal? @db.Decimal(18, 4)
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, cid])
+  @@index([tenantId])
+  @@map("marg_party_balances")
+}
+
+/// Staged Marg outstandings from API type 1
+model MargOutstanding {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  margId      BigInt   @map("marg_id")
+  companyId   Int      @map("company_id")
+  ord         String   @db.VarChar(20)
+  date        DateTime @db.Date
+  vcn         String?  @db.VarChar(50)
+  days        Int      @default(0)
+  finalAmt    Decimal? @map("final_amt") @db.Decimal(18, 4)
+  balance     Decimal? @db.Decimal(18, 4)
+  pdLess      Decimal? @map("pd_less") @db.Decimal(18, 4)
+  groupCode   String?  @map("group_code") @db.VarChar(20)
+  voucher     String?  @db.VarChar(50)
+  sVoucher    String?  @map("s_voucher") @db.VarChar(50)
+  addField    String?  @map("add_field")
+  rawData     Json?    @map("raw_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, margId])
+  @@index([tenantId, date])
+  @@index([tenantId, companyId, ord])
+  @@map("marg_outstandings")
+}
+
+model MargGLMappingRule {
+  id                 String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  ruleName           String    @map("rule_name") @db.VarChar(100)
+  companyId          Int?      @map("company_id")
+  bookCode           String?   @map("book_code") @db.VarChar(20)
+  groupCode          String?   @map("group_code") @db.VarChar(20)
+  partyCode          String?   @map("party_code") @db.VarChar(20)
+  counterpartyCode   String?   @map("counterparty_code") @db.VarChar(20)
+  remarkContains     String?   @map("remark_contains") @db.VarChar(100)
+  glAccountId        String    @map("gl_account_id") @db.Uuid
+  isReceivableControl Boolean  @default(false) @map("is_receivable_control")
+  priority           Int       @default(0)
+  isActive           Boolean   @default(true) @map("is_active")
+  description        String?
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  glAccount          GLAccount @relation("MargGLMappingRuleAccount", fields: [glAccountId], references: [id])
+
+  @@unique([tenantId, ruleName])
+  @@index([tenantId])
+  @@index([tenantId, priority])
+  @@index([tenantId, companyId])
+  @@index([glAccountId])
+  @@map("marg_gl_mapping_rules")
+}
+
+model MargAccountJournalProjection {
+  id              String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  companyId       Int      @map("company_id")
+  groupKey        String   @map("group_key") @db.VarChar(255)
+  bookCode        String?  @map("book_code") @db.VarChar(20)
+  voucher         String?  @db.VarChar(50)
+  entryDate       DateTime @map("entry_date") @db.Date
+  contentHash     String   @map("content_hash") @db.VarChar(64)
+  journalEntryId  String?  @map("journal_entry_id") @db.Uuid
+  lastSyncLogId   String?  @map("last_sync_log_id") @db.Uuid
+  lastProjectedAt DateTime @map("last_projected_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, groupKey])
+  @@index([tenantId])
+  @@index([tenantId, entryDate])
+  @@index([journalEntryId])
+  @@index([lastSyncLogId])
+  @@map("marg_account_journal_projections")
+}
+
+enum MargReconciliationType {
+  STOCK
+  AR_AGING
+  ACCOUNTING_BALANCE
+}
+
+enum MargReconciliationStatus {
+  PASSED
+  WARNING
+  FAILED
+}
+
+model MargReconciliationResult {
+  id                 String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId           String                   @map("tenant_id") @db.Uuid
+  syncLogId          String                   @map("sync_log_id") @db.Uuid
+  reconciliationType MargReconciliationType   @map("reconciliation_type")
+  status             MargReconciliationStatus @default(PASSED)
+  issueCount         Int                      @default(0) @map("issue_count")
+  summary            Json                     @default("{}")
+  issues             Json                     @default("[]")
+  startedAt          DateTime                 @default(now()) @map("started_at")
+  completedAt        DateTime?                @map("completed_at")
+  createdAt          DateTime                 @default(now()) @map("created_at")
+  updatedAt          DateTime                 @updatedAt @map("updated_at")
+
+  @@unique([syncLogId, reconciliationType])
+  @@index([tenantId])
+  @@index([tenantId, reconciliationType, createdAt])
+  @@index([syncLogId])
+  @@map("marg_reconciliation_results")
 }
 
 enum FinancialPlanType {
@@ -3261,7 +3469,7 @@ model Batch {
   nonConformanceReports NonConformanceReport[] @relation("BatchNCRs")
   goodsReceiptLines     GoodsReceiptLine[]     @relation("BatchGoodsReceiptLines")
 
-  @@unique([tenantId, batchNumber])
+  @@unique([tenantId, productId, locationId, batchNumber])
   @@index([tenantId])
   @@index([tenantId, productId])
   @@index([tenantId, status])
@@ -3426,6 +3634,7 @@ model GLAccount {
   children         GLAccount[]        @relation("GLAccountHierarchy")
   debitProfiles    PostingProfile[]   @relation("DebitAccount")
   creditProfiles   PostingProfile[]   @relation("CreditAccount")
+  margMappingRules MargGLMappingRule[] @relation("MargGLMappingRuleAccount")
   journalLines     JournalEntryLine[]
 
   @@unique([tenantId, accountNumber])
@@ -3562,6 +3771,7 @@ model InventoryLedger {
   referenceType   String?         @map("reference_type") @db.VarChar(50)
   referenceId     String?         @map("reference_id") @db.Uuid
   referenceNumber String?         @map("reference_number") @db.VarChar(50)
+  idempotencyKey  String?         @map("idempotency_key") @db.VarChar(100)
   lotNumber       String?         @map("lot_number") @db.VarChar(100)
   inventoryStatus InventoryStatus @default(INV_AVAILABLE) @map("inventory_status")
   runningBalance  Decimal?        @map("running_balance") @db.Decimal(18, 4)
@@ -3581,6 +3791,7 @@ model InventoryLedger {
   @@index([referenceType, referenceId])
   @@index([sequenceNumber])
   @@index([inventoryStatus])
+  @@unique([tenantId, idempotencyKey])
   @@map("inventory_ledger")
 }
 

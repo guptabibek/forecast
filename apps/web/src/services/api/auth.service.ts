@@ -5,7 +5,9 @@ interface AuthResponse extends AuthTokens {
   user: User;
 }
 
-interface RefreshResponse extends AuthTokens {}
+interface RefreshResponse extends AuthTokens {
+  user: User;
+}
 
 interface SessionInfo {
   id: string;

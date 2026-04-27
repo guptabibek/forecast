@@ -2,14 +2,15 @@ import { useState } from 'react';
 import type { Column } from '../../components/ui';
 import { Badge, Card, CardHeader, DataTable, QueryErrorBanner } from '../../components/ui';
 import {
-    useStockOuts,
-    useSuggestedPurchase,
-    useSupplierPerformance,
+  useStockOuts,
+  useSuggestedPurchase,
+  useSupplierPerformance,
 } from '../../hooks/usePharmaReports';
 import type {
-    StockOutRow,
-    SuggestedPurchaseRow,
-    SupplierPerformanceRow,
+  ProcurementDataSyncAnalysis,
+  StockOutRow,
+  SuggestedPurchaseRow,
+  SupplierPerformanceRow,
 } from '../../services/api/pharma-reports.service';
 import ExportToolbar from './ExportToolbar';
 import { fmt, fmtCurrency, fmtDate, fmtPct } from './shared';
@@ -25,8 +26,112 @@ const tabs: { key: Tab; label: string }[] = [
 const exportMap: Record<Tab, string> = {
   purchase: 'suggested-purchase',
   supplier: 'supplier-performance',
-  stockouts: 'suggested-purchase',
+  stockouts: 'stock-out',
 };
+
+function renderPct(value: number | null | undefined) {
+  if (value == null) return '—';
+  return fmtPct(value);
+}
+
+function renderSignedQty(value: number) {
+  if (value === 0) return fmt(0, 2);
+  return `${value > 0 ? '+' : '-'}${fmt(Math.abs(value), 2)}`;
+}
+
+function getMappingBadge(status: SupplierPerformanceRow['mapping_status']) {
+  switch (status) {
+    case 'EXPLICIT_MARG_MAPPING':
+      return { label: 'Mapped', variant: 'success' as const };
+    case 'MARG_ONLY_UNMAPPED':
+      return { label: 'Marg only', variant: 'warning' as const };
+    default:
+      return { label: 'Needs mapping', variant: 'warning' as const };
+  }
+}
+
+function getSpendSourceLabel(source: SupplierPerformanceRow['spend_source']) {
+  switch (source) {
+    case 'MARG_PURCHASE_INVOICE_EXPLICIT_MAPPING':
+      return 'Marg invoice';
+    case 'MARG_PURCHASE_INVOICE_UNMAPPED':
+      return 'Marg only';
+    case 'LOCAL_PURCHASE_ORDER_NO_MARG_INVOICE_OVERLAP':
+      return 'Local PO';
+    case 'LOCAL_PURCHASE_ORDER_EXPLICIT_MAPPING_FALLBACK':
+      return 'Local fallback';
+    case 'REQUIRES_EXPLICIT_MARG_MAPPING':
+      return 'Mapping required';
+    default:
+      return '—';
+  }
+}
+
+function SyncAnalysisCard({ analysis }: { analysis: ProcurementDataSyncAnalysis }) {
+  const blocks = [
+    { label: 'Purchase Orders', value: analysis.purchaseOrders },
+    { label: 'Purchase Invoices', value: analysis.purchaseInvoices },
+    { label: 'Goods Receipts', value: analysis.goodsReceipts },
+    { label: 'Stock Transactions', value: analysis.stockTransactions },
+  ];
+
+  return (
+    <Card>
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Data Sync Analysis</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Marg EDE is authoritative for posted invoices and stock movements, but supplier OTIF metrics still depend on whether local PO, GRN, and QC records exist.
+          </p>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {blocks.map((block) => (
+            <div key={block.label} className="rounded-lg border border-secondary-200 bg-secondary-50 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-secondary-500">{block.label}</p>
+                <Badge variant={block.value.syncedFromMarg ? 'success' : 'warning'} size="sm">
+                  {block.value.syncedFromMarg ? 'Marg Sync' : 'Fallback'}
+                </Badge>
+              </div>
+              <p className="mt-2 text-sm text-gray-900">
+                Marg: {fmt(block.value.margRecordCount)} | Local: {fmt(block.value.localRecordCount)}
+              </p>
+              <p className="mt-2 text-xs text-gray-500">{block.value.notes[0]}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-lg border border-secondary-200 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-secondary-500">Source Of Truth</p>
+            <div className="mt-2 space-y-2 text-sm text-gray-700">
+              <p>{analysis.sourceOfTruth.supplierPerformanceMetrics}</p>
+              <p>{analysis.sourceOfTruth.leadTimeCalculation}</p>
+              <p>{analysis.sourceOfTruth.spendCalculation}</p>
+            </div>
+          </div>
+          <div className="rounded-lg border border-secondary-200 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-secondary-500">Fallback Logic</p>
+            <div className="mt-2 space-y-2 text-sm text-gray-700">
+              {analysis.fallbackLogic.map((item) => (
+                <p key={item}>{item}</p>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-lg border border-secondary-200 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-secondary-500">Risks</p>
+            <div className="mt-2 space-y-2 text-sm text-gray-700">
+              {analysis.risks.map((item) => (
+                <p key={item}>{item}</p>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 export default function ProcurementPage() {
   const [activeTab, setActiveTab] = useState<Tab>('purchase');
@@ -38,6 +143,7 @@ export default function ProcurementPage() {
   const purchase = useSuggestedPurchase(activeTab === 'purchase' ? filters : undefined);
   const supplier = useSupplierPerformance(activeTab === 'supplier' ? filters : undefined);
   const stockouts = useStockOuts(activeTab === 'stockouts' ? filters : undefined);
+  const activeAnalysis = activeTab === 'supplier' ? supplier.data?.analysis : activeTab === 'stockouts' ? stockouts.data?.analysis : null;
 
   const purchaseCols: Column<SuggestedPurchaseRow>[] = [
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px' },
@@ -56,43 +162,70 @@ export default function ProcurementPage() {
   ];
 
   const supplierCols: Column<SupplierPerformanceRow>[] = [
-    { key: 'supplier_code', header: 'Code', accessor: 'supplier_code', width: '90px' },
-    { key: 'supplier_name', header: 'Supplier', accessor: 'supplier_name' },
-    { key: 'total_orders', header: 'Orders', accessor: (r) => fmt(r.total_orders), align: 'right' },
-    { key: 'total_order_value', header: 'Total Value', accessor: (r) => fmtCurrency(r.total_order_value), align: 'right' },
-    { key: 'on_time_pct', header: 'On-Time %', accessor: (r) => {
-      const rate = r.on_time_pct;
+    {
+      key: 'supplier_name',
+      header: 'Supplier Name',
+      accessor: (r) => {
+        const badge = getMappingBadge(r.mapping_status);
+        return (
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="font-medium text-gray-900">{r.supplier_name}</div>
+              <Badge variant={badge.variant} size="sm">{badge.label}</Badge>
+            </div>
+            <div className="text-xs text-gray-500">{r.supplier_code ?? r.order_source}</div>
+          </div>
+        );
+      },
+    },
+    { key: 'total_orders', header: 'Total Orders', accessor: (r) => fmt(r.total_orders), align: 'right' },
+    { key: 'on_time_delivery_pct', header: 'On-Time Delivery %', accessor: (r) => {
+      const rate = r.on_time_delivery_pct;
+      if (rate == null) return '—';
       const color = rate >= 95 ? 'text-green-600' : rate >= 80 ? 'text-amber-600' : 'text-red-600';
-      return <span className={`font-semibold ${color}`}>{fmtPct(rate)}</span>;
+      return <span className={`font-semibold ${color}`}>{renderPct(rate)}</span>;
     }, align: 'right' },
-    { key: 'avg_lead_time_days', header: 'Avg Lead (d)', accessor: (r) => r.avg_lead_time_days?.toFixed(1) ?? '—', align: 'right' },
-    { key: 'quality_rating', header: 'Quality', accessor: (r) => {
-      const q = r.quality_rating;
-      if (q == null) return '—';
-      const stars = '★'.repeat(Math.round(q)) + '☆'.repeat(5 - Math.round(q));
-      return <span className="text-amber-500 tracking-wide">{stars}</span>;
-    }, align: 'center' },
-    { key: 'received_orders', header: 'Received', accessor: (r) => fmt(r.received_orders), align: 'right' },
+    { key: 'avg_lead_time_days', header: 'Avg Lead Time', accessor: (r) => r.avg_lead_time_days != null ? `${r.avg_lead_time_days.toFixed(1)} d` : '—', align: 'right' },
+    { key: 'fulfillment_rate_pct', header: 'Fulfillment Rate %', accessor: (r) => renderPct(r.fulfillment_rate_pct), align: 'right' },
+    { key: 'rejection_rate_pct', header: 'Rejection Rate %', accessor: (r) => renderPct(r.rejection_rate_pct), align: 'right' },
+    {
+      key: 'total_spend',
+      header: 'Total Spend',
+      accessor: (r) => (
+        <div className="text-right">
+          <div>{r.total_spend != null ? fmtCurrency(r.total_spend) : '—'}</div>
+          <div className={`text-xs ${r.spend_note ? 'text-amber-600' : 'text-gray-500'}`}>
+            {r.spend_note ?? getSpendSourceLabel(r.spend_source)}
+          </div>
+        </div>
+      ),
+      align: 'right',
+    },
   ];
 
   const stockoutCols: Column<StockOutRow>[] = [
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px' },
-    { key: 'product_name', header: 'Product', accessor: 'product_name' },
-    { key: 'location_code', header: 'Location', accessor: 'location_code', width: '90px' },
-    { key: 'stockout_start', header: 'Out Since', accessor: (r) => fmtDate(r.stockout_start) },
-    { key: 'stockout_days', header: 'Days Out', accessor: (r) => (
-      <span className={r.stockout_days > 14 ? 'text-red-600 font-bold' : 'text-amber-600 font-semibold'}>
-        {r.stockout_days}
+    { key: 'item_name', header: 'Item Name', accessor: 'item_name' },
+    { key: 'stock_out_count', header: 'Stock-Out Count', accessor: (r) => fmt(r.stock_out_count), align: 'right' },
+    { key: 'total_duration_days', header: 'Total Duration', accessor: (r) => (
+      <span className={r.total_duration_days > 14 ? 'text-red-600 font-bold' : 'text-amber-600 font-semibold'}>
+        {fmt(r.total_duration_days)} d
       </span>
     ), align: 'right' },
-    { key: 'stockout_end', header: 'Resolved', accessor: (r) => r.stockout_end ? fmtDate(r.stockout_end) : (
-      <Badge variant="error" size="sm">Active</Badge>
-    ) },
-    { key: 'is_currently_out', header: 'Status', accessor: (r) => r.is_currently_out ? (
-      <Badge variant="error" size="sm">Out of Stock</Badge>
-    ) : (
-      <Badge variant="success" size="sm">Resolved</Badge>
-    ), align: 'center' },
+    { key: 'last_stock_out_date', header: 'Last Stock-Out Date', accessor: (r) => fmtDate(r.last_stock_out_date) },
+    {
+      key: 'current_stock',
+      header: 'Current Stock',
+      accessor: (r) => (
+        <div className="text-right">
+          <div className={r.current_stock <= 0 ? 'text-red-600 font-bold' : 'text-gray-900 font-medium'}>{fmt(r.current_stock, 2)}</div>
+          <div className={`text-xs ${r.current_stock_source === 'DIVERGES_FROM_MARG' ? 'text-amber-600' : 'text-gray-500'}`}>
+            Marg {fmt(r.marg_current_stock, 2)} | Δ {renderSignedQty(r.current_stock_delta)}
+          </div>
+        </div>
+      ),
+      align: 'right',
+    },
   ];
 
   return (
@@ -100,10 +233,12 @@ export default function ProcurementPage() {
       <div className="flex justify-between items-start">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Procurement & Supply</h1>
-          <p className="mt-1 text-sm text-gray-500">Purchase suggestions, supplier analytics, and stock-out tracking</p>
+          <p className="mt-1 text-sm text-gray-500">Validate Marg sync coverage first, then review supplier performance and stock-out behavior with explicit source-of-truth caveats.</p>
         </div>
         <ExportToolbar reportType={exportMap[activeTab]} filters={{}} />
       </div>
+
+      {activeAnalysis && <SyncAnalysisCard analysis={activeAnalysis} />}
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
@@ -159,13 +294,13 @@ export default function ProcurementPage() {
           <Card padding="none">
             <CardHeader
               title="Supplier Scorecard"
-              description="Delivery, quality, and cost performance by supplier"
+              description="On-time delivery, lead time, fulfillment, rejection, and spend with Marg-vs-local provenance exposed"
               className="px-6 pt-6"
             />
             <DataTable<SupplierPerformanceRow>
               data={supplier.data?.data ?? []}
               columns={supplierCols}
-              keyExtractor={(r) => r.supplier_id}
+              keyExtractor={(r) => r.supplier_key}
               isLoading={supplier.isLoading}
               emptyMessage="No supplier data available"
               pagination={{
@@ -186,16 +321,16 @@ export default function ProcurementPage() {
           {stockouts.isError && <QueryErrorBanner error={stockouts.error} />}
           <Card padding="none">
             <CardHeader
-              title="Active Stock-outs"
-              description="Products currently out of stock with estimated impact"
+              title="Stock-Out Report"
+              description="Marg-backed stock-out frequency, total duration, last zero-stock date, and current on-hand position with live-vs-Marg drift exposed"
               className="px-6 pt-6"
             />
             <DataTable<StockOutRow>
               data={stockouts.data?.data ?? []}
               columns={stockoutCols}
-              keyExtractor={(r) => `${r.product_id}-${r.location_code}`}
+              keyExtractor={(r) => r.product_id}
               isLoading={stockouts.isLoading}
-              emptyMessage="No active stock-outs"
+              emptyMessage="No Marg-backed stock-out history found"
               pagination={{
                 page,
                 pageSize,

@@ -28,7 +28,7 @@ const tabs: { key: Tab; label: string }[] = [
 
 const exportMap: Record<Tab, string> = {
   abc: 'abc-analysis',
-  xyz: 'abc-analysis',
+  xyz: 'xyz-analysis',
   deadSlow: 'dead-slow',
   turnover: 'inventory-turnover',
 };

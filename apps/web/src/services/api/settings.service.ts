@@ -48,6 +48,7 @@ export interface TenantSettings {
     manufacturing: boolean;
     reports: boolean;
     data: boolean;
+    'marg-ede'?: boolean;
   };
 }
 
