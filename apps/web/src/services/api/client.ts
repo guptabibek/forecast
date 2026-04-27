@@ -46,6 +46,49 @@ function getTokenExp(token: string): number | null {
   }
 }
 
+function isIpv4Host(hostname: string): boolean {
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname);
+}
+
+function isReservedWorkspaceLabel(label: string): boolean {
+  return ['localhost', 'www', 'api', 'app'].includes(label);
+}
+
+function resolveTenantHeader(userTenantId?: string): string | undefined {
+  if (userTenantId) {
+    return userTenantId;
+  }
+
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+
+  const persistedTenantId = window.localStorage.getItem('fh:last-tenant-id')?.trim();
+  if (persistedTenantId) {
+    return persistedTenantId;
+  }
+
+  const hostname = window.location.hostname.trim().toLowerCase();
+  if (!hostname || hostname === 'localhost' || isIpv4Host(hostname)) {
+    return undefined;
+  }
+
+  if (hostname.endsWith('.localhost')) {
+    const localSubdomain = hostname.replace(/\.localhost$/, '');
+    return localSubdomain && !isReservedWorkspaceLabel(localSubdomain)
+      ? localSubdomain
+      : undefined;
+  }
+
+  const parts = hostname.split('.').filter(Boolean);
+  if (parts.length >= 3) {
+    const candidate = parts[0];
+    return !isReservedWorkspaceLabel(candidate) ? candidate : undefined;
+  }
+
+  return undefined;
+}
+
 // Request interceptor - add auth token + track mutations
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
@@ -71,14 +114,9 @@ apiClient.interceptors.request.use(
       config.headers.Authorization = `Bearer ${currentTokens.accessToken}`;
     }
 
-    if (user?.tenantId) {
-      config.headers['X-Tenant-ID'] = user.tenantId;
-    } else {
-      const hostname = window.location.hostname;
-      const subdomain = hostname.split('.')[0];
-      if (subdomain && subdomain !== 'localhost' && subdomain !== 'www') {
-        config.headers['X-Tenant-ID'] = subdomain;
-      }
+    const tenantHeader = resolveTenantHeader(user?.tenantId);
+    if (tenantHeader) {
+      config.headers['X-Tenant-ID'] = tenantHeader;
     }
 
     if (isMutation(config)) {

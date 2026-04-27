@@ -4,6 +4,21 @@ import { create } from 'zustand';
 
 let refreshInFlight: Promise<void> | null = null;
 
+const LAST_TENANT_STORAGE_KEY = 'fh:last-tenant-id';
+
+function persistLastTenantId(tenantId?: string | null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (tenantId) {
+    window.localStorage.setItem(LAST_TENANT_STORAGE_KEY, tenantId);
+    return;
+  }
+
+  window.localStorage.removeItem(LAST_TENANT_STORAGE_KEY);
+}
+
 interface AuthState {
   user: User | null;
   tokens: AuthTokens | null;
@@ -41,6 +56,7 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
         try {
           const response = await authService.login({ email, password });
+          persistLastTenantId(response.user?.tenantId);
           set({
             user: response.user,
             tokens: {
@@ -65,6 +81,7 @@ export const useAuthStore = create<AuthState>()(
         } catch {
           // Logout failed - clear local state anyway
         } finally {
+          persistLastTenantId(null);
           set({
             user: null,
             tokens: null,
@@ -82,6 +99,7 @@ export const useAuthStore = create<AuthState>()(
         refreshInFlight = (async () => {
           try {
             const response = await authService.refreshToken();
+            persistLastTenantId(response.user?.tenantId ?? get().user?.tenantId);
             set((state) => ({
               user: response.user ?? state.user,
               tokens: {
@@ -92,6 +110,7 @@ export const useAuthStore = create<AuthState>()(
             }));
           } catch (error) {
             // Refresh failed, log out
+            persistLastTenantId(null);
             set({
               user: null,
               tokens: null,
@@ -109,6 +128,7 @@ export const useAuthStore = create<AuthState>()(
       updateUser: (userData) => {
         const { user } = get();
         if (user) {
+          persistLastTenantId(userData.tenantId ?? user.tenantId);
           set({ user: { ...user, ...userData } });
         }
       },
@@ -118,16 +138,17 @@ export const useAuthStore = create<AuthState>()(
       clearError: () => set({ error: null }),
 
       checkAuth: async () => {
+        set({ isLoading: true });
         try {
-          // The Axios interceptor transparently handles token refresh on 401:
-          // if the access token is absent (e.g. page reload) the interceptor fires
-          // POST /auth/refresh using the httpOnly refresh cookie, stores the new
-          // access token, then retries this request — all before this await resolves.
+          if (!get().tokens?.accessToken) {
+            await get().refreshToken();
+          }
+
           const user = await authService.getCurrentUser();
+          persistLastTenantId(user.tenantId);
           set({ user, isAuthenticated: true, isLoading: false });
         } catch {
-          // No valid session (fresh user or refresh cookie expired).
-          // Interceptor already cleared tokens and redirected to /login if needed.
+          persistLastTenantId(null);
           set({
             user: null,
             tokens: null,
