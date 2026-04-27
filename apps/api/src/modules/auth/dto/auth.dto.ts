@@ -140,6 +140,8 @@ export class TokenResponse {
     tenantId: string;
     permissions?: string[];
     moduleAccess?: Record<string, boolean>;
+    createdAt?: string;
+    lastLoginAt?: string | null;
     roleId?: string | null;
     roleName?: string;
     mustResetPassword?: boolean;

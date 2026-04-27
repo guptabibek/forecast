@@ -142,6 +142,13 @@ export const useAuthStore = create<AuthState>()(
         try {
           if (!get().tokens?.accessToken) {
             await get().refreshToken();
+
+            const restoredUser = get().user;
+            if (restoredUser) {
+              persistLastTenantId(restoredUser.tenantId);
+              set({ user: restoredUser, isAuthenticated: true, isLoading: false });
+              return;
+            }
           }
 
           const user = await authService.getCurrentUser();
