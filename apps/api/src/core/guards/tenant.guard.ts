@@ -72,6 +72,13 @@ export class TenantGuard implements CanActivate {
   private async resolveSuperAdminTenantId(req: Request, user: any): Promise<string | undefined> {
     const headerTenant = req.headers['x-tenant-id'] as string | undefined;
     if (headerTenant) {
+      if (
+        headerTenant === SUPER_ADMIN_TENANT.id ||
+        headerTenant.toLowerCase() === SUPER_ADMIN_TENANT.slug
+      ) {
+        return SUPER_ADMIN_TENANT.id;
+      }
+
       // Super admin can access any tenant regardless of status
       if (this.uuidRegex.test(headerTenant)) {
         const tenant = await this.prisma.tenant.findFirst({

@@ -2,7 +2,7 @@ import { getFallbackPathForRole, isForecastViewerRole, isManufacturingBlockedRol
 import { ErrorBoundary } from '@components/common/ErrorBoundary';
 import { useSettings } from '@hooks/useSettings';
 import { useAuthStore } from '@stores/auth.store';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 // Layout
@@ -144,6 +144,10 @@ function TenantOnlyRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  useEffect(() => {
+    void useAuthStore.getState().checkAuth();
+  }, []);
+
   return (
     <ErrorBoundary>
     <Suspense fallback={<RouteFallback />}>

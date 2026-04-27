@@ -10,6 +10,7 @@ function isMutation(config?: InternalAxiosRequestConfig): boolean {
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const SUPER_ADMIN_SYNTHETIC_TENANT_ID = '00000000-0000-0000-0000-000000000000';
 
 // Create axios instance
 const apiClient: AxiosInstance = axios.create({
@@ -54,9 +55,13 @@ function isReservedWorkspaceLabel(label: string): boolean {
   return ['localhost', 'www', 'api', 'app'].includes(label);
 }
 
-function resolveTenantHeader(userTenantId?: string): string | undefined {
-  if (userTenantId) {
-    return userTenantId;
+function resolveTenantHeader(user?: { tenantId?: string; role?: string | null } | null): string | undefined {
+  if (user?.tenantId) {
+    if (user.role === 'SUPER_ADMIN' && user.tenantId === SUPER_ADMIN_SYNTHETIC_TENANT_ID) {
+      return undefined;
+    }
+
+    return user.tenantId;
   }
 
   if (typeof window === 'undefined') {
@@ -65,6 +70,11 @@ function resolveTenantHeader(userTenantId?: string): string | undefined {
 
   const persistedTenantId = window.localStorage.getItem('fh:last-tenant-id')?.trim();
   if (persistedTenantId) {
+    if (persistedTenantId === SUPER_ADMIN_SYNTHETIC_TENANT_ID) {
+      window.localStorage.removeItem('fh:last-tenant-id');
+      return undefined;
+    }
+
     return persistedTenantId;
   }
 
@@ -114,7 +124,7 @@ apiClient.interceptors.request.use(
       config.headers.Authorization = `Bearer ${currentTokens.accessToken}`;
     }
 
-    const tenantHeader = resolveTenantHeader(user?.tenantId);
+    const tenantHeader = resolveTenantHeader(user);
     if (tenantHeader) {
       config.headers['X-Tenant-ID'] = tenantHeader;
     }

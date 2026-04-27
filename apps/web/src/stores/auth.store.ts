@@ -5,13 +5,14 @@ import { create } from 'zustand';
 let refreshInFlight: Promise<void> | null = null;
 
 const LAST_TENANT_STORAGE_KEY = 'fh:last-tenant-id';
+const SUPER_ADMIN_SYNTHETIC_TENANT_ID = '00000000-0000-0000-0000-000000000000';
 
-function persistLastTenantId(tenantId?: string | null) {
+function persistLastTenantId(tenantId?: string | null, role?: User['role'] | null) {
   if (typeof window === 'undefined') {
     return;
   }
 
-  if (tenantId) {
+  if (tenantId && !(role === 'SUPER_ADMIN' && tenantId === SUPER_ADMIN_SYNTHETIC_TENANT_ID)) {
     window.localStorage.setItem(LAST_TENANT_STORAGE_KEY, tenantId);
     return;
   }
@@ -56,7 +57,7 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
         try {
           const response = await authService.login({ email, password });
-          persistLastTenantId(response.user?.tenantId);
+          persistLastTenantId(response.user?.tenantId, response.user?.role);
           set({
             user: response.user,
             tokens: {
@@ -99,7 +100,10 @@ export const useAuthStore = create<AuthState>()(
         refreshInFlight = (async () => {
           try {
             const response = await authService.refreshToken();
-            persistLastTenantId(response.user?.tenantId ?? get().user?.tenantId);
+            persistLastTenantId(
+              response.user?.tenantId ?? get().user?.tenantId,
+              response.user?.role ?? get().user?.role,
+            );
             set((state) => ({
               user: response.user ?? state.user,
               tokens: {
@@ -128,7 +132,7 @@ export const useAuthStore = create<AuthState>()(
       updateUser: (userData) => {
         const { user } = get();
         if (user) {
-          persistLastTenantId(userData.tenantId ?? user.tenantId);
+          persistLastTenantId(userData.tenantId ?? user.tenantId, userData.role ?? user.role);
           set({ user: { ...user, ...userData } });
         }
       },
@@ -145,14 +149,14 @@ export const useAuthStore = create<AuthState>()(
 
             const restoredUser = get().user;
             if (restoredUser) {
-              persistLastTenantId(restoredUser.tenantId);
+              persistLastTenantId(restoredUser.tenantId, restoredUser.role);
               set({ user: restoredUser, isAuthenticated: true, isLoading: false });
               return;
             }
           }
 
           const user = await authService.getCurrentUser();
-          persistLastTenantId(user.tenantId);
+          persistLastTenantId(user.tenantId, user.role);
           set({ user, isAuthenticated: true, isLoading: false });
         } catch {
           persistLastTenantId(null);
@@ -167,7 +171,3 @@ export const useAuthStore = create<AuthState>()(
     }),
 );
 
-// Initialize auth check on app load
-if (typeof window !== 'undefined') {
-  useAuthStore.getState().checkAuth();
-}
