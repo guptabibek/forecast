@@ -1090,13 +1090,13 @@ export default function Dashboard() {
   // Fetch filter dimension data (products and customers)
   const { data: productsData, isLoading: productsFilterLoading } = useQuery({
     queryKey: ['filter-products'],
-    queryFn: () => dataService.getProducts(),
+    queryFn: () => dataService.getDimensionHierarchy('product'),
     staleTime: 300000, // 5 minutes
   });
 
   const { data: customersData, isLoading: customersFilterLoading } = useQuery({
     queryKey: ['filter-customers'],
-    queryFn: () => dataService.getCustomers(),
+    queryFn: () => dataService.getDimensionHierarchy('customer'),
     staleTime: 300000, // 5 minutes
   });
 

@@ -2,15 +2,15 @@ import { useState } from 'react';
 import type { Column } from '../../components/ui';
 import { Badge, Card, CardHeader, DataTable, QueryErrorBanner } from '../../components/ui';
 import {
-  useStockOuts,
-  useSuggestedPurchase,
-  useSupplierPerformance,
+    useStockOuts,
+    useSuggestedPurchase,
+    useSupplierPerformance,
 } from '../../hooks/usePharmaReports';
 import type {
-  ProcurementDataSyncAnalysis,
-  StockOutRow,
-  SuggestedPurchaseRow,
-  SupplierPerformanceRow,
+    ProcurementDataSyncAnalysis,
+    StockOutRow,
+    SuggestedPurchaseRow,
+    SupplierPerformanceRow,
 } from '../../services/api/pharma-reports.service';
 import ExportToolbar from './ExportToolbar';
 import { fmt, fmtCurrency, fmtDate, fmtPct } from './shared';
@@ -135,14 +135,14 @@ function SyncAnalysisCard({ analysis }: { analysis: ProcurementDataSyncAnalysis 
 
 export default function ProcurementPage() {
   const [activeTab, setActiveTab] = useState<Tab>('purchase');
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(1);
   const pageSize = 50;
 
-  const filters = { limit: pageSize, offset: page * pageSize };
+  const filters = { limit: pageSize, offset: (page - 1) * pageSize };
 
-  const purchase = useSuggestedPurchase(activeTab === 'purchase' ? filters : undefined);
-  const supplier = useSupplierPerformance(activeTab === 'supplier' ? filters : undefined);
-  const stockouts = useStockOuts(activeTab === 'stockouts' ? filters : undefined);
+  const purchase = useSuggestedPurchase(filters, activeTab === 'purchase');
+  const supplier = useSupplierPerformance(filters, activeTab === 'supplier');
+  const stockouts = useStockOuts(filters, activeTab === 'stockouts');
   const activeAnalysis = activeTab === 'supplier' ? supplier.data?.analysis : activeTab === 'stockouts' ? stockouts.data?.analysis : null;
 
   const purchaseCols: Column<SuggestedPurchaseRow>[] = [
@@ -246,7 +246,7 @@ export default function ProcurementPage() {
           {tabs.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => { setActiveTab(tab.key); setPage(0); }}
+              onClick={() => { setActiveTab(tab.key); setPage(1); }}
               className={`whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors ${
                 activeTab === tab.key
                   ? 'border-primary-500 text-primary-600'

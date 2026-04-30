@@ -38,16 +38,16 @@ const exportMap: Record<Tab, string> = {
 
 export default function InventoryReportsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('current');
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(1);
   const pageSize = 50;
 
-  const filters = { limit: pageSize, offset: page * pageSize };
+  const filters = { limit: pageSize, offset: (page - 1) * pageSize };
 
-  const currentStock = useCurrentStock(activeTab === 'current' ? filters : undefined);
-  const batchInv = useBatchInventory(activeTab === 'batch' ? filters : undefined);
-  const ledger = useMovementLedger(activeTab === 'ledger' ? filters : undefined);
-  const reorder = useReorderReport(activeTab === 'reorder' ? filters : undefined);
-  const ageing = useStockAgeing(activeTab === 'ageing' ? filters : undefined);
+  const currentStock = useCurrentStock(filters, activeTab === 'current');
+  const batchInv = useBatchInventory(filters, activeTab === 'batch');
+  const ledger = useMovementLedger(filters, activeTab === 'ledger');
+  const reorder = useReorderReport(filters, activeTab === 'reorder');
+  const ageing = useStockAgeing(filters, activeTab === 'ageing');
 
   const queryMap = { current: currentStock, batch: batchInv, ledger, reorder, ageing };
   const activeQuery = queryMap[activeTab];
@@ -130,7 +130,7 @@ export default function InventoryReportsPage() {
           {tabs.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => { setActiveTab(tab.key); setPage(0); }}
+              onClick={() => { setActiveTab(tab.key); setPage(1); }}
               className={`whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors ${
                 activeTab === tab.key
                   ? 'border-primary-500 text-primary-600'

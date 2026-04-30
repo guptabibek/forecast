@@ -69,121 +69,143 @@ export function useInventoryValueTrend() {
 
 // ── Inventory ────────────────────────────────────────────────────────────
 
-export function useCurrentStock(filters?: PharmaFilters) {
+export function useCurrentStock(filters?: PharmaFilters, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.currentStock(filters),
     queryFn: () => pharmaReportsService.getCurrentStock(filters),
+    enabled,
   });
 }
 
-export function useBatchInventory(filters?: PharmaFilters) {
+export function useBatchInventory(filters?: PharmaFilters, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.batchInventory(filters),
     queryFn: () => pharmaReportsService.getBatchInventory(filters),
+    enabled,
   });
 }
 
-export function useMovementLedger(filters?: PharmaFilters) {
+export function useMovementLedger(filters?: PharmaFilters, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.movementLedger(filters),
     queryFn: () => pharmaReportsService.getMovementLedger(filters),
+    enabled,
   });
 }
 
-export function useReorderReport(filters?: PharmaFilters & { avgSalesDays?: number }) {
+export function useReorderReport(filters?: PharmaFilters & { avgSalesDays?: number }, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.reorder(filters),
     queryFn: () => pharmaReportsService.getReorderReport(filters),
+    enabled,
   });
 }
 
-export function useStockAgeing(filters?: PharmaFilters) {
+export function useStockAgeing(filters?: PharmaFilters, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.ageing(filters),
     queryFn: () => pharmaReportsService.getStockAgeing(filters),
+    enabled,
   });
 }
 
 // ── Expiry ────────────────────────────────────────────────────────────────
 
-export function useNearExpiry(filters?: PharmaFilters & { thresholdDays?: number }) {
+export function useNearExpiry(filters?: PharmaFilters & { thresholdDays?: number }, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.nearExpiry(filters),
     queryFn: () => pharmaReportsService.getNearExpiry(filters),
+    enabled,
   });
 }
 
-export function useExpiredStock(filters?: PharmaFilters) {
+export function useExpiredStock(filters?: PharmaFilters, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.expiredStock(filters),
     queryFn: () => pharmaReportsService.getExpiredStock(filters),
+    enabled,
   });
 }
 
-export function useFEFOPicking(filters?: PharmaFilters) {
+export function useFEFOPicking(filters?: PharmaFilters, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.fefo(filters),
     queryFn: () => pharmaReportsService.getFEFOPicking(filters),
+    enabled,
   });
 }
 
-export function useExpiryRisk(filters?: PharmaFilters) {
+export function useExpiryRisk(filters?: PharmaFilters, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.expiryRisk(filters),
     queryFn: () => pharmaReportsService.getExpiryRisk(filters),
+    enabled,
   });
 }
 
 // ── Stock Analysis ───────────────────────────────────────────────────────
 
-export function useDeadSlowStock(filters?: PharmaFilters & { deadMonths?: number }) {
+export function useDeadSlowStock(filters?: PharmaFilters & { deadMonths?: number }, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.deadSlow(filters),
     queryFn: () => pharmaReportsService.getDeadSlowStock(filters),
+    enabled,
   });
 }
 
-export function useABCAnalysis(filters?: PharmaFilters & { thresholdA?: number; thresholdB?: number; periodMonths?: number }) {
+export function useABCAnalysis(
+  filters?: PharmaFilters & { thresholdA?: number; thresholdB?: number; periodMonths?: number },
+  enabled = true,
+) {
   return useQuery({
     queryKey: pharmaKeys.abc(filters),
     queryFn: () => pharmaReportsService.getABCAnalysis(filters),
+    enabled,
   });
 }
 
-export function useXYZAnalysis(filters?: PharmaFilters & { thresholdX?: number; thresholdY?: number; periodMonths?: number }) {
+export function useXYZAnalysis(
+  filters?: PharmaFilters & { thresholdX?: number; thresholdY?: number; periodMonths?: number },
+  enabled = true,
+) {
   return useQuery({
     queryKey: pharmaKeys.xyz(filters),
     queryFn: () => pharmaReportsService.getXYZAnalysis(filters),
+    enabled,
   });
 }
 
-export function useInventoryTurnover(filters?: PharmaFilters) {
+export function useInventoryTurnover(filters?: PharmaFilters, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.turnover(filters),
     queryFn: () => pharmaReportsService.getInventoryTurnover(filters),
+    enabled,
   });
 }
 
 // ── Procurement ──────────────────────────────────────────────────────────
 
-export function useSuggestedPurchase(filters?: PharmaFilters) {
+export function useSuggestedPurchase(filters?: PharmaFilters, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.suggestedPurchase(filters),
     queryFn: () => pharmaReportsService.getSuggestedPurchase(filters),
+    enabled,
   });
 }
 
-export function useSupplierPerformance(filters?: PharmaFilters & { supplierIds?: string[] }) {
+export function useSupplierPerformance(filters?: PharmaFilters & { supplierIds?: string[] }, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.supplierPerformance(filters),
     queryFn: () => pharmaReportsService.getSupplierPerformance(filters),
+    enabled,
   });
 }
 
-export function useStockOuts(filters?: PharmaFilters) {
+export function useStockOuts(filters?: PharmaFilters, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.stockouts(filters),
     queryFn: () => pharmaReportsService.getStockOuts(filters),
+    enabled,
   });
 }
 

@@ -183,15 +183,7 @@ export class InventoryReportsService {
         FROM inventory_levels il
         JOIN products p ON p.id = il.product_id AND p.tenant_id = il.tenant_id
         JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
-        LEFT JOIN inventory_policies ip
-          ON ip.tenant_id = il.tenant_id
-          AND ip.product_id = il.product_id
-          AND ip.location_id = il.location_id
         WHERE ${where}
-          AND (
-            COALESCE(il.on_hand_qty, 0) <= COALESCE(ip.reorder_point, 0)
-            OR COALESCE(il.on_hand_qty, 0) <= COALESCE(ip.safety_stock_qty, 0)
-          )
       `,
     );
 

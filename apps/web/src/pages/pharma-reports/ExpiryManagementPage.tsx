@@ -41,15 +41,15 @@ const exportMap: Record<Tab, string> = {
 
 export default function ExpiryManagementPage() {
   const [activeTab, setActiveTab] = useState<Tab>('risk');
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(1);
   const pageSize = 50;
 
-  const filters = { limit: pageSize, offset: page * pageSize };
+  const filters = { limit: pageSize, offset: (page - 1) * pageSize };
 
-  const nearExpiry = useNearExpiry(activeTab === 'near' ? { ...filters, thresholdDays: 180 } : undefined);
-  const expired = useExpiredStock(activeTab === 'expired' ? filters : undefined);
-  const fefo = useFEFOPicking(activeTab === 'fefo' ? filters : undefined);
-  const risk = useExpiryRisk(activeTab === 'risk' ? {} : undefined);
+  const nearExpiry = useNearExpiry({ ...filters, thresholdDays: 180 }, activeTab === 'near');
+  const expired = useExpiredStock(filters, activeTab === 'expired');
+  const fefo = useFEFOPicking(filters, activeTab === 'fefo');
+  const risk = useExpiryRisk({}, activeTab === 'risk');
 
   const urgencyVariant: Record<string, 'error' | 'warning' | 'primary' | 'default'> = {
     CRITICAL: 'error',
@@ -115,7 +115,7 @@ export default function ExpiryManagementPage() {
           {tabs.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => { setActiveTab(tab.key); setPage(0); }}
+              onClick={() => { setActiveTab(tab.key); setPage(1); }}
               className={`whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors ${
                 activeTab === tab.key
                   ? 'border-primary-500 text-primary-600'

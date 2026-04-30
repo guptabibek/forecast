@@ -35,15 +35,15 @@ const exportMap: Record<Tab, string> = {
 
 export default function StockAnalysisPage() {
   const [activeTab, setActiveTab] = useState<Tab>('abc');
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(1);
   const pageSize = 50;
 
-  const filters = { limit: pageSize, offset: page * pageSize };
+  const filters = { limit: pageSize, offset: (page - 1) * pageSize };
 
-  const deadSlow = useDeadSlowStock(activeTab === 'deadSlow' ? filters : undefined);
-  const abc = useABCAnalysis(activeTab === 'abc' ? {} : undefined);
-  const xyz = useXYZAnalysis(activeTab === 'xyz' ? {} : undefined);
-  const turnover = useInventoryTurnover(activeTab === 'turnover' ? filters : undefined);
+  const deadSlow = useDeadSlowStock(filters, activeTab === 'deadSlow');
+  const abc = useABCAnalysis({}, activeTab === 'abc');
+  const xyz = useXYZAnalysis({}, activeTab === 'xyz');
+  const turnover = useInventoryTurnover(filters, activeTab === 'turnover');
 
   const abcColors: Record<string, string> = { A: '#EF4444', B: '#F59E0B', C: '#10B981' };
   const xyzColors: Record<string, string> = { X: '#3B82F6', Y: '#F59E0B', Z: '#EF4444' };
@@ -118,7 +118,7 @@ export default function StockAnalysisPage() {
           {tabs.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => { setActiveTab(tab.key); setPage(0); }}
+              onClick={() => { setActiveTab(tab.key); setPage(1); }}
               className={`whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors ${
                 activeTab === tab.key
                   ? 'border-primary-500 text-primary-600'

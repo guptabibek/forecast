@@ -356,9 +356,9 @@ export class ReportsService {
 
   async getDashboardStats(tenantId: string, filters?: DashboardFilterDto) {
     const now = new Date();
-    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastQuarter = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    const currentRange = this.resolveDashboardDateRange(filters, DEFAULT_ANALYTICS_PERIODS);
+    const previousRange = this.getPreviousDashboardDateRange(currentRange);
 
     const dimensionFilters = buildDimensionFilters(filters);
 
@@ -368,6 +368,8 @@ export class ReportsService {
       totalForecasts,
       forecastsLastQuarter,
       lastImport,
+      accuracy,
+      previousAccuracy,
     ] = await Promise.all([
       this.prisma.planVersion.count({
         where: { tenantId, status: { in: ['DRAFT', 'IN_REVIEW', 'APPROVED'] } },
@@ -384,19 +386,26 @@ export class ReportsService {
         orderBy: { completedAt: 'desc' },
         select: { completedAt: true },
       }),
+      this.calculateAverageAccuracy(tenantId, currentRange.start, currentRange.end, filters),
+      this.calculateAverageAccuracy(tenantId, previousRange.start, previousRange.end, filters),
     ]);
 
-    const accuracy = await this.calculateAverageAccuracy(tenantId, undefined, undefined, filters);
-    
-    const forecastAccuracy = 100 - (accuracy.mape * 100);
+    const forecastAccuracy = this.toForecastAccuracy(accuracy.mape, accuracy.comparisons);
+    const previousForecastAccuracy = this.toForecastAccuracy(
+      previousAccuracy.mape,
+      previousAccuracy.comparisons,
+    );
+    const accuracyChange = accuracy.comparisons > 0 && previousAccuracy.comparisons > 0
+      ? forecastAccuracy - previousForecastAccuracy
+      : 0;
     const forecastsChange = forecastsLastQuarter > 0
       ? ((totalForecasts - forecastsLastQuarter) / forecastsLastQuarter) * 100
       : 0;
 
     return {
       data: {
-        forecastAccuracy: Math.min(100, Math.max(0, forecastAccuracy)),
-        accuracyChange: 0,
+        forecastAccuracy,
+        accuracyChange,
         activePlans,
         pendingApproval,
         totalForecasts,
@@ -430,7 +439,7 @@ export class ReportsService {
     });
 
     if (forecasts.length === 0) {
-      return { mape: 0, rmse: 0 };
+      return { mape: 0, rmse: 0, comparisons: 0 };
     }
 
     const actualProductIds = [...new Set(forecasts.map((forecast) => forecast.productId).filter((value): value is string => Boolean(value)))];
@@ -478,7 +487,7 @@ export class ReportsService {
     }
 
     const mape = validComparisons > 0 ? totalError / validComparisons : 0;
-    return { mape, rmse: 0 };
+    return { mape, rmse: 0, comparisons: validComparisons };
   }
 
   async getForecastTrend(tenantId: string, periods: number = 12, filters?: DashboardFilterDto) {
@@ -630,18 +639,6 @@ export class ReportsService {
       }))
       .sort((a, b) => a.mape - b.mape)
       .slice(0, 6);
-
-    if (result.length === 0) {
-      return {
-        data: [
-          { model: 'AI Hybrid', mape: 3.2 },
-          { model: 'Holt-Winters', mape: 4.5 },
-          { model: 'Linear Reg', mape: 5.1 },
-          { model: 'Moving Avg', mape: 6.8 },
-          { model: 'YoY Growth', mape: 7.2 },
-        ],
-      };
-    }
 
     return { data: result };
   }
@@ -939,9 +936,24 @@ export class ReportsService {
         totalForecasts,
         modelDistribution: modelStats,
         coverage: coveragePct,
-        accuracy: 100 - (avgAccuracy.mape * 100),
+        accuracy: this.toForecastAccuracy(avgAccuracy.mape, avgAccuracy.comparisons),
       },
     };
+  }
+
+  private getPreviousDashboardDateRange(range: DashboardDateRange): DashboardDateRange {
+    const end = new Date(range.start.getTime() - 1);
+    const durationMs = Math.max(range.end.getTime() - range.start.getTime(), 0);
+    const start = new Date(end.getTime() - durationMs);
+    return { start, end };
+  }
+
+  private toForecastAccuracy(mape: number, comparisons: number): number {
+    if (comparisons === 0) {
+      return 0;
+    }
+
+    return Math.min(100, Math.max(0, 100 - (mape * 100)));
   }
 
   private async calculateCoverage(tenantId: string, filters?: DashboardFilterDto): Promise<number> {

@@ -878,6 +878,8 @@ export class MargEdeService {
     let outstandingsCount = 0;
     let journalEntriesCount = 0;
 
+    let receivedStockSnapshot = false;
+
     try {
       margKey = this.decryptSecret(config.margKey);
       decryptionKey = this.decryptSecret(config.decryptionKey);
@@ -963,6 +965,7 @@ export class MargEdeService {
           }
 
           if (shouldProcessStockSnapshot && payloadStock.length > 0) {
+            receivedStockSnapshot = true;
             const count = await this.syncStockData(tenantId, payloadStock, syncLog.id);
             stockCount += count;
           }
@@ -1106,12 +1109,17 @@ export class MargEdeService {
         );
       }
 
-      if (shouldFetchFromMarg && shouldRunInventory && shouldProcessStockSnapshot) {
+      if (shouldFetchFromMarg && shouldRunInventory && shouldProcessStockSnapshot && receivedStockSnapshot) {
         await this.markMissingStockAsDeleted(tenantId, syncLog.id);
+      } else if (shouldFetchFromMarg && shouldRunInventory && shouldProcessStockSnapshot && !receivedStockSnapshot) {
+        this.logger.warn(
+          'Marg sync received no stock snapshot rows; preserving previously staged stock and skipping stock-derived projections for this run',
+        );
       }
 
       // Step 3: Transform staged data → core tables
       const shouldResetInventoryProjection = shouldRunInventory && (mode === MARG_SYNC_MODE.REPROJECT || Boolean(dateWindow));
+      const shouldApplyStockProjection = shouldProcessStockSnapshot && (!shouldFetchFromMarg || receivedStockSnapshot);
       let inventoryProjectionReset: MargInventoryProjectionResetResult | null = null;
       if (shouldRunInventory) {
         await this.touchSyncHeartbeat(configId, shouldRunInventory);
@@ -1133,7 +1141,7 @@ export class MargEdeService {
           await this.touchSyncHeartbeat(configId, shouldRunInventory);
         }
         await this.transformTransactionsToActuals(tenantId, dateWindow, shouldResetInventoryProjection);
-        if (shouldProcessStockSnapshot) {
+        if (shouldApplyStockProjection) {
           await this.touchSyncHeartbeat(configId, shouldRunInventory);
           await this.transformStockToInventoryLevels(tenantId);
           await this.touchSyncHeartbeat(configId, shouldRunInventory);

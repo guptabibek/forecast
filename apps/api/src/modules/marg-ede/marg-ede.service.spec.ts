@@ -1015,6 +1015,126 @@ describe('MargEdeService helpers', () => {
     ]);
   });
 
+  it('preserves staged stock when a fetch-based sync receives no stock payload', async () => {
+    const prisma = {
+      margSyncConfig: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'config-1',
+          tenantId: 'tenant-1',
+          isActive: true,
+          apiBaseUrl: 'https://corporate.margerp.com',
+          companyCode: 'COMPANY',
+          companyId: 7,
+          margKey: 'encrypted-key',
+          decryptionKey: 'encrypted-secret',
+          lastSyncIndex: 0,
+          lastSyncDatetime: '',
+          lastAccountingSyncIndex: 0,
+          lastAccountingSyncDatetime: '',
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      margSyncLog: {
+        create: jest.fn().mockResolvedValue({
+          id: 'sync-log-1',
+          startedAt: new Date('2026-04-21T00:00:00.000Z'),
+        }),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+    } as any;
+    const auditService = {
+      log: jest.fn().mockResolvedValue(undefined),
+    } as any;
+
+    service = new MargEdeService(prisma, auditService, {} as any);
+    const helper = service as any;
+
+    helper.decryptSecret = jest.fn().mockReturnValue('decrypted');
+    helper.touchSyncHeartbeat = jest.fn().mockResolvedValue(undefined);
+    helper.fetchBranches = jest.fn().mockResolvedValue([]);
+    helper.syncBranches = jest.fn().mockResolvedValue(0);
+    helper.fetchData = jest.fn().mockImplementation(async ({ apiType }: { apiType: string }) => {
+      if (apiType === '2') {
+        return {
+          Product: [],
+          Party: [],
+          Details: [],
+          Stock: [],
+          MDis: [],
+          SaleType: [],
+          ACGroup: [],
+          Account: [],
+          AcBal: [],
+          PBal: [],
+          Outstanding: [],
+          Index: 1,
+          DataStatus: 10,
+          DateTime: '2026-04-21T08:00:00.000Z',
+        };
+      }
+
+      return {
+        Product: [],
+        Party: [],
+        Details: [],
+        Stock: [],
+        MDis: [],
+        SaleType: [],
+        ACGroup: [],
+        Account: [],
+        AcBal: [],
+        PBal: [],
+        Outstanding: [],
+        Index: 1,
+        DataStatus: 10,
+        DateTime: '2026-04-21T09:00:00.000Z',
+      };
+    });
+    helper.syncProducts = jest.fn().mockResolvedValue(0);
+    helper.syncParties = jest.fn().mockResolvedValue(0);
+    helper.syncTransactions = jest.fn().mockResolvedValue(0);
+    helper.syncStockData = jest.fn().mockResolvedValue(0);
+    helper.syncVouchers = jest.fn().mockResolvedValue(0);
+    helper.syncSaleTypes = jest.fn().mockResolvedValue(0);
+    helper.syncAccountGroups = jest.fn().mockResolvedValue(0);
+    helper.syncAccountPostings = jest.fn().mockResolvedValue(0);
+    helper.syncAccountGroupBalances = jest.fn().mockResolvedValue(0);
+    helper.syncPartyBalances = jest.fn().mockResolvedValue(0);
+    helper.syncOutstandings = jest.fn().mockResolvedValue(0);
+    helper.markMissingStockAsDeleted = jest.fn().mockResolvedValue(undefined);
+    helper.transformBranches = jest.fn().mockResolvedValue(undefined);
+    helper.transformProducts = jest.fn().mockResolvedValue(undefined);
+    helper.transformParties = jest.fn().mockResolvedValue(undefined);
+    helper.transformSuppliers = jest.fn().mockResolvedValue(0);
+    helper.transformTransactionsToActuals = jest.fn().mockResolvedValue(undefined);
+    helper.transformStockToInventoryLevels = jest.fn().mockResolvedValue(undefined);
+    helper.transformStockToBatches = jest.fn().mockResolvedValue(undefined);
+    helper.transformTransactionsToInventoryTransactions = jest.fn().mockResolvedValue(undefined);
+    helper.transformTransactionsToInventoryLedger = jest.fn().mockResolvedValue(undefined);
+    helper.transformAccountPostingsToJournalEntries = jest.fn().mockResolvedValue({
+      journalEntriesSynced: 0,
+      skippedGroups: [],
+      diagnostics: {
+        duplicateFingerprintCount: 0,
+        duplicateRowCount: 0,
+        skippedByReason: {},
+      },
+    });
+    helper.runPostSyncReconciliations = jest.fn().mockResolvedValue({
+      totalIssues: 0,
+      warningCount: 0,
+      failureCount: 0,
+    });
+
+    await expect(service.runSync('config-1', 'tenant-1', 'user-1')).resolves.toBe('sync-log-1');
+
+    expect(helper.syncStockData).not.toHaveBeenCalled();
+    expect(helper.markMissingStockAsDeleted).not.toHaveBeenCalled();
+    expect(helper.transformStockToInventoryLevels).not.toHaveBeenCalled();
+    expect(helper.transformStockToBatches).not.toHaveBeenCalled();
+  });
+
   it('falls back to payload masters when the branch endpoint fails', async () => {
     const prisma = {
       margSyncConfig: {
