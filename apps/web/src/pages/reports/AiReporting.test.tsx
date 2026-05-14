@@ -6,7 +6,35 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AiReporting from './AiReporting';
 
-const mocks = vi.hoisted((): any => ({
+interface HoistedMocks {
+  aiReportingEnabled: boolean;
+  currentUser: {
+    role: string;
+    permissions: string[];
+    moduleAccess: Record<string, boolean>;
+  };
+  catalog: {
+    data: unknown;
+    isFetching: boolean;
+  };
+  history: {
+    data: unknown[];
+    isLoading: boolean;
+    refetch: ReturnType<typeof vi.fn>;
+  };
+  reportQuery: {
+    isPending: boolean;
+    error: unknown;
+    mutateAsync: ReturnType<typeof vi.fn>;
+  };
+  dashboardQuery: {
+    isPending: boolean;
+    error: unknown;
+    mutateAsync: ReturnType<typeof vi.fn>;
+  };
+}
+
+const mocks = vi.hoisted<HoistedMocks>(() => ({
   aiReportingEnabled: true,
   currentUser: {
     role: 'ADMIN',
@@ -40,7 +68,7 @@ const mocks = vi.hoisted((): any => ({
 }));
 
 vi.mock('../../stores/auth.store', () => ({
-  useAuthStore: (selector: any) => selector({ user: mocks.currentUser }),
+  useAuthStore: <T,>(selector: (state: { user: HoistedMocks['currentUser'] }) => T) => selector({ user: mocks.currentUser }),
 }));
 
 vi.mock('../../hooks/useAiReporting', () => ({

@@ -78,11 +78,19 @@ describe('AiReportingService', () => {
     const executor = overrides.executor ?? {
       execute: jest.fn().mockResolvedValue({
         columns: [
+          { key: 'product_id', label: 'Product ID' },
+          { key: 'customerId', label: 'Customer ID' },
           { key: 'product_name', label: 'Product Name' },
           { key: 'sold_quantity', label: 'Sold Quantity', dataType: 'number' },
           { key: 'customer_gst_no', label: 'Customer GST No' },
         ],
-        rows: [{ product_name: 'Item A', sold_quantity: 25, customer_gst_no: '22AAAAA0000A1Z5' }],
+        rows: [{
+          product_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          customerId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          product_name: 'Item A',
+          sold_quantity: 25,
+          customer_gst_no: '22AAAAA0000A1Z5',
+        }],
         rowCount: 1,
         executionTimeMs: 12,
       }),
@@ -154,6 +162,62 @@ describe('AiReportingService', () => {
       aiCallCount: 1,
       summaryCallCount: 1,
     }));
+  });
+
+  it('uses canonical product labels for chart data and grid rows', async () => {
+    const { service } = createService({
+      executor: {
+        execute: jest.fn().mockResolvedValue({
+          columns: [
+            { key: 'product_name', label: 'Product Name' },
+            { key: 'product_code', label: 'Product Code' },
+            { key: 'sold_quantity', label: 'Sold Quantity', dataType: 'number' },
+          ],
+          rows: [{ product_name: null, product_code: 'SKU-001', sold_quantity: 25 }],
+          rowCount: 1,
+          executionTimeMs: 12,
+        }),
+      },
+    });
+
+    const result = await service.query(user, { question: 'Show top selling products', includeSummary: false });
+
+    expect(result.grid?.columns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: 'product_name', label: 'Product Name' }),
+    ]));
+    expect(result.grid?.rows[0]).toEqual(expect.objectContaining({ product_name: 'SKU-001' }));
+    expect(result.chart?.xField).toBe('product_name');
+    expect(result.chart?.data.every((row: Record<string, unknown>) => result.chart?.xField && row[result.chart.xField] !== '-')).toBe(true);
+    expect(result.chart?.data[0]).toEqual(expect.objectContaining({ product_name: 'SKU-001' }));
+  });
+
+  it('preserves unsupported capability details in the API response', async () => {
+    const unsupported = {
+      queryKind: 'unsupported' as const,
+      title: 'Unsupported future transaction report',
+      reason: 'Sales transaction reports for 2027 require an approved forecast/projection dataset.',
+      unsupportedReason: 'Sales transaction reports for 2027 require an approved forecast/projection dataset.',
+      errorCode: 'FUTURE_TRANSACTION_UNSUPPORTED',
+      missingCapabilities: ['sales_forecast_or_projection_dataset'],
+      availableAlternatives: ['Ask for actual sales transactions in a completed period.'],
+      recommendedSchemaFix: 'Add an allowed sales forecast/projection dataset to the semantic catalog.',
+      followUpQuestions: [],
+      assumptions: [],
+    };
+    const { service, compiler, executor } = createService({
+      parser: { parseQuestion: jest.fn().mockResolvedValue(unsupported) },
+      semanticValidator: { validate: jest.fn().mockReturnValue(unsupported) },
+    });
+
+    const result = await service.query(user, { question: 'show sales for 2027' });
+
+    expect(result.status).toBe('unsupported');
+    expect(result.errorCode).toBe('FUTURE_TRANSACTION_UNSUPPORTED');
+    expect(result.missingCapabilities).toEqual(['sales_forecast_or_projection_dataset']);
+    expect(result.availableAlternatives).toEqual(['Ask for actual sales transactions in a completed period.']);
+    expect(result.recommendedSchemaFix).toBe('Add an allowed sales forecast/projection dataset to the semantic catalog.');
+    expect(compiler.compile).not.toHaveBeenCalled();
+    expect(executor.execute).not.toHaveBeenCalled();
   });
 
   it('blocks users without AI execute permission before parser or executor work starts', async () => {

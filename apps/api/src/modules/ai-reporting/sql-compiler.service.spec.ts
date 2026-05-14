@@ -198,12 +198,151 @@ describe('SqlCompilerService', () => {
 
   it('expands the date_range filter placeholder column to the dataset default date column', () => {
     const compiled = compiler.compile(query({
-      filters: [{ filterId: 'date_range', operator: 'BETWEEN', value: ['2026-05-01', '2026-05-31'] }],
+      filters: [{ filterId: 'date_range', operator: 'BETWEEN', value: { from: '2026-05-01', to: '2026-05-31' } }],
       timeRange: undefined,
     }), security);
 
     expect(compiled.sql).not.toContain('default_time_field');
     expect(compiled.sql).toMatch(/\binvoice_date BETWEEN \$\d+::date AND \$\d+::date/);
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('compiles "how many items will be expiring in 2027" as an aggregate count query', () => {
+    const compiled = compiler.compile(query({
+      mode: 'kpi',
+      analysisType: 'grouped_summary',
+      datasetId: 'stock_batches',
+      metrics: ['expiring_item_count'],
+      dimensions: [],
+      displayColumns: [],
+      filters: [],
+      timeRange: { preset: 'custom', fieldId: 'batch_expiry_date', startDate: '2027-01-01', endDate: '2027-12-31' },
+      sort: [{ metricId: 'expiring_item_count', direction: 'desc' }],
+      limit: 1,
+      visualization: { type: 'kpi' },
+    }), security);
+
+    expect(compiled.sql).toContain('COUNT(DISTINCT product_id) AS expiring_item_count');
+    expect(compiled.sql).toContain('FROM vw_ai_stock_batches');
+    expect(compiled.sql).not.toContain('GROUP BY');
+    expect(compiled.sql).toMatch(/\bexpiry_date BETWEEN \$\d+::date AND \$\d+::date/);
+    expect(compiled.params).toContain('2027-01-01');
+    expect(compiled.params).toContain('2027-12-31');
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('compiles explicit calendar-year expiry list queries as detail reports', () => {
+    const compiled = compiler.compile(query({
+      mode: 'detail',
+      analysisType: 'exception_list',
+      datasetId: 'stock_batches',
+      metrics: [],
+      dimensions: [],
+      displayColumns: [
+        'batch_product_name',
+        'batch_warehouse_name',
+        'batch_no',
+        'batch_expiry_date',
+        'batch_days_to_expiry',
+        'batch_current_stock',
+      ],
+      filters: [],
+      timeRange: { preset: 'custom', fieldId: 'batch_expiry_date', startDate: '2027-01-01', endDate: '2027-12-31' },
+      sort: [{ columnId: 'batch_expiry_date', direction: 'asc' }],
+      limit: 100,
+      visualization: { type: 'table' },
+    }), security);
+
+    expect(compiled.sql).toContain('FROM vw_ai_stock_batches');
+    expect(compiled.sql).toMatch(/\bexpiry_date BETWEEN \$\d+::date AND \$\d+::date/);
+    expect(compiled.sql).toContain('ORDER BY expiry_date ASC');
+    expect(compiled.sql).not.toContain('GROUP BY');
+    expect(compiled.params).toContain('2027-01-01');
+    expect(compiled.params).toContain('2027-12-31');
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('compiles expiry detail queries even when the AI includes dimensions plus detail columns', () => {
+    const compiled = compiler.compile(query({
+      mode: 'detail',
+      analysisType: 'exception_list',
+      datasetId: 'stock_batches',
+      metrics: [],
+      dimensions: ['batch_product'],
+      displayColumns: [
+        'batch_no',
+        'batch_expiry_date',
+        'batch_current_stock',
+        'batch_stock_value',
+      ],
+      filters: [],
+      timeRange: { preset: 'custom', fieldId: 'batch_expiry_date', startDate: '2027-01-01', endDate: '2027-12-31' },
+      sort: [{ columnId: 'batch_no', direction: 'asc' }],
+      limit: 100,
+      visualization: { type: 'table' },
+    }), security);
+
+    expect(compiled.sql).toContain('GROUP BY product_id, product_code, product_name, batch_no, expiry_date, current_stock, stock_value');
+    expect(compiled.sql).toContain('ORDER BY batch_no ASC');
+    expect(compiled.sql).toMatch(/\bcurrent_stock AS current_stock\b/);
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('aggregates display-column sorts when grouped stock batch queries sort by non-grouped detail fields', () => {
+    const compiled = compiler.compile(query({
+      datasetId: 'stock_batches',
+      metrics: ['batch_stock'],
+      dimensions: ['batch_product'],
+      displayColumns: [],
+      filters: [],
+      timeRange: { preset: 'custom', fieldId: 'batch_expiry_date', startDate: '2027-01-01', endDate: '2027-12-31' },
+      sort: [{ column: 'current_stock', direction: 'desc' }],
+      limit: 100,
+    }), security);
+
+    expect(compiled.sql).toContain('GROUP BY product_id, product_code, product_name');
+    expect(compiled.sql).toContain('ORDER BY MAX(current_stock) DESC');
+    expect(compiled.sql).not.toContain('ORDER BY current_stock DESC');
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('compiles stock value expiring in 2027 using the catalog stock-value expiry metric', () => {
+    const compiled = compiler.compile(query({
+      mode: 'kpi',
+      analysisType: 'grouped_summary',
+      datasetId: 'stock_batches',
+      metrics: ['expiring_stock_value'],
+      dimensions: [],
+      displayColumns: [],
+      filters: [],
+      timeRange: { preset: 'custom', fieldId: 'batch_expiry_date', startDate: '2027-01-01', endDate: '2027-12-31' },
+      sort: [{ metricId: 'expiring_stock_value', direction: 'desc' }],
+      limit: 1,
+      visualization: { type: 'kpi' },
+    }), security);
+
+    expect(compiled.sql).toContain('SUM(stock_value) AS expiring_stock_value');
+    expect(compiled.sql).toMatch(/\bexpiry_date BETWEEN \$\d+::date AND \$\d+::date/);
+    expect(compiled.params).toContain('2027-01-01');
+    expect(compiled.params).toContain('2027-12-31');
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('uses aggregate ordering when grouped stock batch queries sort by catalog expiry date field', () => {
+    const compiled = compiler.compile(query({
+      datasetId: 'stock_batches',
+      metrics: ['batch_stock'],
+      dimensions: ['batch_product'],
+      filters: [],
+      timeRange: { preset: 'custom', fieldId: 'batch_expiry_date', startDate: '2027-01-01', endDate: '2027-12-31' },
+      sort: [{ fieldId: 'batch_expiry_date', direction: 'asc' }],
+      limit: 100,
+    }), security);
+
+    expect(compiled.sql).toMatch(/\bexpiry_date BETWEEN \$\d+::date AND \$\d+::date/);
+    expect(compiled.sql).toContain('GROUP BY product_id, product_code, product_name');
+    expect(compiled.sql).toContain('ORDER BY MIN(expiry_date) ASC');
+    expect(compiled.sql).not.toContain('ORDER BY expiry_date ASC');
     expect(() => safety.validate(compiled)).not.toThrow();
   });
 

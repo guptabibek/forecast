@@ -1094,6 +1094,59 @@
       ]
     },
     {
+      "metricId": "expiring_item_count",
+      "displayName": "Expiring Item Count",
+      "datasetId": "stock_batches",
+      "expression": "COUNT(DISTINCT product_id)",
+      "aggregation": "count_distinct",
+      "dataType": "number",
+      "synonyms": [
+        "how many items expiring",
+        "items expiring count",
+        "products expiring count",
+        "expiring products"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Use with an expiry date range to count distinct products with reportable stock batches expiring in that period"
+      ]
+    },
+    {
+      "metricId": "expiring_batch_count",
+      "displayName": "Expiring Batch Count",
+      "datasetId": "stock_batches",
+      "expression": "COUNT(DISTINCT batch_id)",
+      "aggregation": "count_distinct",
+      "dataType": "number",
+      "synonyms": [
+        "how many batches expiring",
+        "batches expiring count",
+        "expiring batch count"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Use with an expiry date range to count reportable stock batches expiring in that period"
+      ]
+    },
+    {
+      "metricId": "expiring_stock_value",
+      "displayName": "Expiring Stock Value",
+      "datasetId": "stock_batches",
+      "expression": "SUM(stock_value)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "stock value expiring",
+        "expiring stock amount",
+        "expiry stock value",
+        "future expiry stock value"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Use with an expiry date range to value reportable stock batches expiring in that period"
+      ]
+    },
+    {
       "metricId": "movement_quantity",
       "displayName": "Movement Quantity",
       "datasetId": "stock_ledger",

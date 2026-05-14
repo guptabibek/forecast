@@ -81,6 +81,50 @@ export interface CanonicalReportPayload {
   rows: Record<string, unknown>[];
 }
 
+const INTERNAL_IDENTIFIER_KEYS = new Set([
+  'id',
+  'tenant_id',
+  'tenantid',
+  'company_id',
+  'companyid',
+  'branch_id',
+  'branchid',
+  'warehouse_id',
+  'warehouseid',
+  'location_id',
+  'locationid',
+  'product_id',
+  'productid',
+  'customer_id',
+  'customerid',
+  'supplier_id',
+  'supplierid',
+  'batch_id',
+  'batchid',
+  'account_id',
+  'accountid',
+  'invoice_id',
+  'invoiceid',
+  'journal_entry_id',
+  'journalentryid',
+  'created_by_id',
+  'createdbyid',
+  'purchase_order_id',
+  'purchaseorderid',
+  'work_order_id',
+  'workorderid',
+  'source_voucher_id',
+  'sourcevoucherid',
+  'source_transaction_id',
+  'sourcetransactionid',
+  'source_outstanding_id',
+  'sourceoutstandingid',
+  'source_entry_id',
+  'sourceentryid',
+  'source_line_id',
+  'sourcelineid',
+]);
+
 @Injectable()
 export class AiReportingService {
   private readonly logger = new Logger(AiReportingService.name);
@@ -172,6 +216,7 @@ export class AiReportingService {
           summaryCallCount,
         });
         const unsupported = validated.queryKind === 'unsupported';
+        const unsupportedDetails = unsupported ? this.unsupportedDetails(validated) : null;
         return {
           requestId,
           status: unsupported ? 'unsupported' : 'clarification_required',
@@ -188,10 +233,11 @@ export class AiReportingService {
           assumptions: validated.assumptions ?? [],
           followUpQuestions: validated.followUpQuestions,
           clarification: unsupported ? null : validated.reason,
-          unsupportedReason: unsupported ? validated.reason : null,
-          availableAlternatives: validated.followUpQuestions ?? [],
-          missingCapabilities: [],
-          recommendedSchemaFix: null,
+          unsupportedReason: unsupported ? unsupportedDetails?.unsupportedReason ?? validated.reason : null,
+          errorCode: unsupported ? unsupportedDetails?.errorCode ?? 'UNSUPPORTED_REPORT' : null,
+          availableAlternatives: unsupported ? unsupportedDetails?.availableAlternatives ?? [] : validated.followUpQuestions ?? [],
+          missingCapabilities: unsupported ? unsupportedDetails?.missingCapabilities ?? [] : [],
+          recommendedSchemaFix: unsupported ? unsupportedDetails?.recommendedSchemaFix ?? null : null,
         };
       }
       if (validated.queryKind !== 'single_report') {
@@ -333,6 +379,7 @@ export class AiReportingService {
           summaryCallCount,
         });
         const unsupported = validated.queryKind === 'unsupported';
+        const unsupportedDetails = unsupported ? this.unsupportedDetails(validated) : null;
         return {
           requestId,
           status: unsupported ? 'unsupported' : 'clarification_required',
@@ -346,10 +393,11 @@ export class AiReportingService {
           assumptions: validated.assumptions ?? [],
           followUpQuestions: validated.followUpQuestions,
           clarification: unsupported ? null : validated.reason,
-          unsupportedReason: unsupported ? validated.reason : null,
-          availableAlternatives: validated.followUpQuestions ?? [],
-          missingCapabilities: [],
-          recommendedSchemaFix: null,
+          unsupportedReason: unsupported ? unsupportedDetails?.unsupportedReason ?? validated.reason : null,
+          errorCode: unsupported ? unsupportedDetails?.errorCode ?? 'UNSUPPORTED_REPORT' : null,
+          availableAlternatives: unsupported ? unsupportedDetails?.availableAlternatives ?? [] : validated.followUpQuestions ?? [],
+          missingCapabilities: unsupported ? unsupportedDetails?.missingCapabilities ?? [] : [],
+          recommendedSchemaFix: unsupported ? unsupportedDetails?.recommendedSchemaFix ?? null : null,
         };
       }
       if (validated.queryKind !== 'dashboard') {
@@ -476,6 +524,16 @@ export class AiReportingService {
     throw new ForbiddenException('You do not have permission to use AI reporting');
   }
 
+  private unsupportedDetails(query: any) {
+    return {
+      errorCode: typeof query.errorCode === 'string' && query.errorCode.trim() ? query.errorCode : 'UNSUPPORTED_REPORT',
+      missingCapabilities: Array.isArray(query.missingCapabilities) ? query.missingCapabilities.map(String).filter(Boolean) : [],
+      availableAlternatives: Array.isArray(query.availableAlternatives) ? query.availableAlternatives.map(String).filter(Boolean) : [],
+      recommendedSchemaFix: typeof query.recommendedSchemaFix === 'string' && query.recommendedSchemaFix.trim() ? query.recommendedSchemaFix : null,
+      unsupportedReason: typeof query.unsupportedReason === 'string' && query.unsupportedReason.trim() ? query.unsupportedReason : query.reason,
+    };
+  }
+
   private sanitizeResult(
     query: SemanticReportQuery,
     result: { columns: Array<{ key: string; label: string; dataType?: string }>; rows: Record<string, unknown>[]; rowCount: number; executionTimeMs: number },
@@ -504,13 +562,27 @@ export class AiReportingService {
       return false;
     };
     const canSeeSensitive = elevated && authorizedDataset && explicitSensitiveRequested(this.catalog);
-    if (canSeeSensitive && !runtime.maskSensitiveFields) return result;
+    const shouldMaskSensitiveFields = !canSeeSensitive || runtime.maskSensitiveFields;
+    const shouldSuppressKey = (key: string) =>
+      this.isInternalIdentifierKey(key) || (shouldMaskSensitiveFields && isSensitiveKey(key));
 
-    const columns = result.columns.filter((column) => !isSensitiveKey(column.key));
+    const columns = result.columns.filter((column) => !shouldSuppressKey(column.key));
     if (columns.length === result.columns.length) return result;
     const allowed = new Set(columns.map((column) => column.key));
     const rows = result.rows.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => allowed.has(key))));
     return { ...result, columns, rows };
+  }
+
+  private isInternalIdentifierKey(key: string): boolean {
+    const normalized = this.normalizeResultKey(key);
+    return INTERNAL_IDENTIFIER_KEYS.has(normalized) || normalized.endsWith('_id');
+  }
+
+  private normalizeResultKey(key: string): string {
+    return key
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .replace(/[\s-]+/g, '_')
+      .toLowerCase();
   }
 
   private applyRuntimeLimits(query: SemanticReportQuery, runtime: AiReportingRuntimeSettings): SemanticReportQuery {
@@ -563,6 +635,7 @@ export class AiReportingService {
       if ('date' in output && !this.hasDisplayValue(output.date_label)) {
         output.date_label = this.formatDayLabel(output.date);
       }
+      this.applyCommonLabelFallbacks(output);
 
       for (const dimensionId of query.dimensions) {
         const dimension = this.catalog.getDimension(dimensionId);
@@ -662,7 +735,7 @@ export class AiReportingService {
   private resolveDimensionLabelField(query: SemanticReportQuery, grid: CanonicalGrid): string | null {
     const preferred = [query.output?.xField, query.visualization?.x].filter(Boolean) as string[];
     for (const field of preferred) {
-      const usable = this.usableGridField(field, grid);
+      const usable = this.resolvePreferredChartField(field, query, grid);
       if (usable) return usable;
     }
 
@@ -684,6 +757,39 @@ export class AiReportingService {
 
     this.logger.warn(`AI chart label field was not available: dataset=${query.datasetId}, dimension=${dimension.dimensionId}`);
     return null;
+  }
+
+  private resolvePreferredChartField(field: string, query: SemanticReportQuery, grid: CanonicalGrid): string | null {
+    const dimension = this.catalog.getDimension(field);
+    if (dimension && query.dimensions.includes(dimension.dimensionId)) {
+      const label = this.usableGridField(this.dimensionLabelColumn(dimension) ?? '', grid);
+      if (label) return label;
+    }
+
+    const displayColumn = this.catalog.getDisplayColumn(field);
+    if (displayColumn?.datasetId === query.datasetId) {
+      const usable = this.usableGridField(displayColumn.column, grid);
+      if (usable) return usable;
+    }
+
+    if (field === 'month' || field === 'month_label') return this.usableGridField('month_label', grid) ?? this.usableGridField('month', grid);
+    if (field === 'date' || field === 'date_label') return this.usableGridField('date_label', grid) ?? this.usableGridField('date', grid);
+    if (/^(product|item)(_id)?$/.test(field) || field.endsWith('_product') || field.endsWith('_item')) {
+      return this.usableGridField('product_name', grid) ?? this.usableGridField('product_code', grid) ?? this.usableGridField(field, grid);
+    }
+    if (field === 'product_id' || field === 'item_id') {
+      return this.usableGridField('product_name', grid) ?? this.usableGridField('product_code', grid) ?? this.usableGridField(field, grid);
+    }
+
+    const selectedDimension = query.dimensions
+      .map((id) => this.catalog.getDimension(id))
+      .find((dimensionItem) => dimensionItem?.columns?.includes(field));
+    if (selectedDimension) {
+      const label = this.usableGridField(this.dimensionLabelColumn(selectedDimension) ?? '', grid);
+      if (label) return label;
+    }
+
+    return this.usableGridField(field, grid);
   }
 
   private usableGridField(field: string, grid: CanonicalGrid): string | null {
@@ -1010,6 +1116,20 @@ export class AiReportingService {
     if (id.includes('invoice')) return 'Unknown Invoice';
     if (id.includes('batch')) return 'Unknown Batch';
     return `Unknown ${dimension.displayName}`;
+  }
+
+  private applyCommonLabelFallbacks(row: Record<string, unknown>) {
+    this.applyLabelFallback(row, 'product_name', 'product_code', 'Unknown Product');
+    this.applyLabelFallback(row, 'customer_name', 'customer_code', 'Unknown Customer');
+    this.applyLabelFallback(row, 'supplier_name', 'supplier_code', 'Unknown Supplier');
+    this.applyLabelFallback(row, 'warehouse_name', 'warehouse_code', 'Unknown Warehouse');
+    this.applyLabelFallback(row, 'branch_name', 'branch_code', 'Unknown Branch');
+  }
+
+  private applyLabelFallback(row: Record<string, unknown>, labelField: string, fallbackField: string, unknown: string) {
+    if (!(labelField in row)) return;
+    if (this.hasDisplayValue(row[labelField])) return;
+    row[labelField] = this.hasDisplayValue(row[fallbackField]) ? row[fallbackField] : unknown;
   }
 
   private hasDisplayValue(value: unknown) {

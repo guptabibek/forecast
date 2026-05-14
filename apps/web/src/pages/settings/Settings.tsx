@@ -11,7 +11,7 @@ import { settingsKeys } from '@hooks/useSettings';
 import { settingsService } from '@services/api';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { z } from 'zod';
@@ -210,6 +210,17 @@ export default function Settings() {
     queryKey: settingsKeys.tenant(),
     queryFn: () => settingsService.getSettings(),
   });
+  const isAiReportingModuleEnabled = settings?.aiReporting?.environmentEnabled !== false;
+  const visibleTabs = useMemo(
+    () => tabs.filter((tab) => tab.key !== 'ai-reporting' || isAiReportingModuleEnabled),
+    [isAiReportingModuleEnabled],
+  );
+
+  useEffect(() => {
+    if (activeTab === 'ai-reporting' && !isAiReportingModuleEnabled) {
+      setActiveTab('general');
+    }
+  }, [activeTab, isAiReportingModuleEnabled]);
 
   /* --- Mutations --- */
   const updateMutation = useMutation({
@@ -220,6 +231,7 @@ export default function Settings() {
       if (!payload.domain) payload.domain = undefined;
       if (!payload.subdomain) payload.subdomain = undefined;
       if (!payload.logoUrl) payload.logoUrl = undefined;
+      if (!isAiReportingModuleEnabled) delete payload.aiReporting;
       const response = await settingsService.patchSettings(payload);
       return response;
     },
@@ -377,7 +389,7 @@ export default function Settings() {
           {/* Sidebar Tabs */}
           <div className="lg:w-64 flex-shrink-0">
             <nav className="space-y-1">
-              {tabs.map((tab) => (
+              {visibleTabs.map((tab) => (
                 <button
                   key={tab.key}
                   type="button"

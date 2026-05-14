@@ -51,6 +51,40 @@ describe('AiReportResult', () => {
     expect(followUp).toHaveBeenCalledWith('Show by sales value');
   });
 
+  it('hides internal identifier columns from report tables', () => {
+    const result: AiReportResponse = {
+      requestId: 'req-ids',
+      status: 'success',
+      title: 'Customer Product Sales',
+      queryKind: 'single_report',
+      visualization: { type: 'table' },
+      columns: [
+        { key: 'product_id', label: 'Product ID' },
+        { key: 'customerId', label: 'Customer ID' },
+        { key: 'product_name', label: 'Product Name' },
+        { key: 'customer_name', label: 'Customer Name' },
+        { key: 'net_sales', label: 'Net Sales', dataType: 'currency' },
+      ],
+      rows: [{
+        product_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        customerId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        product_name: 'Item A',
+        customer_name: 'Apollo Pharmacy',
+        net_sales: 1250,
+      }],
+    };
+
+    render(<AiReportResult result={result} onAskFollowUp={vi.fn()} />);
+
+    expect(screen.queryByText('Product ID')).not.toBeInTheDocument();
+    expect(screen.queryByText('Customer ID')).not.toBeInTheDocument();
+    expect(screen.queryByText('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')).not.toBeInTheDocument();
+    expect(screen.queryByText('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')).not.toBeInTheDocument();
+    expect(screen.getByText('Product Name')).toBeInTheDocument();
+    expect(screen.getByText('Item A')).toBeInTheDocument();
+    expect(screen.getByText('Apollo Pharmacy')).toBeInTheDocument();
+  });
+
   it('renders chart reports from backend visualization configuration', () => {
     const result: AiReportResponse = {
       requestId: 'req-2',
@@ -140,5 +174,33 @@ describe('AiReportResult', () => {
 
     expect(screen.getByText('The report request needs one more detail before it can run.')).toBeInTheDocument();
     expect(screen.queryByText(/select/i)).not.toBeInTheDocument();
+  });
+
+  it('renders unsupported capability details from the backend response', () => {
+    render(
+      <AiReportResult
+        result={{
+          requestId: 'req-5',
+          status: 'unsupported',
+          title: 'Unsupported future transaction report',
+          queryKind: 'unsupported',
+          unsupportedReason: 'Sales transaction reports for 2027 require an approved forecast/projection dataset.',
+          errorCode: 'FUTURE_TRANSACTION_UNSUPPORTED',
+          missingCapabilities: ['sales_forecast_or_projection_dataset'],
+          availableAlternatives: ['Ask for actual sales transactions in a completed period.'],
+          recommendedSchemaFix: 'Add an allowed sales forecast/projection dataset to the semantic catalog.',
+          columns: [],
+          rows: [],
+          followUpQuestions: [],
+        }}
+        onAskFollowUp={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Sales transaction reports for 2027 require an approved forecast/projection dataset.')).toBeInTheDocument();
+    expect(screen.getByText('Error code: FUTURE_TRANSACTION_UNSUPPORTED')).toBeInTheDocument();
+    expect(screen.getByText('sales_forecast_or_projection_dataset')).toBeInTheDocument();
+    expect(screen.getByText('Alternative: Ask for actual sales transactions in a completed period.')).toBeInTheDocument();
+    expect(screen.getByText('Schema fix: Add an allowed sales forecast/projection dataset to the semantic catalog.')).toBeInTheDocument();
   });
 });

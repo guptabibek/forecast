@@ -183,6 +183,8 @@ export class UpdateSettingsDto {
     manufacturing?: boolean;
     reports?: boolean;
     data?: boolean;
+    'marg-ede'?: boolean;
+    'ai-reporting'?: boolean;
   };
 
   @ApiPropertyOptional({ description: 'AI reporting tenant-level controls. Environment flag can still disable AI globally.' })

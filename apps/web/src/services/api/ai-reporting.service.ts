@@ -114,6 +114,7 @@ export interface AiReportResponse {
   followUpQuestions?: string[];
   clarification?: string | null;
   unsupportedReason?: string | null;
+  errorCode?: string | null;
   availableAlternatives?: string[];
   missingCapabilities?: string[];
   recommendedSchemaFix?: string | null;

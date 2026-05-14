@@ -92,7 +92,7 @@ export class SqlCompilerService {
     const hasMetrics = query.metrics.length > 0;
     for (const columnId of query.displayColumns ?? []) {
       const displayColumn = this.required(this.catalog.getDisplayColumn(columnId), `Unknown display column ${columnId}`);
-      const compiled = this.compileDisplayColumn(displayColumn, dataset, hasMetrics);
+      const compiled = this.compileDisplayColumn(displayColumn, dataset, hasMetrics || groupBy.length > 0);
       if (!selectedColumns.includes(compiled.alias)) {
         select.push(compiled.select);
         if (compiled.groupBy && !groupBy.includes(compiled.groupBy)) groupBy.push(compiled.groupBy);
@@ -115,7 +115,7 @@ export class SqlCompilerService {
       `FROM ${this.ident(dataset.viewName)}`,
       where.length ? `WHERE ${where.join(' AND ')}` : '',
       groupBy.length ? `GROUP BY ${groupBy.join(', ')}` : '',
-      this.compileOrderBy(query.sort ?? [], query, dataset),
+      this.compileOrderBy(query.sort ?? [], query, dataset, groupBy),
       `LIMIT ${addParam(query.limit ?? 100)}`,
     ].filter(Boolean);
 
@@ -227,7 +227,7 @@ export class SqlCompilerService {
     where: string[],
     addParam: (value: unknown) => string,
   ) {
-    if (!DATE_FILTER_DATASETS.has(dataset.datasetId)) return;
+    if (!this.shouldApplyDateFilter(dataset, timeRange)) return;
     const dateColumn = this.defaultDateColumn(dataset, timeRange?.fieldId);
     if (!dateColumn) return;
     const range = this.resolveDateRange(timeRange, security);
@@ -374,8 +374,10 @@ export class SqlCompilerService {
     return values.length > 0 && values.every((item) => this.isUuidLike(item));
   }
 
-  private compileOrderBy(sort: SemanticSort[], query: SemanticReportQuery, dataset: CatalogDataset): string {
+  private compileOrderBy(sort: SemanticSort[], query: SemanticReportQuery, dataset: CatalogDataset, groupBy: string[]): string {
     const parts: string[] = [];
+    const hasAggregateMetrics = query.metrics.length > 0;
+    const requiresGroupedSort = hasAggregateMetrics || groupBy.length > 0;
     for (const item of sort.slice(0, 3)) {
       const direction = item.direction.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
       if (item.metricId && query.metrics.includes(item.metricId)) parts.push(`${this.ident(item.metricId)} ${direction}`);
@@ -385,15 +387,35 @@ export class SqlCompilerService {
         if (column) parts.push(`${this.ident(column)} ${direction}`);
       } else if (item.columnId && query.displayColumns?.includes(item.columnId)) {
         const displayColumn = this.catalog.getDisplayColumn(item.columnId);
-        if (displayColumn && this.isColumnAllowedForDataset(dataset, displayColumn.column)) parts.push(`${this.ident(displayColumn.column)} ${direction}`);
+        if (displayColumn && this.isColumnAllowedForDataset(dataset, displayColumn.column)) {
+          parts.push(`${this.compileSortableColumn(displayColumn.column, direction, groupBy, requiresGroupedSort)} ${direction}`);
+        }
       } else if (item.fieldId) {
-        const tf = this.catalog.getTimeField(item.fieldId);
-        if (tf && this.isColumnAllowedForDataset(dataset, tf.column)) parts.push(`${this.ident(tf.column)} ${direction}`);
+        const dateColumn = this.dateColumnForFieldId(dataset, item.fieldId);
+        if (dateColumn && this.isColumnAllowedForDataset(dataset, dateColumn)) {
+          parts.push(`${this.compileSortableColumn(dateColumn, direction, groupBy, requiresGroupedSort)} ${direction}`);
+        }
       } else if (item.column && this.isColumnAllowedForDataset(dataset, item.column)) {
-        parts.push(`${this.ident(item.column)} ${direction}`);
+        parts.push(`${this.compileSortableColumn(item.column, direction, groupBy, requiresGroupedSort)} ${direction}`);
       }
     }
     return parts.length ? `ORDER BY ${parts.join(', ')}` : '';
+  }
+
+  private compileSortableColumn(columnName: string, direction: 'ASC' | 'DESC', groupBy: string[], hasAggregateMetrics: boolean): string {
+    const column = this.ident(columnName);
+    if (!hasAggregateMetrics) return column;
+    if (groupBy.includes(column)) return column;
+    const dateExpression = `${column}::date`;
+    if (groupBy.includes(dateExpression)) return dateExpression;
+    return `${direction === 'ASC' ? 'MIN' : 'MAX'}(${column})`;
+  }
+
+  private shouldApplyDateFilter(dataset: CatalogDataset, timeRange: SemanticTimeRange | undefined): boolean {
+    if (DATE_FILTER_DATASETS.has(dataset.datasetId)) return true;
+    if (!timeRange || !this.defaultDateColumn(dataset, timeRange.fieldId)) return false;
+    if (timeRange.preset === 'custom') return true;
+    return Boolean(timeRange.fieldId) && !['current_financial_year', 'unspecified'].includes(timeRange.preset ?? 'current_financial_year');
   }
 
   private isColumnAllowedForDataset(dataset: CatalogDataset, column: string): boolean {
@@ -411,11 +433,21 @@ export class SqlCompilerService {
 
   private defaultDateColumn(dataset: CatalogDataset, fieldId?: string): string | null {
     if (fieldId) {
-      const tf = this.catalog.getTimeField(fieldId);
-      if (tf?.datasetId === dataset.datasetId) return tf.column;
+      const dateColumn = this.dateColumnForFieldId(dataset, fieldId);
+      if (dateColumn) return dateColumn;
     }
     const tf = this.catalog.getCatalog().timeFields.find((t) => t.datasetId === dataset.datasetId && t.default);
     return tf?.column ?? dataset.dateFields?.find((d) => d.default)?.column ?? null;
+  }
+
+  private dateColumnForFieldId(dataset: CatalogDataset, fieldId: string): string | null {
+    const tf = this.catalog.getTimeField(fieldId);
+    if (tf?.datasetId === dataset.datasetId) return tf.column;
+    const dateField = dataset.dateFields?.find((field) => field.fieldId === fieldId);
+    if (dateField) return dateField.column;
+    const displayColumn = this.catalog.getDisplayColumn(fieldId);
+    if (displayColumn?.datasetId === dataset.datasetId && displayColumn.dataType === 'date') return displayColumn.column;
+    return null;
   }
 
   private resolveDateRange(timeRange: SemanticTimeRange | undefined, security: ReportingSecurityContext): { startDate: string; endDate: string } | null {

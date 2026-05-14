@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import { Button, EmptyState, Pagination } from '../ui';
 import type { AiReportColumn, AiReportRow } from '../../services/api/ai-reporting.service';
-import { columnField, exportRowsToCsv, formatAiValue, isCurrencyKey } from './ai-reporting-utils';
+import { columnField, exportRowsToCsv, formatAiValue, isCurrencyKey, isDisplayableAiColumn } from './ai-reporting-utils';
 
 const PAGE_SIZE = 25;
 
@@ -16,7 +16,7 @@ interface AiReportTableProps {
 export function AiReportTable({ title = 'ai-report', columns, rows, totals }: AiReportTableProps) {
   const [page, setPage] = useState(1);
   const displayColumns = useMemo(
-    () => columns.map((column) => ({ ...column, key: columnField(column) })).filter((column) => column.key),
+    () => columns.map((column) => ({ ...column, key: columnField(column) })).filter(isDisplayableAiColumn),
     [columns],
   );
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
@@ -36,7 +36,7 @@ export function AiReportTable({ title = 'ai-report', columns, rows, totals }: Ai
           size="sm"
           variant="outline"
           leftIcon={<ArrowDownTrayIcon className="h-4 w-4" />}
-          onClick={() => exportRowsToCsv(`${title.replace(/\s+/g, '_').toLowerCase()}.csv`, columns, rows)}
+          onClick={() => exportRowsToCsv(`${title.replace(/\s+/g, '_').toLowerCase()}.csv`, displayColumns, rows)}
         >
           Export CSV
         </Button>

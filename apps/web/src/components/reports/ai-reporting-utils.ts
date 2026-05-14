@@ -2,9 +2,65 @@ import { formatIndianNumber, formatInr } from '../../utils/number-format';
 import type { AiReportColumn, AiReportRow } from '../../services/api/ai-reporting.service';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}/;
+const INTERNAL_IDENTIFIER_KEYS = new Set([
+  'id',
+  'tenant_id',
+  'tenantid',
+  'company_id',
+  'companyid',
+  'branch_id',
+  'branchid',
+  'warehouse_id',
+  'warehouseid',
+  'location_id',
+  'locationid',
+  'product_id',
+  'productid',
+  'customer_id',
+  'customerid',
+  'supplier_id',
+  'supplierid',
+  'batch_id',
+  'batchid',
+  'account_id',
+  'accountid',
+  'invoice_id',
+  'invoiceid',
+  'journal_entry_id',
+  'journalentryid',
+  'created_by_id',
+  'createdbyid',
+  'purchase_order_id',
+  'purchaseorderid',
+  'work_order_id',
+  'workorderid',
+  'source_voucher_id',
+  'sourcevoucherid',
+  'source_transaction_id',
+  'sourcetransactionid',
+  'source_outstanding_id',
+  'sourceoutstandingid',
+  'source_entry_id',
+  'sourceentryid',
+  'source_line_id',
+  'sourcelineid',
+]);
 
 export function columnField(column: AiReportColumn): string {
   return column.field ?? column.key ?? '';
+}
+
+export function isInternalIdentifierKey(key: string): boolean {
+  const normalized = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[\s-]+/g, '_')
+    .toLowerCase();
+  return INTERNAL_IDENTIFIER_KEYS.has(normalized) || normalized.endsWith('_id');
+}
+
+export function isDisplayableAiColumn(column: AiReportColumn): boolean {
+  const key = columnField(column);
+  return Boolean(key) && !isInternalIdentifierKey(key);
 }
 
 export function isCurrencyKey(key: string): boolean {
@@ -47,7 +103,7 @@ export function labelForColumn(columns: AiReportColumn[], key?: string): string 
 }
 
 export function firstNumericColumn(columns: AiReportColumn[], rows: AiReportRow[]): string | undefined {
-  const column = columns.find((candidate) => {
+  const column = columns.filter(isDisplayableAiColumn).find((candidate) => {
     const key = columnField(candidate);
     return key && rows.some((row) => asNumber(row[key]) !== null);
   });
@@ -55,17 +111,18 @@ export function firstNumericColumn(columns: AiReportColumn[], rows: AiReportRow[
 }
 
 export function firstTextColumn(columns: AiReportColumn[], metricKey?: string): string | undefined {
-  const column = columns.find((candidate) => columnField(candidate) !== metricKey);
+  const column = columns.filter(isDisplayableAiColumn).find((candidate) => columnField(candidate) !== metricKey);
   return column ? columnField(column) : undefined;
 }
 
 export function exportRowsToCsv(filename: string, columns: AiReportColumn[], rows: AiReportRow[]) {
+  const exportColumns = columns.filter(isDisplayableAiColumn);
   const escape = (value: unknown) => {
     const text = value === null || value === undefined ? '' : String(value);
     return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
-  const header = columns.map((column) => escape(column.label || columnField(column))).join(',');
-  const body = rows.map((row) => columns.map((column) => escape(row[columnField(column)])).join(',')).join('\n');
+  const header = exportColumns.map((column) => escape(column.label || columnField(column))).join(',');
+  const body = rows.map((row) => exportColumns.map((column) => escape(row[columnField(column)])).join(',')).join('\n');
   const blob = new Blob([[header, body].filter(Boolean).join('\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');

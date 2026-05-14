@@ -229,7 +229,7 @@ export default function App() {
 
         {/* Reports */}
         <Route path="/reports" element={<Reports />} />
-        <Route path="/reports/ai" element={<RoleAwareRoute requiredModule="reports"><AiReporting /></RoleAwareRoute>} />
+        <Route path="/reports/ai" element={<RoleAwareRoute requiredModule="ai-reporting"><AiReporting /></RoleAwareRoute>} />
         <Route path="/pharma-reports/*" element={<RoleAwareRoute requiredModule="reports"><PharmaReportsRoutes /></RoleAwareRoute>} />
 
         {/* Settings */}

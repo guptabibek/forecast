@@ -89,6 +89,8 @@ export class NlqParserService {
     if (!input.dashboardOnly) {
       const shortcut = this.tryTemplateShortcut(input.question, input.outputMode);
       if (shortcut) return shortcut;
+      const unsupported = this.tryUnsupportedFutureTransactionQuestion(input.question, input.currentDate);
+      if (unsupported) return unsupported;
     }
 
     const catalog = this.catalogLoader.getPromptCatalog();
@@ -223,7 +225,10 @@ export class NlqParserService {
   private normalizeFilterValue(value: unknown): unknown {
     const record = this.asRecord(value);
     if (Object.keys(record).length && ('from' in record || 'to' in record)) {
-      return [record.from, record.to].filter((item) => item != null);
+      return {
+        ...(record.from != null ? { from: record.from } : {}),
+        ...(record.to != null ? { to: record.to } : {}),
+      };
     }
     return value;
   }
@@ -338,12 +343,18 @@ export class NlqParserService {
   }
 
   private unsupported(raw: Record<string, any>): SemanticUnsupportedQuery {
+    const reason = this.cleanText(raw.unsupportedReason ?? raw.reason ?? 'The approved AI reporting catalog cannot answer this request');
     return {
       queryKind: 'unsupported',
       title: 'Unsupported report request',
-      reason: this.cleanText(raw.unsupportedReason ?? raw.reason ?? 'The approved AI reporting catalog cannot answer this request'),
+      reason,
       followUpQuestions: this.stringArray(raw.followUpQuestions),
       assumptions: this.stringArray(raw.assumptions),
+      errorCode: this.optionalString(raw.errorCode),
+      missingCapabilities: this.stringArray(raw.missingCapabilities),
+      availableAlternatives: this.stringArray(raw.availableAlternatives),
+      recommendedSchemaFix: this.optionalString(raw.recommendedSchemaFix) ?? null,
+      unsupportedReason: reason,
     };
   }
 
@@ -392,6 +403,7 @@ export class NlqParserService {
     const catalog = this.catalogLoader.getCatalog();
     const cleanedQuestion = this.normalizeShortcutText(question);
     if (!cleanedQuestion) return null;
+    if (this.hasComplexShortcutSignal(cleanedQuestion)) return null;
     const { text: phraseWithoutRank, rankLimit } = this.extractRankLimit(cleanedQuestion);
     const normalizedQuestion = this.stripShortcutNoise(phraseWithoutRank);
     if (!normalizedQuestion) return null;
@@ -405,11 +417,10 @@ export class NlqParserService {
         .map((term) => this.normalizeShortcutText(term))
         .filter(Boolean);
       if (!terms.some((term) => candidatePhrases.some((phrase) => phrase === term || phrase === `${term}s`))) continue;
-      const timeRange = this.shortcutTimeRange(question);
       const chartType = outputMode === 'table' ? 'table' : ((template.visualization as SemanticVisualization['type']) || 'table');
       const limit = rankLimit ?? template.defaultLimit;
       const assumptions = [
-        ...(timeRange ? [] : ['Using the default date range from the semantic catalog.']),
+        'Using the default date range from the semantic catalog.',
         ...(rankLimit ? [`Using requested top ${rankLimit} limit.`] : []),
       ];
       return {
@@ -423,7 +434,7 @@ export class NlqParserService {
         dimensions: template.defaultDimensions,
         displayColumns: template.defaultDisplayColumns,
         filters: template.defaultFilters ?? [],
-        timeRange,
+        timeRange: undefined,
         sort: template.defaultSort,
         limit,
         visualization: {
@@ -439,6 +450,53 @@ export class NlqParserService {
       };
     }
     return null;
+  }
+
+  private tryUnsupportedFutureTransactionQuestion(question: string, currentDate: string): SemanticUnsupportedQuery | null {
+    const text = this.normalizeShortcutText(question);
+    const yearRange = this.parseCalendarYearRange(text);
+    if (!yearRange) return null;
+    const currentYear = Number(String(currentDate).slice(0, 4));
+    if (!Number.isInteger(currentYear) || yearRange.year <= currentYear) return null;
+    if (/\b(expir|expiry|due|promised|reorder)\b/.test(text)) return null;
+
+    const domain = /\b(purchase|purchases|bought|buying|supplier|vendors?)\b/.test(text)
+      ? 'purchase'
+      : /\b(sales?|sold|selling|revenue|invoice|bill|customer)\b/.test(text)
+        ? 'sales'
+        : null;
+    if (!domain || this.hasForecastOrProjectionDataset(domain)) return null;
+
+    const capability = `${domain}_forecast_or_projection_dataset`;
+    const reason = `${domain === 'sales' ? 'Sales' : 'Purchase'} transaction reports for ${yearRange.year} require an approved forecast/projection dataset; the current catalog only supports actual recorded transactions.`;
+    return {
+      queryKind: 'unsupported',
+      title: 'Unsupported future transaction report',
+      reason,
+      followUpQuestions: [],
+      assumptions: [],
+      errorCode: 'FUTURE_TRANSACTION_UNSUPPORTED',
+      missingCapabilities: [capability],
+      availableAlternatives: [
+        `Ask for actual ${domain} transactions in a completed period.`,
+        `Expose an approved ${domain} forecast/projection dataset in the semantic catalog.`,
+      ],
+      recommendedSchemaFix: `Add an allowed ${domain} forecast/projection dataset, metrics, dimensions, and date field to the AI semantic catalog.`,
+      unsupportedReason: reason,
+    };
+  }
+
+  private hasForecastOrProjectionDataset(domain: 'sales' | 'purchase'): boolean {
+    return this.catalogLoader.getCatalog().datasets.some((dataset) => {
+      if (!dataset.allowedForNlq || dataset.domain !== domain) return false;
+      const text = this.normalizeShortcutText([
+        dataset.datasetId,
+        dataset.description,
+        dataset.grain,
+        ...(dataset.synonyms ?? []),
+      ].join(' '));
+      return /\b(forecast|projection|projected|prediction|plan|budget)\b/.test(text);
+    });
   }
 
   private extractRankLimit(text: string): { text: string; rankLimit?: number } {
@@ -461,115 +519,33 @@ export class NlqParserService {
   private stripShortcutNoise(value: string): string {
     return value
       .replace(/^(show|list|get|give me|display|generate|create|what are|which are)\s+/, '')
-      .replace(/\s+(for|in|during)?\s*(today|yesterday|this week|current week|previous week|last week|this month|current month|mtd|month to date|last month|previous month|prev month|this quarter|current quarter|qtd|quarter to date|last quarter|previous quarter|current financial year|this financial year|current fiscal year|this fiscal year|current fy|this fy|ytd|year to date|last financial year|previous financial year|last fiscal year|previous fiscal year|last fy|previous fy|last 7 days|last 30 days)\b.*$/, '')
-      .replace(/\s+(from|between)\s+.*$/, '')
-      .replace(/\s+(for|in|during)\s+(the\s+)?(month of\s+)?(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\b.*$/, '')
       .replace(/\s+/g, ' ')
       .trim();
   }
 
-  private shortcutTimeRange(question: string): SemanticTimeRange | undefined {
-    const lowered = question.toLowerCase();
-    const custom = this.parseAbsoluteDateRange(lowered);
-    if (custom) return { preset: 'custom', startDate: custom.startDate, endDate: custom.endDate };
-    const monthName = this.parseMonthName(lowered);
-    if (monthName) return { preset: 'custom', startDate: monthName.startDate, endDate: monthName.endDate };
-    const text = this.normalizeShortcutText(question);
-    if (/\btoday\b/.test(text)) return { preset: 'today' };
-    if (/\byesterday\b/.test(text)) return { preset: 'yesterday' };
-    if (/\b(this week|current week)\b/.test(text)) return { preset: 'this_week' };
-    if (/\b(last week|previous week)\b/.test(text)) return { preset: 'last_week' };
-    if (/\b(this month|current month|mtd|month to date)\b/.test(text)) return { preset: 'this_month' };
-    if (/\b(last month|previous month|prev month)\b/.test(text)) return { preset: 'last_month' };
-    if (/\b(this quarter|current quarter|qtd|quarter to date)\b/.test(text)) return { preset: 'this_quarter' };
-    if (/\b(last quarter|previous quarter)\b/.test(text)) return { preset: 'last_quarter' };
-    if (/\b(current|this) (financial year|fiscal year|fy|ytd|year to date)\b/.test(text)) return { preset: 'current_financial_year' };
-    if (/\b(last|previous) (financial year|fiscal year|fy)\b/.test(text)) return { preset: 'last_financial_year' };
-    if (/\blast 7 days\b/.test(text)) return { preset: 'last_7_days' };
-    if (/\blast 30 days\b/.test(text)) return { preset: 'last_30_days' };
-    return undefined;
+  private hasComplexShortcutSignal(text: string): boolean {
+    const dateSignals = /\b(today|yesterday|week|month|quarter|fy|ytd|mtd|qtd|year|from|between|during|january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec|20\d{2})\b/;
+    const sensitiveOrLegal = /\b(vat|gst|pan|tax id|legal|license|registration|bank|phone|email|address)\b/;
+    const comparison = /\b(compare|comparison|versus|vs|growth|increase|decrease|previous|last year|same period)\b/;
+    const futureOrExpiry = /\b(will|future|forecast|projection|projected|due|expire|expires|expired|expiring|expiry)\b/;
+    const namedEntityFilter = /\b(for|with|without|where|filter|only)\s+(customer|supplier|party|product|item|sku|batch|brand|salesman|warehouse|branch)\b/;
+    const multiDimension = (text.match(/\bwise\b/g) ?? []).length > 1 || /\bby\s+\w+\s+(and|,)\s+\w+\b/.test(text);
+    const extraMetric = /\b(quantity|qty|value|amount|rate|tax|discount|margin|profit|stock value)\s+(and|with)|\b(and|with)\s+(quantity|qty|value|amount|rate|tax|discount|margin|profit|stock value)\b/;
+    return dateSignals.test(text)
+      || sensitiveOrLegal.test(text)
+      || comparison.test(text)
+      || futureOrExpiry.test(text)
+      || namedEntityFilter.test(text)
+      || multiDimension
+      || extraMetric.test(text);
   }
 
-  private parseMonthName(text: string): { startDate: string; endDate: string } | null {
-    const months: Record<string, number> = {
-      january: 1, jan: 1, february: 2, feb: 2, march: 3, mar: 3, april: 4, apr: 4,
-      may: 5, june: 6, jun: 6, july: 7, jul: 7, august: 8, aug: 8, september: 9, sept: 9, sep: 9,
-      october: 10, oct: 10, november: 11, nov: 11, december: 12, dec: 12,
-    };
-    const match = text.match(/\b(?:month of|in (?:the month of )?|during|for (?:the month of )?)\s*(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\b(?:\s+(\d{4}))?/i);
+  private parseCalendarYearRange(text: string): { year: number; startDate: string; endDate: string } | null {
+    const match = this.normalizeShortcutText(text).match(/\b(?:in|for|during|by|year)?\s*(20\d{2})\b/);
     if (!match) return null;
-    const month = months[match[1].toLowerCase()];
-    if (!month) return null;
-    const today = new Date();
-    let year = match[2] ? Number(match[2]) : today.getFullYear();
-    if (!match[2] && month > today.getMonth() + 1) year = today.getFullYear() - 1;
-    const start = new Date(year, month - 1, 1);
-    const end = new Date(year, month, 0);
-    return { startDate: this.formatIsoDate(start), endDate: this.formatIsoDate(end) };
-  }
-
-  private formatIsoDate(d: Date): string {
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  }
-
-  private parseAbsoluteDateRange(text: string): { startDate: string; endDate: string } | null {
-    const dateToken = '(\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[\\s/\\-][a-z]{3,9}(?:[\\s/\\-]\\d{2,4})?|[a-z]{3,9}\\s+\\d{1,2}(?:\\s*,?\\s*\\d{2,4})?|\\d{1,2}[\\s/\\-]\\d{1,2}[\\s/\\-]\\d{2,4})';
-    const match = text.match(new RegExp(`(?:from|between)\\s+${dateToken}\\s+(?:to|and|\\-)\\s+${dateToken}`, 'i'));
-    if (!match) return null;
-    const start = this.normalizeDateToken(match[1]);
-    const end = this.normalizeDateToken(match[2]);
-    if (!start || !end) return null;
-    if (start > end) return null;
-    return { startDate: start, endDate: end };
-  }
-
-  private normalizeDateToken(token: string): string | null {
-    const trimmed = token.trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-    const months: Record<string, number> = {
-      jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
-      may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9, sept: 9, september: 9,
-      oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12,
-    };
-    const today = new Date();
-    const monthDayYear = trimmed.match(/^([a-z]+)\s+(\d{1,2})(?:\s*,?\s*(\d{2,4}))?$/i);
-    if (monthDayYear) {
-      const month = months[monthDayYear[1].toLowerCase()];
-      const day = Number(monthDayYear[2]);
-      const year = monthDayYear[3] ? this.normalizeYear(Number(monthDayYear[3])) : today.getFullYear();
-      if (month && day >= 1 && day <= 31) return this.formatDate(year, month, day);
-    }
-    const dayMonthYear = trimmed.match(/^(\d{1,2})[\s\/\-]([a-z]+)(?:[\s\/\-](\d{2,4}))?$/i);
-    if (dayMonthYear) {
-      const day = Number(dayMonthYear[1]);
-      const month = months[dayMonthYear[2].toLowerCase()];
-      const year = dayMonthYear[3] ? this.normalizeYear(Number(dayMonthYear[3])) : today.getFullYear();
-      if (month && day >= 1 && day <= 31) return this.formatDate(year, month, day);
-    }
-    const numeric = trimmed.match(/^(\d{1,2})[\s\/\-](\d{1,2})[\s\/\-](\d{2,4})$/);
-    if (numeric) {
-      const day = Number(numeric[1]);
-      const month = Number(numeric[2]);
-      const year = this.normalizeYear(Number(numeric[3]));
-      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) return this.formatDate(year, month, day);
-    }
-    return null;
-  }
-
-  private normalizeYear(year: number): number {
-    if (year >= 100) return year;
-    return year >= 70 ? 1900 + year : 2000 + year;
-  }
-
-  private formatDate(year: number, month: number, day: number): string {
-    const d = new Date(year, month - 1, day);
-    if (Number.isNaN(d.getTime()) || d.getMonth() !== month - 1 || d.getDate() !== day) return '';
-    const mm = String(month).padStart(2, '0');
-    const dd = String(day).padStart(2, '0');
-    return `${year}-${mm}-${dd}`;
+    const year = Number(match[1]);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) return null;
+    return { year, startDate: `${year}-01-01`, endDate: `${year}-12-31` };
   }
 
   private asRecord(value: unknown): Record<string, any> {

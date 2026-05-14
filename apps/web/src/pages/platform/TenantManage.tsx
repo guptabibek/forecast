@@ -24,6 +24,7 @@ const MODULE_LABELS: Record<string, { name: string; description: string }> = {
   reports: { name: 'Reports', description: 'Dashboard analytics, report builder, and data export' },
   data: { name: 'Data Management', description: 'Data import, actuals, products, locations, dimensions' },
   'marg-ede': { name: 'Marg EDE Integration', description: 'Sync data from Marg ERP via EDE API' },
+  'ai-reporting': { name: 'AI Reporting', description: 'Natural-language reporting and AI provider access' },
 };
 
 const STATUS_OPTIONS = ['ACTIVE', 'TRIAL', 'SUSPENDED', 'CANCELLED'] as const;

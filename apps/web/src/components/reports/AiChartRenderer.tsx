@@ -1,7 +1,15 @@
 import { BarChart, LineChart, PieChart } from '../charts';
 import { EmptyState } from '../ui';
 import type { AiReportChart, AiReportColumn, AiReportRow, AiReportVisualization } from '../../services/api/ai-reporting.service';
-import { asNumber, columnField, firstNumericColumn, firstTextColumn, formatAiValue, labelForColumn } from './ai-reporting-utils';
+import {
+  asNumber,
+  columnField,
+  firstNumericColumn,
+  firstTextColumn,
+  formatAiValue,
+  isDisplayableAiColumn,
+  labelForColumn,
+} from './ai-reporting-utils';
 import { AiKpiCard } from './AiKpiCard';
 
 interface AiChartRendererProps {
@@ -104,7 +112,7 @@ export function AiChartRenderer({ chart, visualization, columns, rows }: AiChart
 }
 
 function AiKpiSet({ columns, row }: { columns: AiReportColumn[]; row: AiReportRow }) {
-  const metricColumns = columns.filter((column) => asNumber(row[columnField(column)]) !== null);
+  const metricColumns = columns.filter((column) => isDisplayableAiColumn(column) && asNumber(row[columnField(column)]) !== null);
   if (!metricColumns.length) {
     return <EmptyState title="No KPI values" description="The result does not include numeric KPI values." />;
   }

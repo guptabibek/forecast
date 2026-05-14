@@ -77,14 +77,20 @@ export class SemanticQueryValidator {
     }
     if (input.queryKind === 'unsupported' || input.queryKind === 'follow_up' || input.queryKind === 'explanation') {
       const raw = input as any;
+      const reason = String(raw.reason || raw.unsupportedReason || 'The approved AI reporting catalog cannot answer this request');
       return {
         queryKind: 'unsupported',
         title: raw.title ?? 'Unsupported report request',
-        reason: String(raw.reason || raw.unsupportedReason || 'The approved AI reporting catalog cannot answer this request'),
+        reason,
         followUpQuestions: Array.isArray(raw.followUpQuestions)
           ? raw.followUpQuestions.slice(0, 3).map(String)
           : [],
         assumptions: Array.isArray(raw.assumptions) ? raw.assumptions.map(String) : [],
+        errorCode: typeof raw.errorCode === 'string' ? raw.errorCode : undefined,
+        missingCapabilities: Array.isArray(raw.missingCapabilities) ? raw.missingCapabilities.map(String).slice(0, 10) : [],
+        availableAlternatives: Array.isArray(raw.availableAlternatives) ? raw.availableAlternatives.map(String).slice(0, 10) : [],
+        recommendedSchemaFix: typeof raw.recommendedSchemaFix === 'string' ? raw.recommendedSchemaFix : null,
+        unsupportedReason: reason,
       };
     }
     if (input.queryKind === 'dashboard') {
@@ -135,6 +141,7 @@ export class SemanticQueryValidator {
 
     const dataset = this.requireDataset(normalizedDatasetId);
     this.assertDatasetPermission(dataset, security);
+    timeRange = this.normalizeTimeFieldForDataset(timeRange, dataset);
 
     for (const metricId of metrics) {
       const metric = this.catalog.getMetric(metricId);
@@ -331,7 +338,7 @@ export class SemanticQueryValidator {
       operator = canonical;
       if (catalogFilter.defaultValue != null) value = catalogFilter.defaultValue;
     }
-    if (!catalogFilter && filter.column && !this.datasetColumns(dataset).has(filter.column)) {
+    if (!catalogFilter && filter.column && !this.isRawFilterColumnAllowed(dataset, filter.column)) {
       throw new AiReportingBadRequest('INVALID_SEMANTIC_QUERY', `Filter column is not allowed: ${filter.column}`);
     }
     this.validateValue(value);
@@ -370,7 +377,7 @@ export class SemanticQueryValidator {
         throw new AiReportingBadRequest('INVALID_SEMANTIC_QUERY', `Sort display column is not selected: ${sort.columnId}`);
       }
     }
-    if (sort.fieldId && !this.catalog.getTimeField(sort.fieldId)) {
+    if (sort.fieldId && !this.dateColumnForFieldId(dataset, sort.fieldId)) {
       throw new AiReportingBadRequest('MISSING_DATE_FIELD', `Unknown sort field: ${sort.fieldId}`);
     }
     if (sort.column && !this.datasetColumns(dataset).has(sort.column)) {
@@ -390,6 +397,10 @@ export class SemanticQueryValidator {
       const timeField = this.catalog.getTimeField(sort.metricId);
       if (timeField?.datasetId === dataset.datasetId) {
         return { ...sort, metricId: undefined, fieldId: timeField.fieldId };
+      }
+      const dateFieldId = this.normalizeDateFieldId(dataset, sort.metricId);
+      if (dateFieldId) {
+        return { ...sort, metricId: undefined, fieldId: dateFieldId };
       }
 
       const dimension = this.catalog.getDimension(sort.metricId);
@@ -468,6 +479,12 @@ export class SemanticQueryValidator {
       return;
     }
     if (typeof value === 'object') {
+      if ('from' in (value as Record<string, unknown>) || 'to' in (value as Record<string, unknown>)) {
+        const range = value as Record<string, unknown>;
+        if (range.from != null) this.validateValue(range.from);
+        if (range.to != null) this.validateValue(range.to);
+        return;
+      }
       const relative = (value as any).relativeDate;
       if (typeof relative === 'string' && /^[a-z0-9_]+$/i.test(relative)) return;
       throw new AiReportingBadRequest('INVALID_SEMANTIC_QUERY', 'Filter values must be scalar, arrays, or approved relative date tokens');
@@ -476,6 +493,48 @@ export class SemanticQueryValidator {
     if (text.length > 300 || /(;|--|\/\*|\*\/|\b(select|insert|update|delete|drop|alter|create|grant|revoke|copy|vacuum|analyze|refresh)\b)/i.test(text)) {
       throw new AiReportingBadRequest('INVALID_SEMANTIC_QUERY', 'Filter value was rejected by safety validation');
     }
+  }
+
+  private normalizeTimeFieldForDataset(timeRange: SemanticTimeRange | undefined, dataset: CatalogDataset): SemanticTimeRange {
+    if (!timeRange?.fieldId) return timeRange ?? { preset: 'current_financial_year' };
+    const fieldId = this.normalizeDateFieldId(dataset, timeRange.fieldId);
+    if (!fieldId) {
+      throw new AiReportingBadRequest('MISSING_DATE_FIELD', `Date field is not available on dataset ${dataset.datasetId}: ${timeRange.fieldId}`);
+    }
+    return { ...timeRange, fieldId };
+  }
+
+  private normalizeDateFieldId(dataset: CatalogDataset, fieldId: string): string | null {
+    const tf = this.catalog.getTimeField(fieldId);
+    if (tf?.datasetId === dataset.datasetId) return tf.fieldId;
+    const datasetDateField = dataset.dateFields?.find((field) => field.fieldId === fieldId);
+    if (datasetDateField) return datasetDateField.fieldId;
+    const displayColumn = this.catalog.getDisplayColumn(fieldId);
+    if (displayColumn?.datasetId === dataset.datasetId && displayColumn.dataType === 'date') {
+      const matchingTimeField = this.catalog.getCatalog().timeFields.find((field) => field.datasetId === dataset.datasetId && field.column === displayColumn.column);
+      const matchingDateField = dataset.dateFields?.find((field) => field.column === displayColumn.column);
+      return matchingTimeField?.fieldId ?? matchingDateField?.fieldId ?? null;
+    }
+    return null;
+  }
+
+  private dateColumnForFieldId(dataset: CatalogDataset, fieldId: string): string | null {
+    const tf = this.catalog.getTimeField(fieldId);
+    if (tf?.datasetId === dataset.datasetId) return tf.column;
+    const dateField = dataset.dateFields?.find((field) => field.fieldId === fieldId);
+    if (dateField) return dateField.column;
+    const displayColumn = this.catalog.getDisplayColumn(fieldId);
+    if (displayColumn?.datasetId === dataset.datasetId && displayColumn.dataType === 'date') return displayColumn.column;
+    return null;
+  }
+
+  private isRawFilterColumnAllowed(dataset: CatalogDataset, column: string): boolean {
+    if (!/^[a-z][a-z0-9_]*$/i.test(column)) return false;
+    return dataset.defaultFilters?.some((filter) => filter.column === column) === true
+      || dataset.dateFields?.some((field) => field.column === column) === true
+      || this.catalog.getCatalog().timeFields.some((field) => field.datasetId === dataset.datasetId && field.column === column)
+      || this.catalog.getCatalog().filters.some((filter) =>
+        (filter.datasetIds.includes(dataset.datasetId) || filter.datasetIds.includes('*')) && filter.column === column);
   }
 
   private datasetColumns(dataset: CatalogDataset): Set<string> {
@@ -517,12 +576,18 @@ export class SemanticQueryValidator {
       };
     }
     if (raw.status === 'unsupported') {
+      const reason = String(raw.unsupportedReason || 'The approved AI reporting catalog cannot answer this request');
       return {
         queryKind: 'unsupported',
         title: 'Unsupported report request',
-        reason: String(raw.unsupportedReason || 'The approved AI reporting catalog cannot answer this request'),
+        reason,
         followUpQuestions: [],
         assumptions: Array.isArray(raw.assumptions) ? raw.assumptions.map(String) : [],
+        errorCode: typeof raw.errorCode === 'string' ? raw.errorCode : undefined,
+        missingCapabilities: Array.isArray(raw.missingCapabilities) ? raw.missingCapabilities.map(String).slice(0, 10) : [],
+        availableAlternatives: Array.isArray(raw.availableAlternatives) ? raw.availableAlternatives.map(String).slice(0, 10) : [],
+        recommendedSchemaFix: typeof raw.recommendedSchemaFix === 'string' ? raw.recommendedSchemaFix : null,
+        unsupportedReason: reason,
       };
     }
     if (raw.status !== 'ok') {
@@ -562,7 +627,10 @@ export class SemanticQueryValidator {
     return filters.slice(0, 20).map((filter) => {
       const operator = String(filter.operator ?? '').toLowerCase();
       const value = filter.value && typeof filter.value === 'object' && !Array.isArray(filter.value) && ('from' in filter.value || 'to' in filter.value)
-        ? [(filter.value as any).from, (filter.value as any).to].filter((item) => item != null)
+        ? {
+            ...((filter.value as any).from != null ? { from: (filter.value as any).from } : {}),
+            ...((filter.value as any).to != null ? { to: (filter.value as any).to } : {}),
+          }
         : filter.value;
       return {
         filterId: filter.filterId,

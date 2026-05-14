@@ -405,7 +405,7 @@ export class SettingsService {
     if (rows.length > 0) {
       // SA-managed modules take precedence
       const result: Record<string, boolean> = {};
-      for (const key of ['planning', 'forecasting', 'manufacturing', 'reports', 'data', 'marg-ede']) {
+      for (const key of ['planning', 'forecasting', 'manufacturing', 'reports', 'data', 'marg-ede', 'ai-reporting']) {
         const row = rows.find((r) => r.module === key);
         result[key] = row ? row.enabled : true;
       }
@@ -419,6 +419,7 @@ export class SettingsService {
       manufacturing: settings.enabledModules?.manufacturing ?? true,
       reports: settings.enabledModules?.reports ?? true,
       data: settings.enabledModules?.data ?? true,
+      'ai-reporting': settings.enabledModules?.['ai-reporting'] ?? true,
     };
   }
 

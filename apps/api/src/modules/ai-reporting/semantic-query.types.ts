@@ -218,6 +218,11 @@ export interface SemanticUnsupportedQuery {
   reason: string;
   followUpQuestions: string[];
   assumptions?: string[];
+  errorCode?: string;
+  missingCapabilities?: string[];
+  availableAlternatives?: string[];
+  recommendedSchemaFix?: string | null;
+  unsupportedReason?: string;
 }
 
 export interface DynamicSemanticQuery {
@@ -264,6 +269,10 @@ export interface DynamicSemanticQuery {
   assumptions: string[];
   clarifyingQuestion: string | null;
   unsupportedReason: string | null;
+  errorCode?: string | null;
+  missingCapabilities?: string[];
+  availableAlternatives?: string[];
+  recommendedSchemaFix?: string | null;
 }
 
 export type SemanticQuery =

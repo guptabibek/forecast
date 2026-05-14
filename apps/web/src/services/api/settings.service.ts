@@ -50,6 +50,7 @@ export interface TenantSettings {
     reports: boolean;
     data: boolean;
     'marg-ede'?: boolean;
+    'ai-reporting'?: boolean;
   };
   aiReporting?: {
     enabled: boolean;

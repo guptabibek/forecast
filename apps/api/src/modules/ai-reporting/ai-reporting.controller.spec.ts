@@ -27,11 +27,11 @@ describe('AiReportingController', () => {
     controller = new AiReportingController(service as any, aiProvider);
   });
 
-  it('requires authentication, reports module, and base report permission at controller level', () => {
+  it('requires authentication, AI reporting module, and base report permission at controller level', () => {
     const guards = Reflect.getMetadata(GUARDS_METADATA, AiReportingController);
 
     expect(guards).toEqual(expect.arrayContaining([JwtAuthGuard, RolesGuard]));
-    expect(Reflect.getMetadata(REQUIRE_MODULE_KEY, AiReportingController)).toBe('reports');
+    expect(Reflect.getMetadata(REQUIRE_MODULE_KEY, AiReportingController)).toBe('ai-reporting');
     expect(Reflect.getMetadata(PERMISSIONS_KEY, AiReportingController)).toEqual(['report:read']);
   });
 

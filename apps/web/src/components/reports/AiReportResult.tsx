@@ -152,6 +152,7 @@ function AiMetadataBanner({ metadata, interpretation }: { metadata?: AiReportMet
 
 function ErrorDetails({ result }: { result: AiReportResponse }) {
   const details = [
+    result.errorCode ? `Error code: ${result.errorCode}` : null,
     ...(result.missingCapabilities ?? []),
     ...(result.availableAlternatives ?? []).map((item) => `Alternative: ${item}`),
     result.recommendedSchemaFix ? `Schema fix: ${result.recommendedSchemaFix}` : null,

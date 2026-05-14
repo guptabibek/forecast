@@ -171,6 +171,87 @@ describe('SemanticQueryValidator', () => {
     expect(result.sort).toEqual([{ metricId: undefined, columnId: 'batch_days_to_expiry', direction: 'asc' }]);
   });
 
+  it('accepts "how many items will be expiring in 2027" as a catalog aggregate expiry query', () => {
+    const result = validator.validate(report({
+      title: 'Items Expiring in 2027',
+      datasetId: 'stock_batches',
+      analysisType: 'grouped_summary',
+      mode: 'kpi',
+      metrics: ['expiring_item_count'],
+      dimensions: [],
+      displayColumns: [],
+      filters: [],
+      timeRange: { preset: 'custom', fieldId: 'batch_expiry_date', startDate: '2027-01-01', endDate: '2027-12-31' },
+      sort: [{ metricId: 'expiring_item_count', direction: 'desc' }],
+      limit: 1,
+      visualization: { type: 'kpi' },
+    }), security) as SemanticReportQuery;
+
+    expect(result.datasetId).toBe('stock_batches');
+    expect(result.mode).toBe('kpi');
+    expect(result.metrics).toEqual(['expiring_item_count']);
+    expect(result.dimensions).toEqual([]);
+    expect(result.timeRange).toEqual(expect.objectContaining({
+      fieldId: 'batch_expiry_date',
+      startDate: '2027-01-01',
+      endDate: '2027-12-31',
+    }));
+  });
+
+  it('accepts product and batch expiry detail queries with catalog display columns', () => {
+    const result = validator.validate(report({
+      title: 'Products Expiring in 2027',
+      datasetId: 'stock_batches',
+      analysisType: 'exception_list',
+      mode: 'detail',
+      metrics: [],
+      dimensions: [],
+      displayColumns: [
+        'batch_product_name',
+        'batch_no',
+        'batch_expiry_date',
+        'batch_current_stock',
+        'batch_stock_value',
+      ],
+      filters: [],
+      timeRange: { preset: 'custom', fieldId: 'expiry_date', startDate: '2027-01-01', endDate: '2027-12-31' },
+      sort: [{ columnId: 'batch_expiry_date', direction: 'asc' }],
+      limit: 100,
+      visualization: { type: 'table' },
+    }), security) as SemanticReportQuery;
+
+    expect(result.mode).toBe('detail');
+    expect(result.metrics).toEqual([]);
+    expect(result.displayColumns).toEqual(expect.arrayContaining([
+      'batch_product_name',
+      'batch_no',
+      'batch_expiry_date',
+      'batch_current_stock',
+      'batch_stock_value',
+    ]));
+    expect(result.timeRange?.fieldId).toBe('expiry_date');
+  });
+
+  it('accepts stock value expiring in 2027 as a catalog stock-value expiry metric', () => {
+    const result = validator.validate(report({
+      title: 'Stock Value Expiring in 2027',
+      datasetId: 'stock_batches',
+      analysisType: 'grouped_summary',
+      mode: 'kpi',
+      metrics: ['expiring_stock_value'],
+      dimensions: [],
+      displayColumns: [],
+      filters: [],
+      timeRange: { preset: 'custom', fieldId: 'batch_expiry_date', startDate: '2027-01-01', endDate: '2027-12-31' },
+      sort: [{ metricId: 'expiring_stock_value', direction: 'desc' }],
+      limit: 1,
+      visualization: { type: 'kpi' },
+    }), security) as SemanticReportQuery;
+
+    expect(result.metrics).toEqual(['expiring_stock_value']);
+    expect(result.timeRange?.fieldId).toBe('batch_expiry_date');
+  });
+
   it('enforces report family permissions for the selected dataset', () => {
     const restricted = { ...security, userRole: 'SALES', permissions: ['reports.ai.execute', 'reports.sales.view'] };
 
@@ -277,6 +358,48 @@ describe('SemanticQueryValidator', () => {
     ]));
   });
 
+  it('preserves between filter objects during dynamic semantic normalization', () => {
+    const result = validator.validate({
+      status: 'ok',
+      queryKind: 'single_report',
+      mode: 'detail',
+      domain: 'sales',
+      datasetId: 'sales_invoices',
+      metrics: [],
+      dimensions: [],
+      displayColumns: [{ columnId: 'sales_invoice_no' }],
+      filters: [
+        { filterId: 'date_range', operator: 'between', value: { from: '2026-05-01', to: '2026-05-31' } },
+      ],
+      time: {
+        dateFieldId: null,
+        rangeType: 'unspecified',
+        startDate: null,
+        endDate: null,
+      },
+      comparison: {
+        enabled: false,
+        type: 'none',
+        startDate: null,
+        endDate: null,
+      },
+      sort: [],
+      limit: 50,
+      output: {
+        showGrid: true,
+        showChart: false,
+        chartType: 'none',
+      },
+      assumptions: [],
+      clarifyingQuestion: null,
+      unsupportedReason: null,
+    }, security) as SemanticReportQuery;
+
+    expect(result.filters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ filterId: 'date_range', operator: 'BETWEEN', value: { from: '2026-05-01', to: '2026-05-31' } }),
+    ]));
+  });
+
   it('keeps unsupported dynamic semantic JSON distinct from clarification', () => {
     const result = validator.validate({
       status: 'unsupported',
@@ -303,10 +426,18 @@ describe('SemanticQueryValidator', () => {
       },
       assumptions: [],
       clarifyingQuestion: null,
+      errorCode: 'MISSING_CAPABILITY',
+      missingCapabilities: ['payroll_dataset'],
+      availableAlternatives: ['Use approved accounting reports'],
+      recommendedSchemaFix: 'Add payroll dataset metadata',
       unsupportedReason: 'No approved payroll dataset is available.',
     }, security);
 
     expect(result.queryKind).toBe('unsupported');
     expect((result as any).reason).toBe('No approved payroll dataset is available.');
+    expect((result as any).errorCode).toBe('MISSING_CAPABILITY');
+    expect((result as any).missingCapabilities).toEqual(['payroll_dataset']);
+    expect((result as any).availableAlternatives).toEqual(['Use approved accounting reports']);
+    expect((result as any).recommendedSchemaFix).toBe('Add payroll dataset metadata');
   });
 });

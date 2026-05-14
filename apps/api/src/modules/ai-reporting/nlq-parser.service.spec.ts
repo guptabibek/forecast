@@ -26,9 +26,9 @@ describe('NlqParserService', () => {
     parser = new NlqParserService(aiProvider as any, loader);
   });
 
-  it('uses exact/common report templates only as shortcuts', async () => {
+  it('uses exact simple report templates only as shortcuts', async () => {
     const result = await parser.parseQuestion({
-      question: 'Show top selling products this month',
+      question: 'Top Selling Products',
       outputMode: 'auto',
       currentDate: '2026-05-13',
       securityContext: security,
@@ -37,7 +37,7 @@ describe('NlqParserService', () => {
     expect(aiProvider.generateJson).not.toHaveBeenCalled();
     expect(result.queryKind).toBe('single_report');
     expect((result as SemanticReportQuery).templateId).toBe('top_selling_products');
-    expect((result as SemanticReportQuery).timeRange).toEqual({ preset: 'this_month' });
+    expect((result as SemanticReportQuery).timeRange).toBeUndefined();
   });
 
   it('normalizes dynamic non-template AI semantic JSON', async () => {
@@ -99,7 +99,7 @@ describe('NlqParserService', () => {
 
   it('uses requested top-N limit via shortcut without calling the LLM', async () => {
     const result = await parser.parseQuestion({
-      question: 'Show top 5 selling products this month',
+      question: 'Top 5 Selling Products',
       outputMode: 'auto',
       currentDate: '2026-05-13',
       securityContext: security,
@@ -109,10 +109,40 @@ describe('NlqParserService', () => {
     expect(result.queryKind).toBe('single_report');
     expect((result as SemanticReportQuery).templateId).toBe('top_selling_products');
     expect((result as SemanticReportQuery).limit).toBe(5);
-    expect((result as SemanticReportQuery).timeRange).toEqual({ preset: 'this_month' });
+    expect((result as SemanticReportQuery).timeRange).toBeUndefined();
   });
 
-  it('parses absolute date ranges in the shortcut path', async () => {
+  it('does not shortcut template-like queries with date ranges', async () => {
+    aiProvider.generateJson.mockResolvedValueOnce({
+      status: 'ok',
+      queryKind: 'single_report',
+      mode: 'ranking',
+      domain: 'sales',
+      datasetId: 'sales_items',
+      metrics: [{ metricId: 'sold_quantity' }],
+      dimensions: [{ dimensionId: 'sales_product' }],
+      displayColumns: [],
+      filters: [],
+      time: {
+        dateFieldId: 'invoice_date',
+        rangeType: 'custom',
+        startDate: '2026-04-01',
+        endDate: '2026-04-10',
+      },
+      sort: [{ byMetricId: 'sold_quantity', direction: 'desc' }],
+      limit: 10,
+      output: {
+        showGrid: true,
+        showChart: true,
+        chartType: 'bar',
+        xField: 'product_name',
+        yField: 'sold_quantity',
+      },
+      assumptions: [],
+      clarifyingQuestion: null,
+      unsupportedReason: null,
+    });
+
     const result = await parser.parseQuestion({
       question: 'Show top selling products from 2026-04-01 to 2026-04-10',
       outputMode: 'auto',
@@ -120,33 +150,46 @@ describe('NlqParserService', () => {
       securityContext: security,
     });
 
-    expect(aiProvider.generateJson).not.toHaveBeenCalled();
+    expect(aiProvider.generateJson).toHaveBeenCalled();
     expect((result as SemanticReportQuery).timeRange).toEqual({
       preset: 'custom',
+      fieldId: 'invoice_date',
       startDate: '2026-04-01',
       endDate: '2026-04-10',
     });
   });
 
-  it('parses MTD and current week period synonyms in the shortcut path', async () => {
-    const mtd = await parser.parseQuestion({
-      question: 'Show top selling products MTD',
-      outputMode: 'auto',
-      currentDate: '2026-05-13',
-      securityContext: security,
+  it('routes "top N items wise sales for the month of <month>" through the AI parser', async () => {
+    aiProvider.generateJson.mockResolvedValueOnce({
+      status: 'ok',
+      queryKind: 'single_report',
+      mode: 'ranking',
+      domain: 'sales',
+      datasetId: 'sales_items',
+      metrics: [{ metricId: 'net_sales' }],
+      dimensions: [{ dimensionId: 'sales_product' }],
+      displayColumns: [],
+      filters: [],
+      time: {
+        dateFieldId: 'invoice_date',
+        rangeType: 'custom',
+        startDate: '2026-05-01',
+        endDate: '2026-05-31',
+      },
+      sort: [{ byMetricId: 'net_sales', direction: 'desc' }],
+      limit: 20,
+      output: {
+        showGrid: true,
+        showChart: true,
+        chartType: 'bar',
+        xField: 'product_name',
+        yField: 'net_sales',
+      },
+      assumptions: [],
+      clarifyingQuestion: null,
+      unsupportedReason: null,
     });
-    expect((mtd as SemanticReportQuery).timeRange).toEqual({ preset: 'this_month' });
 
-    const currentWeek = await parser.parseQuestion({
-      question: 'Show top selling products current week',
-      outputMode: 'auto',
-      currentDate: '2026-05-13',
-      securityContext: security,
-    });
-    expect((currentWeek as SemanticReportQuery).timeRange).toEqual({ preset: 'this_week' });
-  });
-
-  it('resolves "top N items wise sales for the month of <month>" without an LLM call', async () => {
     const result = await parser.parseQuestion({
       question: 'top 20 items wise sales for the month of may',
       outputMode: 'auto',
@@ -154,18 +197,122 @@ describe('NlqParserService', () => {
       securityContext: security,
     });
 
-    expect(aiProvider.generateJson).not.toHaveBeenCalled();
+    expect(aiProvider.generateJson).toHaveBeenCalled();
     const report = result as SemanticReportQuery;
     expect(report.queryKind).toBe('single_report');
-    expect(report.templateId).toBe('top_sales_value_products');
+    expect(report.datasetId).toBe('sales_items');
+    expect(report.metrics).toEqual(['net_sales']);
+    expect(report.dimensions).toEqual(['sales_product']);
     expect(report.limit).toBe(20);
-    expect(report.timeRange).toEqual({ preset: 'custom', startDate: '2026-05-01', endDate: '2026-05-31' });
+    expect(report.timeRange).toEqual({ preset: 'custom', fieldId: 'invoice_date', startDate: '2026-05-01', endDate: '2026-05-31' });
+  });
+
+  it('normalizes "how many items will be expiring in 2027" as an aggregate expiry query from AI output', async () => {
+    aiProvider.generateJson.mockResolvedValueOnce({
+      status: 'ok',
+      queryKind: 'single_report',
+      mode: 'kpi',
+      domain: 'inventory',
+      datasetId: 'stock_batches',
+      metrics: [{ metricId: 'expiring_item_count' }],
+      dimensions: [],
+      displayColumns: [],
+      filters: [],
+      time: {
+        dateFieldId: 'batch_expiry_date',
+        rangeType: 'custom',
+        startDate: '2027-01-01',
+        endDate: '2027-12-31',
+      },
+      sort: [{ byMetricId: 'expiring_item_count', direction: 'desc' }],
+      limit: 1,
+      output: {
+        showGrid: true,
+        showChart: true,
+        chartType: 'kpi',
+        xField: null,
+        yField: 'expiring_item_count',
+      },
+      assumptions: [],
+      clarifyingQuestion: null,
+      unsupportedReason: null,
+    });
+
+    const result = await parser.parseQuestion({
+      question: 'how many items will be expiring in 2027',
+      outputMode: 'auto',
+      currentDate: '2026-05-13',
+      securityContext: security,
+    });
+
+    expect(aiProvider.generateJson).toHaveBeenCalled();
+    const report = result as SemanticReportQuery;
+    expect(report.queryKind).toBe('single_report');
+    expect(report.datasetId).toBe('stock_batches');
+    expect(report.mode).toBe('kpi');
+    expect(report.metrics).toEqual(['expiring_item_count']);
+    expect(report.displayColumns).toEqual([]);
+    expect(report.timeRange).toEqual({
+      preset: 'custom',
+      fieldId: 'batch_expiry_date',
+      startDate: '2027-01-01',
+      endDate: '2027-12-31',
+    });
+    expect(report.sort).toEqual([{ metricId: 'expiring_item_count', direction: 'desc' }]);
+  });
+
+  it('preserves between filter objects emitted by the AI parser', async () => {
+    aiProvider.generateJson.mockResolvedValueOnce({
+      status: 'ok',
+      queryKind: 'single_report',
+      mode: 'detail',
+      domain: 'sales',
+      datasetId: 'sales_invoices',
+      metrics: [],
+      dimensions: [],
+      displayColumns: [{ columnId: 'sales_invoice_no' }],
+      filters: [{ filterId: 'date_range', operator: 'between', value: { from: '2026-05-01', to: '2026-05-31' } }],
+      time: { dateFieldId: null, rangeType: 'unspecified', startDate: null, endDate: null },
+      sort: [],
+      limit: 25,
+      output: { showGrid: true, showChart: false, chartType: 'none' },
+      assumptions: [],
+      clarifyingQuestion: null,
+      unsupportedReason: null,
+    });
+
+    const result = await parser.parseQuestion({
+      question: 'show sales invoices between 2026-05-01 and 2026-05-31',
+      outputMode: 'auto',
+      currentDate: '2026-05-13',
+      securityContext: security,
+    });
+
+    expect((result as SemanticReportQuery).filters?.[0].value).toEqual({ from: '2026-05-01', to: '2026-05-31' });
+  });
+
+  it('returns unsupported for future sales transaction queries unless a forecast dataset exists', async () => {
+    const result = await parser.parseQuestion({
+      question: 'show sales for 2027',
+      outputMode: 'auto',
+      currentDate: '2026-05-13',
+      securityContext: security,
+    });
+
+    expect(aiProvider.generateJson).not.toHaveBeenCalled();
+    expect(result.queryKind).toBe('unsupported');
+    expect((result as any).errorCode).toBe('FUTURE_TRANSACTION_UNSUPPORTED');
+    expect((result as any).missingCapabilities).toContain('sales_forecast_or_projection_dataset');
   });
 
   it('returns unsupported as a first-class semantic state', async () => {
     aiProvider.generateJson.mockResolvedValueOnce({
       status: 'unsupported',
       queryKind: 'single_report',
+      errorCode: 'MISSING_DATASET',
+      missingCapabilities: ['payroll_dataset'],
+      availableAlternatives: ['Use staff attendance export outside AI reporting'],
+      recommendedSchemaFix: 'Add a payroll dataset to the semantic catalog',
       unsupportedReason: 'No approved payroll dataset is available.',
     });
 
@@ -178,5 +325,9 @@ describe('NlqParserService', () => {
 
     expect(result.queryKind).toBe('unsupported');
     expect((result as any).reason).toBe('No approved payroll dataset is available.');
+    expect((result as any).errorCode).toBe('MISSING_DATASET');
+    expect((result as any).missingCapabilities).toEqual(['payroll_dataset']);
+    expect((result as any).availableAlternatives).toEqual(['Use staff attendance export outside AI reporting']);
+    expect((result as any).recommendedSchemaFix).toBe('Add a payroll dataset to the semantic catalog');
   });
 });
