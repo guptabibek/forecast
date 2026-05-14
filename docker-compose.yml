@@ -1,0 +1,70 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api-runtime
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      API_PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-forecast_saas}?schema=public}
+      REDIS_URL: ${REDIS_URL:-}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-12345678901234567890123456789012}
+      MAIN_DOMAIN: ${MAIN_DOMAIN:-localhost}
+      # AI reporting is per-tenant: module gated by superadmin via
+      # tenant_modules, operational config (timeouts/limits/flags) lives in
+      # ai_tenant_provider_configs. Only the encryption key remains in env.
+      AI_CONFIG_ENCRYPTION_KEY: ${AI_CONFIG_ENCRYPTION_KEY:-}
+      AI_SEMANTIC_CATALOG_PATH: ${AI_SEMANTIC_CATALOG_PATH:-/app/ai-reporting/semantic-catalog.json}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-false}
+      SMTP_IGNORE_TLS: ${SMTP_IGNORE_TLS:-false}
+      SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-true}
+      MARG_HTTP_TIMEOUT_MS: ${MARG_HTTP_TIMEOUT_MS:-30000}
+      MARG_DATA_HTTP_TIMEOUT_MS: ${MARG_DATA_HTTP_TIMEOUT_MS:-120000}
+      MARG_SYNC_MAX_PAGES: ${MARG_SYNC_MAX_PAGES:-500}
+      THROTTLE_SHORT_LIMIT: ${THROTTLE_SHORT_LIMIT:-100}
+      THROTTLE_MEDIUM_LIMIT: ${THROTTLE_MEDIUM_LIMIT:-500}
+      THROTTLE_LONG_LIMIT: ${THROTTLE_LONG_LIMIT:-3000}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      NODE_OPTIONS: "--max-old-space-size=1024"
+    ports:
+      - "${API_EXTERNAL_PORT:-3001}:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "require('http').get('http://127.0.0.1:3000/health/ready', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web-runtime
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api/v1}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-3000}:80"
+
+volumes:
+  redis_data:

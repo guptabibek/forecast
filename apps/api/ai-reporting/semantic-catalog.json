@@ -1,0 +1,5562 @@
+{
+  "catalogVersion": "1.0",
+  "generatedFrom": [
+    "docs/ai-reporting/reporting-views.schema.json",
+    "docs/ai-reporting/report-inventory.json",
+    "docs/ai-reporting/discovery-report.md"
+  ],
+  "datasets": [
+    {
+      "datasetId": "sales_items",
+      "viewName": "vw_ai_sales_items",
+      "domain": "sales",
+      "grain": "item_level",
+      "description": "Item-level Marg sales and sales-return invoice lines",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_cancelled",
+          "operator": "IS DISTINCT FROM",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "supportedReportIds": [
+        "sales-overview",
+        "sales-bills",
+        "sales-purchase-bill-drilldown",
+        "sales-purchase-item-drilldown",
+        "sales-purchase-dimension",
+        "sales-purchase-comparison",
+        "item-360",
+        "customer-360"
+      ],
+      "synonyms": [
+        "sales item lines",
+        "item wise sales",
+        "product sales lines",
+        "sales invoice items"
+      ],
+      "defaultAggregateMetrics": [
+        "sold_quantity",
+        "net_sales"
+      ],
+      "defaultDetailColumns": [
+        "sales_item_invoice_date",
+        "sales_item_invoice_no",
+        "sales_item_customer_name",
+        "sales_item_product_name",
+        "sales_item_batch_no",
+        "sales_item_quantity",
+        "sales_item_rate",
+        "sales_item_net_amount"
+      ],
+      "displayColumns": [
+        "sales_item_invoice_date",
+        "sales_item_invoice_no",
+        "sales_item_customer_name",
+        "sales_item_product_name",
+        "sales_item_batch_no",
+        "sales_item_quantity",
+        "sales_item_rate",
+        "sales_item_net_amount"
+      ]
+    },
+    {
+      "datasetId": "sales_invoices",
+      "viewName": "vw_ai_sales_invoices",
+      "domain": "sales",
+      "grain": "invoice_level",
+      "description": "Invoice-level Marg sales and sales-return rollup",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_cancelled",
+          "operator": "IS DISTINCT FROM",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "supportedReportIds": [
+        "sales-overview",
+        "sales-bills",
+        "sales-purchase-party-drilldown",
+        "sales-purchase-comparison",
+        "generic-dashboard"
+      ],
+      "synonyms": [
+        "sales bills",
+        "sales invoices",
+        "bill wise sales",
+        "invoice wise sales"
+      ],
+      "defaultAggregateMetrics": [
+        "invoice_net_sales",
+        "sales_invoice_count"
+      ],
+      "defaultDetailColumns": [
+        "sales_invoice_date",
+        "sales_invoice_no",
+        "sales_customer_name",
+        "sales_salesman_name",
+        "sales_invoice_quantity",
+        "sales_invoice_net_amount",
+        "sales_invoice_tax_amount"
+      ],
+      "displayColumns": [
+        "sales_invoice_date",
+        "sales_invoice_no",
+        "sales_customer_name",
+        "sales_salesman_name",
+        "sales_invoice_quantity",
+        "sales_invoice_net_amount",
+        "sales_invoice_tax_amount"
+      ]
+    },
+    {
+      "datasetId": "purchase_items",
+      "viewName": "vw_ai_purchase_items",
+      "domain": "purchase",
+      "grain": "item_level",
+      "description": "Item-level Marg purchase and purchase-return invoice lines",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_cancelled",
+          "operator": "IS DISTINCT FROM",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "supportedReportIds": [
+        "purchase-overview",
+        "purchase-bills",
+        "sales-purchase-bill-drilldown",
+        "sales-purchase-item-drilldown",
+        "sales-purchase-dimension",
+        "sales-purchase-comparison",
+        "supplier-360",
+        "item-360"
+      ],
+      "synonyms": [
+        "purchase item lines",
+        "item wise purchase",
+        "product purchase lines",
+        "purchase invoice items"
+      ],
+      "defaultAggregateMetrics": [
+        "purchase_quantity",
+        "net_purchase"
+      ],
+      "defaultDetailColumns": [
+        "purchase_item_invoice_date",
+        "purchase_item_invoice_no",
+        "purchase_item_supplier_name",
+        "purchase_item_product_name",
+        "purchase_item_batch_no",
+        "purchase_item_quantity",
+        "purchase_item_rate",
+        "purchase_item_net_amount"
+      ],
+      "displayColumns": [
+        "purchase_item_invoice_date",
+        "purchase_item_invoice_no",
+        "purchase_item_supplier_name",
+        "purchase_item_product_name",
+        "purchase_item_batch_no",
+        "purchase_item_quantity",
+        "purchase_item_rate",
+        "purchase_item_net_amount"
+      ]
+    },
+    {
+      "datasetId": "purchase_invoices",
+      "viewName": "vw_ai_purchase_invoices",
+      "domain": "purchase",
+      "grain": "invoice_level",
+      "description": "Invoice-level Marg purchase and purchase-return rollup",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_cancelled",
+          "operator": "IS DISTINCT FROM",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "supportedReportIds": [
+        "purchase-overview",
+        "purchase-bills",
+        "sales-purchase-party-drilldown",
+        "sales-purchase-comparison"
+      ],
+      "synonyms": [
+        "purchase bills",
+        "purchase invoices",
+        "bill wise purchase",
+        "supplier bill wise"
+      ],
+      "defaultAggregateMetrics": [
+        "invoice_net_purchase",
+        "purchase_invoice_count"
+      ],
+      "defaultDetailColumns": [
+        "purchase_invoice_date",
+        "purchase_invoice_no",
+        "purchase_supplier_name",
+        "purchase_invoice_quantity",
+        "purchase_invoice_net_amount",
+        "purchase_invoice_tax_amount"
+      ],
+      "displayColumns": [
+        "purchase_invoice_date",
+        "purchase_invoice_no",
+        "purchase_supplier_name",
+        "purchase_invoice_quantity",
+        "purchase_invoice_net_amount",
+        "purchase_invoice_tax_amount"
+      ]
+    },
+    {
+      "datasetId": "stock_summary",
+      "viewName": "vw_ai_stock_summary",
+      "domain": "inventory",
+      "grain": "product_location",
+      "description": "Current product-location stock and replenishment dataset",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "warehouse_id"
+      ],
+      "defaultFilters": [],
+      "dateFields": [
+        {
+          "fieldId": "last_updated_at",
+          "column": "last_updated_at",
+          "default": false
+        }
+      ],
+      "supportedReportIds": [
+        "current-stock",
+        "reorder-low-stock",
+        "dead-slow-stock",
+        "inventory-turnover",
+        "stock-out",
+        "pharma-dashboard-kpis",
+        "alerts"
+      ],
+      "synonyms": [
+        "stock summary",
+        "current stock",
+        "inventory summary",
+        "stock by warehouse"
+      ],
+      "defaultAggregateMetrics": [
+        "stock_quantity",
+        "stock_value"
+      ],
+      "defaultDetailColumns": [
+        "stock_product_name",
+        "stock_warehouse_name",
+        "stock_current_quantity",
+        "stock_available_quantity",
+        "stock_value_amount",
+        "stock_status"
+      ],
+      "displayColumns": [
+        "stock_product_name",
+        "stock_warehouse_name",
+        "stock_current_quantity",
+        "stock_available_quantity",
+        "stock_value_amount",
+        "stock_status"
+      ]
+    },
+    {
+      "datasetId": "stock_batches",
+      "viewName": "vw_ai_stock_batches",
+      "domain": "inventory",
+      "grain": "product_location_batch",
+      "description": "Batch-level stock, expiry, FEFO, and ageing dataset",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "warehouse_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_reportable_stock",
+          "operator": "=",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "expiry_date",
+          "column": "expiry_date",
+          "default": true
+        },
+        {
+          "fieldId": "manufacturing_date",
+          "column": "manufacturing_date",
+          "default": false
+        }
+      ],
+      "supportedReportIds": [
+        "batch-inventory",
+        "stock-ageing",
+        "near-expiry",
+        "expired-stock",
+        "fefo-picking",
+        "expiry-risk",
+        "expiry-loss-trend",
+        "batches-list",
+        "item-360"
+      ],
+      "synonyms": [
+        "batch stock",
+        "batch inventory",
+        "expiry stock",
+        "near expiry stock"
+      ],
+      "defaultAggregateMetrics": [
+        "batch_stock",
+        "expired_stock_value"
+      ],
+      "defaultDetailColumns": [
+        "batch_product_name",
+        "batch_warehouse_name",
+        "batch_no",
+        "batch_expiry_date",
+        "batch_days_to_expiry",
+        "batch_current_stock",
+        "batch_stock_value",
+        "batch_status"
+      ],
+      "displayColumns": [
+        "batch_product_name",
+        "batch_warehouse_name",
+        "batch_no",
+        "batch_expiry_date",
+        "batch_days_to_expiry",
+        "batch_current_stock",
+        "batch_stock_value",
+        "batch_status"
+      ]
+    },
+    {
+      "datasetId": "stock_ledger",
+      "viewName": "vw_ai_stock_ledger",
+      "domain": "inventory",
+      "grain": "ledger_entry",
+      "description": "Append-only inventory movement ledger",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "warehouse_id"
+      ],
+      "defaultFilters": [],
+      "dateFields": [
+        {
+          "fieldId": "transaction_date",
+          "column": "transaction_date",
+          "default": true
+        }
+      ],
+      "supportedReportIds": [
+        "movement-ledger",
+        "stock-out",
+        "inventory-value-trend",
+        "item-360"
+      ],
+      "synonyms": [
+        "stock ledger",
+        "inventory movement",
+        "movement ledger",
+        "stock transactions"
+      ],
+      "defaultAggregateMetrics": [
+        "movement_quantity",
+        "movement_value"
+      ],
+      "defaultDetailColumns": [
+        "stock_ledger_transaction_date",
+        "stock_ledger_product_name",
+        "stock_ledger_warehouse_name",
+        "stock_ledger_batch_no",
+        "stock_ledger_entry_type",
+        "stock_ledger_quantity",
+        "stock_ledger_value",
+        "stock_ledger_running_balance"
+      ],
+      "displayColumns": [
+        "stock_ledger_transaction_date",
+        "stock_ledger_product_name",
+        "stock_ledger_warehouse_name",
+        "stock_ledger_batch_no",
+        "stock_ledger_entry_type",
+        "stock_ledger_quantity",
+        "stock_ledger_value",
+        "stock_ledger_running_balance"
+      ]
+    },
+    {
+      "datasetId": "party_outstanding",
+      "viewName": "vw_ai_party_outstanding",
+      "domain": "outstanding",
+      "grain": "party_invoice_line",
+      "description": "Marg customer/supplier outstanding invoice lines",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_open",
+          "operator": "=",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "supportedReportIds": [
+        "financial-outstanding",
+        "financial-outstanding-groups",
+        "financial-outstanding-detail",
+        "customer-360",
+        "supplier-360"
+      ],
+      "synonyms": [
+        "customer outstanding",
+        "supplier outstanding",
+        "party outstanding",
+        "receivable payable"
+      ],
+      "defaultAggregateMetrics": [
+        "outstanding_amount",
+        "outstanding_invoice_count"
+      ],
+      "defaultDetailColumns": [
+        "outstanding_party_type",
+        "outstanding_party_name",
+        "outstanding_invoice_date",
+        "outstanding_invoice_no",
+        "outstanding_invoice_amount",
+        "outstanding_amount_value",
+        "outstanding_age_days"
+      ],
+      "displayColumns": [
+        "outstanding_party_type",
+        "outstanding_party_name",
+        "outstanding_invoice_date",
+        "outstanding_invoice_no",
+        "outstanding_invoice_amount",
+        "outstanding_amount_value",
+        "outstanding_age_days"
+      ]
+    },
+    {
+      "datasetId": "tax_register",
+      "viewName": "vw_ai_tax_register",
+      "domain": "tax",
+      "grain": "item_tax_line",
+      "description": "Unified sales and purchase tax line register",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "sensitiveColumns": [
+        "party_gst_no",
+        "party_vat_no",
+        "party_pan_no"
+      ],
+      "supportedReportIds": [
+        "sales-overview",
+        "purchase-overview",
+        "sales-purchase-dimension"
+      ],
+      "synonyms": [
+        "tax register",
+        "gst register",
+        "vat register",
+        "tax summary lines"
+      ],
+      "defaultAggregateMetrics": [
+        "taxable_amount",
+        "tax_amount"
+      ],
+      "defaultDetailColumns": [
+        "tax_domain",
+        "tax_invoice_date",
+        "tax_invoice_no",
+        "tax_party_name",
+        "tax_product_name",
+        "tax_hsn_code",
+        "taxable_amount_column",
+        "tax_rate_column",
+        "tax_amount_column",
+        "tax_net_amount"
+      ],
+      "displayColumns": [
+        "tax_domain",
+        "tax_invoice_date",
+        "tax_invoice_no",
+        "tax_party_name",
+        "tax_product_name",
+        "tax_hsn_code",
+        "taxable_amount_column",
+        "tax_rate_column",
+        "tax_amount_column",
+        "tax_net_amount"
+      ]
+    },
+    {
+      "datasetId": "ledger_entries",
+      "viewName": "vw_ai_ledger_entries",
+      "domain": "accounting",
+      "grain": "ledger_line",
+      "description": "Core GL journal lines and Marg party ledger postings",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [],
+      "dateFields": [
+        {
+          "fieldId": "entry_date",
+          "column": "entry_date",
+          "default": true
+        }
+      ],
+      "supportedReportIds": [
+        "trial-balance",
+        "account-ledger",
+        "financial-party-ledger",
+        "gl-accounts-list",
+        "journal-entries-list"
+      ],
+      "synonyms": [
+        "ledger entries",
+        "general ledger",
+        "account ledger",
+        "journal lines",
+        "trial balance lines"
+      ],
+      "defaultAggregateMetrics": [
+        "ledger_debit",
+        "ledger_credit",
+        "ledger_balance"
+      ],
+      "defaultDetailColumns": [
+        "ledger_entry_date_column",
+        "ledger_voucher_no",
+        "ledger_account_name",
+        "ledger_party_name",
+        "ledger_debit_amount",
+        "ledger_credit_amount",
+        "ledger_signed_amount",
+        "ledger_source"
+      ],
+      "displayColumns": [
+        "ledger_entry_date_column",
+        "ledger_voucher_no",
+        "ledger_account_name",
+        "ledger_party_name",
+        "ledger_debit_amount",
+        "ledger_credit_amount",
+        "ledger_signed_amount",
+        "ledger_source"
+      ]
+    }
+  ],
+  "metrics": [
+    {
+      "metricId": "sold_quantity",
+      "displayName": "Sold Quantity",
+      "datasetId": "sales_items",
+      "expression": "SUM(quantity)",
+      "aggregation": "sum",
+      "dataType": "number",
+      "synonyms": [
+        "sold qty",
+        "sales quantity",
+        "most selling",
+        "fast moving",
+        "moving item",
+        "top item by quantity"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Uses sales item quantity from approved sales item view",
+        "Returns are included according to production status logic unless template filters exclude them"
+      ]
+    },
+    {
+      "metricId": "net_sales",
+      "displayName": "Net Sales",
+      "datasetId": "sales_items",
+      "expression": "SUM(net_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "sales value",
+        "net amount",
+        "net sale",
+        "turnover",
+        "highest sales"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Line net equals absolute line amount plus absolute tax amount"
+      ]
+    },
+    {
+      "metricId": "sales_contribution_pct",
+      "displayName": "Sales Contribution Percentage",
+      "datasetId": "sales_items",
+      "expression": "CASE WHEN SUM(SUM(quantity)) OVER () > 0 THEN (SUM(quantity) / SUM(SUM(quantity)) OVER () * 100)::float8 ELSE 0 END",
+      "aggregation": "window_ratio",
+      "dataType": "percentage",
+      "synonyms": [
+        "conversion percentage",
+        "contribution percentage",
+        "sales contribution",
+        "item contribution",
+        "share percentage",
+        "sales share"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "For top sold items, conversion percentage means the product's percentage contribution to total sold quantity in the filtered result set, matching existing item contribution report semantics"
+      ]
+    },
+    {
+      "metricId": "gross_sales",
+      "displayName": "Gross Sales",
+      "datasetId": "sales_items",
+      "expression": "SUM(gross_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "gross amount",
+        "gross sale",
+        "billing gross"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Gross amount equals ABS(quantity) multiplied by rate"
+      ]
+    },
+    {
+      "metricId": "sales_discount",
+      "displayName": "Sales Discount",
+      "datasetId": "sales_items",
+      "expression": "SUM(discount_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "discount",
+        "discount amount",
+        "sales discount"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Discount is gross amount less absolute line amount floored at zero"
+      ]
+    },
+    {
+      "metricId": "taxable_sales",
+      "displayName": "Taxable Sales",
+      "datasetId": "sales_items",
+      "expression": "SUM(taxable_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "taxable",
+        "taxable amount",
+        "vatable sales",
+        "gst sales"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Taxable amount is line amount where tax rate is positive"
+      ]
+    },
+    {
+      "metricId": "non_taxable_sales",
+      "displayName": "Non Taxable Sales",
+      "datasetId": "sales_items",
+      "expression": "SUM(non_taxable_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "non taxable",
+        "non-taxable",
+        "tax exempt",
+        "zero tax sales"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Non-taxable amount is line amount where tax rate is zero"
+      ]
+    },
+    {
+      "metricId": "sales_tax",
+      "displayName": "Sales Tax",
+      "datasetId": "sales_items",
+      "expression": "SUM(tax_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "vat",
+        "gst",
+        "tax amount",
+        "output tax"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Tax amount uses ABS(gst_amount)"
+      ]
+    },
+    {
+      "metricId": "sales_profit",
+      "displayName": "Sales Profit",
+      "datasetId": "sales_items",
+      "expression": "SUM(profit_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "profit",
+        "gross profit",
+        "margin value"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Cost fallback follows Marg stock purchase rate, last purchase rate, then product standard cost"
+      ]
+    },
+    {
+      "metricId": "sales_invoice_count",
+      "displayName": "Sales Invoice Count",
+      "datasetId": "sales_invoices",
+      "expression": "COUNT(DISTINCT invoice_id)",
+      "aggregation": "count_distinct",
+      "dataType": "number",
+      "synonyms": [
+        "invoice count",
+        "bill count",
+        "number of bills"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Invoice-level dataset has one row per invoice"
+      ]
+    },
+    {
+      "metricId": "sales_item_invoice_count",
+      "displayName": "Sales Invoice Count",
+      "datasetId": "sales_items",
+      "expression": "COUNT(DISTINCT invoice_id)",
+      "aggregation": "count_distinct",
+      "dataType": "number",
+      "synonyms": [
+        "invoice count",
+        "bill count",
+        "number of bills",
+        "customers purchasing product bill count"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Counts distinct sales invoices from the item-level sales dataset so product filters are preserved"
+      ]
+    },
+    {
+      "metricId": "invoice_net_sales",
+      "displayName": "Invoice Net Sales",
+      "datasetId": "sales_invoices",
+      "expression": "SUM(net_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "sales value",
+        "invoice net amount",
+        "bill amount",
+        "net sales"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Invoice net uses the approved invoice final amount when present, otherwise summed line net amount"
+      ]
+    },
+    {
+      "metricId": "invoice_gross_sales",
+      "displayName": "Invoice Gross Sales",
+      "datasetId": "sales_invoices",
+      "expression": "SUM(gross_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "invoice gross",
+        "bill gross",
+        "gross sales"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Gross amount is rolled up from item lines"
+      ]
+    },
+    {
+      "metricId": "invoice_sales_tax",
+      "displayName": "Invoice Sales Tax",
+      "datasetId": "sales_invoices",
+      "expression": "SUM(tax_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "invoice tax",
+        "bill vat",
+        "bill gst",
+        "sales tax"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Tax amount is rolled up from item lines"
+      ]
+    },
+    {
+      "metricId": "purchase_quantity",
+      "displayName": "Purchase Quantity",
+      "datasetId": "purchase_items",
+      "expression": "SUM(quantity)",
+      "aggregation": "sum",
+      "dataType": "number",
+      "synonyms": [
+        "purchased qty",
+        "purchase item quantity",
+        "most purchasing",
+        "most purchased item"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Uses purchase item quantity from approved purchase item view"
+      ]
+    },
+    {
+      "metricId": "net_purchase",
+      "displayName": "Net Purchase",
+      "datasetId": "purchase_items",
+      "expression": "SUM(net_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "purchase value",
+        "purchase amount",
+        "net purchase amount"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Line net equals absolute line amount plus absolute tax amount"
+      ]
+    },
+    {
+      "metricId": "purchase_tax",
+      "displayName": "Purchase Tax",
+      "datasetId": "purchase_items",
+      "expression": "SUM(tax_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "input tax",
+        "purchase vat",
+        "purchase gst"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Tax amount uses ABS(gst_amount)"
+      ]
+    },
+    {
+      "metricId": "purchase_invoice_count",
+      "displayName": "Purchase Invoice Count",
+      "datasetId": "purchase_invoices",
+      "expression": "COUNT(DISTINCT invoice_id)",
+      "aggregation": "count_distinct",
+      "dataType": "number",
+      "synonyms": [
+        "purchase bill count",
+        "supplier bill count"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Invoice-level dataset has one row per purchase invoice"
+      ]
+    },
+    {
+      "metricId": "invoice_net_purchase",
+      "displayName": "Invoice Net Purchase",
+      "datasetId": "purchase_invoices",
+      "expression": "SUM(net_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "purchase value",
+        "purchase bill amount",
+        "supplier bill amount",
+        "net purchase"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Invoice net uses the approved invoice final amount when present, otherwise summed line net amount"
+      ]
+    },
+    {
+      "metricId": "invoice_purchase_tax",
+      "displayName": "Invoice Purchase Tax",
+      "datasetId": "purchase_invoices",
+      "expression": "SUM(tax_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "purchase tax",
+        "input tax",
+        "purchase vat",
+        "purchase gst"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Tax amount is rolled up from purchase item lines"
+      ]
+    },
+    {
+      "metricId": "current_stock",
+      "displayName": "Current Stock",
+      "datasetId": "stock_summary",
+      "expression": "SUM(current_stock)",
+      "aggregation": "sum",
+      "dataType": "number",
+      "synonyms": [
+        "stock",
+        "on hand",
+        "stock qty",
+        "inventory quantity"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Uses the approved current on-hand stock quantity"
+      ]
+    },
+    {
+      "metricId": "available_stock",
+      "displayName": "Available Stock",
+      "datasetId": "stock_summary",
+      "expression": "SUM(available_stock)",
+      "aggregation": "sum",
+      "dataType": "number",
+      "synonyms": [
+        "available qty",
+        "available inventory",
+        "free stock"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Uses the approved available stock quantity"
+      ]
+    },
+    {
+      "metricId": "stock_value",
+      "displayName": "Stock Value",
+      "datasetId": "stock_summary",
+      "expression": "SUM(stock_value)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "inventory value",
+        "stock amount",
+        "closing stock value"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Uses the approved stock valuation amount"
+      ]
+    },
+    {
+      "metricId": "low_stock_item_count",
+      "displayName": "Low Stock Item Count",
+      "datasetId": "stock_summary",
+      "expression": "COUNT(DISTINCT product_id)",
+      "aggregation": "count_distinct",
+      "dataType": "number",
+      "synonyms": [
+        "low stock count",
+        "below minimum count",
+        "reorder count"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Use with filter stock_status IN BELOW_MINIMUM, BELOW_REORDER, NEGATIVE"
+      ]
+    },
+    {
+      "metricId": "batch_stock",
+      "displayName": "Batch Stock",
+      "datasetId": "stock_batches",
+      "expression": "SUM(current_stock)",
+      "aggregation": "sum",
+      "dataType": "number",
+      "synonyms": [
+        "batch stock",
+        "batch quantity",
+        "expiry stock"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Default dataset filter keeps reportable non-consumed/non-recalled non-zero batches"
+      ]
+    },
+    {
+      "metricId": "expired_stock_value",
+      "displayName": "Expired Stock Value",
+      "datasetId": "stock_batches",
+      "expression": "SUM(stock_value)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "expiry loss",
+        "expired value",
+        "expired stock amount"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Use with expiry_date before current date"
+      ]
+    },
+    {
+      "metricId": "movement_quantity",
+      "displayName": "Movement Quantity",
+      "datasetId": "stock_ledger",
+      "expression": "SUM(quantity)",
+      "aggregation": "sum",
+      "dataType": "number",
+      "synonyms": [
+        "movement qty",
+        "stock movement",
+        "ledger quantity"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Uses signed inventory ledger quantity"
+      ]
+    },
+    {
+      "metricId": "movement_value",
+      "displayName": "Movement Value",
+      "datasetId": "stock_ledger",
+      "expression": "SUM(total_cost)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "movement amount",
+        "ledger value",
+        "inventory movement value"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Uses inventory ledger total cost"
+      ]
+    },
+    {
+      "metricId": "customer_outstanding",
+      "displayName": "Customer Outstanding",
+      "datasetId": "party_outstanding",
+      "expression": "SUM(outstanding_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "receivable",
+        "customer due",
+        "debtors",
+        "amount receivable"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Use party_type = CUSTOMER and is_open = true"
+      ]
+    },
+    {
+      "metricId": "supplier_outstanding",
+      "displayName": "Supplier Outstanding",
+      "datasetId": "party_outstanding",
+      "expression": "SUM(outstanding_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "payable",
+        "supplier due",
+        "creditors",
+        "amount payable"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Use party_type = SUPPLIER and is_open = true"
+      ]
+    },
+    {
+      "metricId": "outstanding_invoice_count",
+      "displayName": "Outstanding Invoice Count",
+      "datasetId": "party_outstanding",
+      "expression": "COUNT(*)",
+      "aggregation": "count",
+      "dataType": "number",
+      "synonyms": [
+        "open bill count",
+        "due bill count",
+        "outstanding bill count"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Default dataset filter keeps open invoices"
+      ]
+    },
+    {
+      "metricId": "taxable_amount",
+      "displayName": "Taxable Amount",
+      "datasetId": "tax_register",
+      "expression": "SUM(taxable_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "taxable",
+        "taxable value",
+        "vatable",
+        "gst taxable"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Uses approved tax register derived from item views"
+      ]
+    },
+    {
+      "metricId": "tax_amount",
+      "displayName": "Tax Amount",
+      "datasetId": "tax_register",
+      "expression": "SUM(tax_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "vat",
+        "gst",
+        "tax",
+        "tax collected",
+        "input tax",
+        "output tax"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "PAN/VAT/GST identifiers require tax or detailed-report authorization"
+      ]
+    },
+    {
+      "metricId": "ledger_debit",
+      "displayName": "Ledger Debit",
+      "datasetId": "ledger_entries",
+      "expression": "SUM(debit_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "debit",
+        "dr",
+        "debit amount"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Trial balance must filter ledger_source = CORE_GL and status = POSTED"
+      ]
+    },
+    {
+      "metricId": "ledger_credit",
+      "displayName": "Ledger Credit",
+      "datasetId": "ledger_entries",
+      "expression": "SUM(credit_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "credit",
+        "cr",
+        "credit amount"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Trial balance must filter ledger_source = CORE_GL and status = POSTED"
+      ]
+    },
+    {
+      "metricId": "ledger_balance",
+      "displayName": "Ledger Balance",
+      "datasetId": "ledger_entries",
+      "expression": "SUM(signed_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "balance",
+        "net balance",
+        "closing balance"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Core GL signed amount is debit minus credit; Marg party ledger signed amount follows Marg convention"
+      ]
+    },
+    {
+      "metricId": "purchase_value",
+      "displayName": "Purchase Value",
+      "datasetId": "purchase_items",
+      "expression": "SUM(net_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "purchase value",
+        "purchase amount",
+        "net purchase value"
+      ],
+      "defaultSortDirection": "desc"
+    },
+    {
+      "metricId": "stock_quantity",
+      "displayName": "Stock Quantity",
+      "datasetId": "stock_summary",
+      "expression": "SUM(current_stock)",
+      "aggregation": "sum",
+      "dataType": "quantity",
+      "synonyms": [
+        "stock quantity",
+        "stock qty",
+        "current stock quantity"
+      ],
+      "defaultSortDirection": "desc"
+    },
+    {
+      "metricId": "outstanding_amount",
+      "displayName": "Outstanding Amount",
+      "datasetId": "party_outstanding",
+      "expression": "SUM(outstanding_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "outstanding amount",
+        "balance outstanding",
+        "open amount"
+      ],
+      "defaultSortDirection": "desc"
+    }
+  ],
+  "dimensions": [
+    {
+      "dimensionId": "sales_product",
+      "displayName": "Product",
+      "datasetId": "sales_items",
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "labelColumn": "product_name",
+      "fallbackLabelColumn": "product_code",
+      "synonyms": [
+        "item",
+        "product",
+        "sku",
+        "medicine",
+        "goods"
+      ]
+    },
+    {
+      "dimensionId": "sales_item_customer",
+      "displayName": "Customer",
+      "datasetId": "sales_items",
+      "columns": [
+        "customer_id",
+        "customer_code",
+        "customer_name"
+      ],
+      "labelColumn": "customer_name",
+      "synonyms": [
+        "customer",
+        "party",
+        "buyer",
+        "client",
+        "customer purchasing item",
+        "customer buying product"
+      ]
+    },
+    {
+      "dimensionId": "sales_item_salesman",
+      "displayName": "Salesman",
+      "datasetId": "sales_items",
+      "columns": [
+        "salesman_code",
+        "salesman_name"
+      ],
+      "labelColumn": "salesman_name",
+      "synonyms": [
+        "salesman",
+        "sales person",
+        "mr",
+        "user",
+        "salesman wise item"
+      ]
+    },
+    {
+      "dimensionId": "sales_item_invoice",
+      "displayName": "Sales Invoice",
+      "datasetId": "sales_items",
+      "columns": [
+        "invoice_id",
+        "invoice_no",
+        "invoice_date"
+      ],
+      "labelColumn": "invoice_no",
+      "synonyms": [
+        "invoice",
+        "bill",
+        "bill wise item",
+        "invoice wise item"
+      ]
+    },
+    {
+      "dimensionId": "sales_item_branch",
+      "displayName": "Branch",
+      "datasetId": "sales_items",
+      "columns": [
+        "branch_id",
+        "branch_code",
+        "branch_name"
+      ],
+      "labelColumn": "branch_name",
+      "synonyms": [
+        "branch",
+        "warehouse",
+        "location",
+        "store"
+      ]
+    },
+    {
+      "dimensionId": "sales_customer",
+      "displayName": "Customer",
+      "datasetId": "sales_invoices",
+      "columns": [
+        "customer_id",
+        "customer_code",
+        "customer_name"
+      ],
+      "labelColumn": "customer_name",
+      "synonyms": [
+        "customer",
+        "party",
+        "buyer",
+        "client"
+      ]
+    },
+    {
+      "dimensionId": "sales_salesman",
+      "displayName": "Salesman",
+      "datasetId": "sales_invoices",
+      "columns": [
+        "salesman_code",
+        "salesman_name"
+      ],
+      "labelColumn": "salesman_name",
+      "synonyms": [
+        "salesman",
+        "sales person",
+        "mr",
+        "user",
+        "salesman wise"
+      ]
+    },
+    {
+      "dimensionId": "sales_invoice",
+      "displayName": "Sales Invoice",
+      "datasetId": "sales_invoices",
+      "columns": [
+        "invoice_id",
+        "invoice_no",
+        "invoice_date"
+      ],
+      "labelColumn": "invoice_no",
+      "synonyms": [
+        "invoice",
+        "bill",
+        "bill wise",
+        "invoice wise"
+      ]
+    },
+    {
+      "dimensionId": "sales_branch",
+      "displayName": "Branch",
+      "datasetId": "sales_invoices",
+      "columns": [
+        "branch_id",
+        "branch_code",
+        "branch_name"
+      ],
+      "labelColumn": "branch_name",
+      "synonyms": [
+        "branch",
+        "warehouse",
+        "location",
+        "store"
+      ]
+    },
+    {
+      "dimensionId": "sales_product_group",
+      "displayName": "Product Group",
+      "datasetId": "sales_items",
+      "columns": [
+        "product_group"
+      ],
+      "labelColumn": "product_group",
+      "synonyms": [
+        "group",
+        "category",
+        "product group"
+      ]
+    },
+    {
+      "dimensionId": "sales_company",
+      "displayName": "Manufacturer",
+      "datasetId": "sales_items",
+      "columns": [
+        "product_company",
+        "product_company_name"
+      ],
+      "labelColumn": "product_company_name",
+      "synonyms": [
+        "company",
+        "manufacturer",
+        "brand",
+        "mfg"
+      ]
+    },
+    {
+      "dimensionId": "sales_salt",
+      "displayName": "Salt",
+      "datasetId": "sales_items",
+      "columns": [
+        "salt",
+        "salt_name"
+      ],
+      "labelColumn": "salt_name",
+      "synonyms": [
+        "salt",
+        "composition"
+      ]
+    },
+    {
+      "dimensionId": "purchase_product",
+      "displayName": "Product",
+      "datasetId": "purchase_items",
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "labelColumn": "product_name",
+      "fallbackLabelColumn": "product_code",
+      "synonyms": [
+        "purchase item",
+        "item",
+        "product",
+        "sku",
+        "medicine"
+      ]
+    },
+    {
+      "dimensionId": "purchase_supplier",
+      "displayName": "Supplier",
+      "datasetId": "purchase_invoices",
+      "columns": [
+        "supplier_id",
+        "supplier_code",
+        "supplier_name"
+      ],
+      "labelColumn": "supplier_name",
+      "synonyms": [
+        "supplier",
+        "vendor",
+        "party",
+        "creditor"
+      ]
+    },
+    {
+      "dimensionId": "purchase_invoice",
+      "displayName": "Purchase Invoice",
+      "datasetId": "purchase_invoices",
+      "columns": [
+        "invoice_id",
+        "invoice_no",
+        "invoice_date"
+      ],
+      "labelColumn": "invoice_no",
+      "synonyms": [
+        "purchase bill",
+        "supplier bill",
+        "bill wise",
+        "invoice wise"
+      ]
+    },
+    {
+      "dimensionId": "stock_product",
+      "displayName": "Product",
+      "datasetId": "stock_summary",
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "labelColumn": "product_name",
+      "fallbackLabelColumn": "product_code",
+      "synonyms": [
+        "stock item",
+        "item",
+        "product",
+        "sku"
+      ]
+    },
+    {
+      "dimensionId": "stock_warehouse",
+      "displayName": "Warehouse",
+      "datasetId": "stock_summary",
+      "columns": [
+        "warehouse_id",
+        "warehouse_code",
+        "warehouse_name"
+      ],
+      "labelColumn": "warehouse_name",
+      "synonyms": [
+        "warehouse",
+        "branch",
+        "location",
+        "store"
+      ]
+    },
+    {
+      "dimensionId": "batch_product",
+      "displayName": "Batch Product",
+      "datasetId": "stock_batches",
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "labelColumn": "product_name",
+      "fallbackLabelColumn": "product_code",
+      "synonyms": [
+        "batch item",
+        "expiry item",
+        "product",
+        "sku"
+      ]
+    },
+    {
+      "dimensionId": "batch_warehouse",
+      "displayName": "Batch Warehouse",
+      "datasetId": "stock_batches",
+      "columns": [
+        "warehouse_id",
+        "warehouse_code",
+        "warehouse_name"
+      ],
+      "labelColumn": "warehouse_name",
+      "synonyms": [
+        "batch warehouse",
+        "branch",
+        "location",
+        "store"
+      ]
+    },
+    {
+      "dimensionId": "batch",
+      "displayName": "Batch",
+      "datasetId": "stock_batches",
+      "columns": [
+        "batch_id",
+        "batch_no"
+      ],
+      "labelColumn": "batch_no",
+      "synonyms": [
+        "batch",
+        "lot",
+        "batch no",
+        "batch number"
+      ]
+    },
+    {
+      "dimensionId": "batch_expiry",
+      "displayName": "Expiry Date",
+      "datasetId": "stock_batches",
+      "columns": [
+        "expiry_date",
+        "days_to_expiry"
+      ],
+      "labelColumn": "expiry_date",
+      "synonyms": [
+        "expiry",
+        "expiry date",
+        "expired",
+        "near expiry",
+        "fefo"
+      ]
+    },
+    {
+      "dimensionId": "ledger_product",
+      "displayName": "Ledger Product",
+      "datasetId": "stock_ledger",
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "labelColumn": "product_name",
+      "fallbackLabelColumn": "product_code",
+      "synonyms": [
+        "ledger item",
+        "movement item",
+        "product",
+        "sku"
+      ]
+    },
+    {
+      "dimensionId": "ledger_warehouse",
+      "displayName": "Ledger Warehouse",
+      "datasetId": "stock_ledger",
+      "columns": [
+        "warehouse_id",
+        "warehouse_code",
+        "warehouse_name"
+      ],
+      "labelColumn": "warehouse_name",
+      "synonyms": [
+        "ledger warehouse",
+        "branch",
+        "location",
+        "store"
+      ]
+    },
+    {
+      "dimensionId": "ledger_batch",
+      "displayName": "Ledger Batch",
+      "datasetId": "stock_ledger",
+      "columns": [
+        "batch_id",
+        "batch_no"
+      ],
+      "labelColumn": "batch_no",
+      "synonyms": [
+        "ledger batch",
+        "batch",
+        "lot"
+      ]
+    },
+    {
+      "dimensionId": "party",
+      "displayName": "Party",
+      "datasetId": "party_outstanding",
+      "columns": [
+        "party_type",
+        "party_code",
+        "party_name"
+      ],
+      "labelColumn": "party_name",
+      "synonyms": [
+        "party",
+        "customer",
+        "supplier",
+        "debtor",
+        "creditor"
+      ]
+    },
+    {
+      "dimensionId": "tax_rate",
+      "displayName": "Tax Rate",
+      "datasetId": "tax_register",
+      "columns": [
+        "tax_rate"
+      ],
+      "labelColumn": "tax_rate",
+      "synonyms": [
+        "tax rate",
+        "gst rate",
+        "vat rate",
+        "tax slab"
+      ]
+    },
+    {
+      "dimensionId": "tax_party",
+      "displayName": "Tax Party",
+      "datasetId": "tax_register",
+      "columns": [
+        "party_code",
+        "party_name"
+      ],
+      "labelColumn": "party_name",
+      "synonyms": [
+        "tax party",
+        "gst party",
+        "vat party",
+        "pan party"
+      ]
+    },
+    {
+      "dimensionId": "gl_account",
+      "displayName": "GL Account",
+      "datasetId": "ledger_entries",
+      "columns": [
+        "account_id",
+        "account_code",
+        "account_name",
+        "account_type"
+      ],
+      "labelColumn": "account_name",
+      "synonyms": [
+        "ledger",
+        "account",
+        "gl account",
+        "trial balance account"
+      ]
+    },
+    {
+      "dimensionId": "ledger_party",
+      "displayName": "Ledger Party",
+      "datasetId": "ledger_entries",
+      "columns": [
+        "party_code",
+        "party_name"
+      ],
+      "labelColumn": "party_name",
+      "synonyms": [
+        "party ledger",
+        "customer ledger",
+        "supplier ledger"
+      ]
+    },
+    {
+      "dimensionId": "month",
+      "displayName": "Month",
+      "datasetId": "*",
+      "columns": [
+        "default_time_field"
+      ],
+      "transform": "calendar_month",
+      "labelColumn": "month",
+      "synonyms": [
+        "month",
+        "monthly",
+        "month wise"
+      ]
+    },
+    {
+      "dimensionId": "date",
+      "displayName": "Date",
+      "datasetId": "*",
+      "columns": [
+        "default_time_field"
+      ],
+      "labelColumn": "date",
+      "synonyms": [
+        "date",
+        "day",
+        "daily",
+        "date wise"
+      ]
+    },
+    {
+      "dimensionId": "sales_item_category",
+      "displayName": "Category",
+      "datasetId": "sales_items",
+      "columns": [
+        "product_category"
+      ],
+      "labelColumn": "product_category",
+      "synonyms": [
+        "category",
+        "product category"
+      ]
+    },
+    {
+      "dimensionId": "sales_item_financial_year",
+      "displayName": "Financial Year",
+      "datasetId": "sales_items",
+      "columns": [
+        "financial_year"
+      ],
+      "labelColumn": "financial_year",
+      "synonyms": [
+        "financial year",
+        "fy"
+      ]
+    },
+    {
+      "dimensionId": "sales_financial_year",
+      "displayName": "Financial Year",
+      "datasetId": "sales_invoices",
+      "columns": [
+        "financial_year"
+      ],
+      "labelColumn": "financial_year",
+      "synonyms": [
+        "financial year",
+        "fy"
+      ]
+    },
+    {
+      "dimensionId": "purchase_item_supplier",
+      "displayName": "Supplier",
+      "datasetId": "purchase_items",
+      "columns": [
+        "supplier_id",
+        "supplier_code",
+        "supplier_name"
+      ],
+      "labelColumn": "supplier_name",
+      "synonyms": [
+        "supplier",
+        "vendor",
+        "party"
+      ]
+    },
+    {
+      "dimensionId": "purchase_item_category",
+      "displayName": "Category",
+      "datasetId": "purchase_items",
+      "columns": [
+        "product_category"
+      ],
+      "labelColumn": "product_category",
+      "synonyms": [
+        "category",
+        "product category"
+      ]
+    },
+    {
+      "dimensionId": "purchase_company",
+      "displayName": "Manufacturer",
+      "datasetId": "purchase_items",
+      "columns": [
+        "product_company",
+        "product_company_name"
+      ],
+      "labelColumn": "product_company_name",
+      "synonyms": [
+        "company",
+        "manufacturer",
+        "brand",
+        "mfg"
+      ]
+    },
+    {
+      "dimensionId": "purchase_salt",
+      "displayName": "Salt",
+      "datasetId": "purchase_items",
+      "columns": [
+        "salt",
+        "salt_name"
+      ],
+      "labelColumn": "salt_name",
+      "synonyms": [
+        "salt",
+        "composition"
+      ]
+    },
+    {
+      "dimensionId": "purchase_item_financial_year",
+      "displayName": "Financial Year",
+      "datasetId": "purchase_items",
+      "columns": [
+        "financial_year"
+      ],
+      "labelColumn": "financial_year",
+      "synonyms": [
+        "financial year",
+        "fy"
+      ]
+    },
+    {
+      "dimensionId": "purchase_financial_year",
+      "displayName": "Financial Year",
+      "datasetId": "purchase_invoices",
+      "columns": [
+        "financial_year"
+      ],
+      "labelColumn": "financial_year",
+      "synonyms": [
+        "financial year",
+        "fy"
+      ]
+    },
+    {
+      "dimensionId": "stock_category",
+      "displayName": "Category",
+      "datasetId": "stock_summary",
+      "columns": [
+        "product_category"
+      ],
+      "labelColumn": "product_category",
+      "synonyms": [
+        "category",
+        "product category"
+      ]
+    },
+    {
+      "dimensionId": "stock_company",
+      "displayName": "Manufacturer",
+      "datasetId": "stock_summary",
+      "columns": [
+        "product_company",
+        "product_company_name"
+      ],
+      "labelColumn": "product_company_name",
+      "synonyms": [
+        "company",
+        "manufacturer",
+        "brand",
+        "mfg"
+      ]
+    },
+    {
+      "dimensionId": "stock_salt",
+      "displayName": "Salt",
+      "datasetId": "stock_summary",
+      "columns": [
+        "salt",
+        "salt_name"
+      ],
+      "labelColumn": "salt_name",
+      "synonyms": [
+        "salt",
+        "composition"
+      ]
+    },
+    {
+      "dimensionId": "batch_category",
+      "displayName": "Category",
+      "datasetId": "stock_batches",
+      "columns": [
+        "product_category"
+      ],
+      "labelColumn": "product_category",
+      "synonyms": [
+        "category",
+        "product category"
+      ]
+    },
+    {
+      "dimensionId": "batch_company",
+      "displayName": "Manufacturer",
+      "datasetId": "stock_batches",
+      "columns": [
+        "product_company"
+      ],
+      "labelColumn": "product_company",
+      "synonyms": [
+        "company",
+        "manufacturer",
+        "brand",
+        "mfg"
+      ]
+    },
+    {
+      "dimensionId": "batch_salt",
+      "displayName": "Salt",
+      "datasetId": "stock_batches",
+      "columns": [
+        "salt"
+      ],
+      "labelColumn": "salt",
+      "synonyms": [
+        "salt",
+        "composition"
+      ]
+    },
+    {
+      "dimensionId": "outstanding_group",
+      "displayName": "Outstanding Group",
+      "datasetId": "party_outstanding",
+      "columns": [
+        "group_code",
+        "group_name"
+      ],
+      "labelColumn": "group_name",
+      "synonyms": [
+        "group",
+        "account group"
+      ]
+    },
+    {
+      "dimensionId": "tax_domain",
+      "displayName": "Tax Domain",
+      "datasetId": "tax_register",
+      "columns": [
+        "tax_domain"
+      ],
+      "labelColumn": "tax_domain",
+      "synonyms": [
+        "sales tax",
+        "purchase tax",
+        "tax domain"
+      ]
+    },
+    {
+      "dimensionId": "tax_product",
+      "displayName": "Tax Product",
+      "datasetId": "tax_register",
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "labelColumn": "product_name",
+      "fallbackLabelColumn": "product_code",
+      "synonyms": [
+        "tax item",
+        "product",
+        "sku"
+      ]
+    },
+    {
+      "dimensionId": "tax_financial_year",
+      "displayName": "Financial Year",
+      "datasetId": "tax_register",
+      "columns": [
+        "financial_year"
+      ],
+      "labelColumn": "financial_year",
+      "synonyms": [
+        "financial year",
+        "fy"
+      ]
+    },
+    {
+      "dimensionId": "ledger_source",
+      "displayName": "Ledger Source",
+      "datasetId": "ledger_entries",
+      "columns": [
+        "ledger_source"
+      ],
+      "labelColumn": "ledger_source",
+      "synonyms": [
+        "source",
+        "ledger source"
+      ]
+    }
+  ],
+  "filters": [
+    {
+      "filterId": "tenant_scope",
+      "displayName": "Tenant Scope",
+      "datasetIds": [
+        "*"
+      ],
+      "column": "tenant_id",
+      "operators": [
+        "="
+      ],
+      "required": true,
+      "securityFilter": true,
+      "valueSource": "authenticated_user.tenant_id"
+    },
+    {
+      "filterId": "company_scope",
+      "displayName": "Company Scope",
+      "datasetIds": [
+        "sales_items",
+        "sales_invoices",
+        "purchase_items",
+        "purchase_invoices",
+        "party_outstanding",
+        "tax_register",
+        "ledger_entries"
+      ],
+      "column": "company_id",
+      "operators": [
+        "=",
+        "IN"
+      ],
+      "requiredWhenAvailable": true,
+      "securityFilter": true,
+      "valueSource": "user_allowed_companies"
+    },
+    {
+      "filterId": "branch_scope",
+      "displayName": "Branch Scope",
+      "datasetIds": [
+        "sales_items",
+        "sales_invoices",
+        "purchase_items",
+        "purchase_invoices",
+        "party_outstanding",
+        "tax_register"
+      ],
+      "column": "branch_id",
+      "operators": [
+        "=",
+        "IN"
+      ],
+      "requiredWhenScoped": true,
+      "securityFilter": true,
+      "valueSource": "user_allowed_branches"
+    },
+    {
+      "filterId": "warehouse_scope",
+      "displayName": "Warehouse Scope",
+      "datasetIds": [
+        "stock_summary",
+        "stock_batches",
+        "stock_ledger"
+      ],
+      "column": "warehouse_id",
+      "operators": [
+        "=",
+        "IN"
+      ],
+      "requiredWhenScoped": true,
+      "securityFilter": true,
+      "valueSource": "user_allowed_locations"
+    },
+    {
+      "filterId": "date_range",
+      "displayName": "Date Range",
+      "datasetIds": [
+        "*"
+      ],
+      "column": "default_time_field",
+      "operators": [
+        ">=",
+        "<=",
+        "BETWEEN"
+      ],
+      "required": false,
+      "securityFilter": false,
+      "defaultAssumptionId": "default_current_financial_year"
+    },
+    {
+      "filterId": "status",
+      "displayName": "Status",
+      "datasetIds": [
+        "sales_items",
+        "sales_invoices",
+        "purchase_items",
+        "purchase_invoices",
+        "ledger_entries"
+      ],
+      "column": "status",
+      "operators": [
+        "=",
+        "IN",
+        "!="
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "exclude_cancelled",
+      "displayName": "Exclude Cancelled",
+      "datasetIds": [
+        "sales_items",
+        "sales_invoices",
+        "purchase_items",
+        "purchase_invoices"
+      ],
+      "column": "is_cancelled",
+      "operators": [
+        "IS DISTINCT FROM"
+      ],
+      "defaultValue": true,
+      "securityFilter": false
+    },
+    {
+      "filterId": "product_filter",
+      "displayName": "Product Filter",
+      "datasetIds": [
+        "sales_items",
+        "purchase_items",
+        "stock_summary",
+        "stock_batches",
+        "stock_ledger",
+        "tax_register"
+      ],
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        "ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "customer_filter",
+      "displayName": "Customer Filter",
+      "datasetIds": [
+        "sales_items",
+        "sales_invoices"
+      ],
+      "columns": [
+        "customer_code",
+        "customer_name"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        "ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "supplier_filter",
+      "displayName": "Supplier Filter",
+      "datasetIds": [
+        "purchase_items",
+        "purchase_invoices"
+      ],
+      "columns": [
+        "supplier_code",
+        "supplier_name"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        "ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "salesman_filter",
+      "displayName": "Salesman Filter",
+      "datasetIds": [
+        "sales_items",
+        "sales_invoices"
+      ],
+      "columns": [
+        "salesman_code",
+        "salesman_name"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        "ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "tax_filter",
+      "displayName": "Tax Filter",
+      "datasetIds": [
+        "sales_items",
+        "purchase_items",
+        "tax_register"
+      ],
+      "columns": [
+        "tax_rate",
+        "tax_domain"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        ">",
+        "<"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "low_stock_filter",
+      "displayName": "Low Stock Filter",
+      "datasetIds": [
+        "stock_summary"
+      ],
+      "column": "stock_status",
+      "operators": [
+        "=",
+        "IN"
+      ],
+      "allowedValues": [
+        "BELOW_MINIMUM",
+        "BELOW_REORDER",
+        "NEGATIVE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "expiry_filter",
+      "displayName": "Expiry Filter",
+      "datasetIds": [
+        "stock_batches"
+      ],
+      "columns": [
+        "expiry_date",
+        "days_to_expiry"
+      ],
+      "operators": [
+        "<",
+        "<=",
+        ">",
+        ">=",
+        "BETWEEN"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "party_type_filter",
+      "displayName": "Party Type",
+      "datasetIds": [
+        "party_outstanding"
+      ],
+      "column": "party_type",
+      "operators": [
+        "=",
+        "IN"
+      ],
+      "allowedValues": [
+        "CUSTOMER",
+        "SUPPLIER",
+        "OTHER"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "ledger_source_filter",
+      "displayName": "Ledger Source",
+      "datasetIds": [
+        "ledger_entries"
+      ],
+      "column": "ledger_source",
+      "operators": [
+        "=",
+        "IN"
+      ],
+      "allowedValues": [
+        "CORE_GL",
+        "MARG_PARTY_LEDGER"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "category_filter",
+      "displayName": "Category Filter",
+      "datasetIds": [
+        "sales_items",
+        "purchase_items",
+        "stock_summary",
+        "stock_batches"
+      ],
+      "columns": [
+        "product_category"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        "ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "manufacturer_filter",
+      "displayName": "Manufacturer Filter",
+      "datasetIds": [
+        "sales_items",
+        "purchase_items",
+        "stock_summary",
+        "stock_batches"
+      ],
+      "columns": [
+        "product_company"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        "ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "salt_filter",
+      "displayName": "Salt Filter",
+      "datasetIds": [
+        "sales_items",
+        "purchase_items",
+        "stock_summary",
+        "stock_batches"
+      ],
+      "columns": [
+        "salt"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        "ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "invoice_filter",
+      "displayName": "Invoice Filter",
+      "datasetIds": [
+        "sales_items",
+        "sales_invoices",
+        "purchase_items",
+        "purchase_invoices",
+        "tax_register"
+      ],
+      "columns": [
+        "invoice_id",
+        "invoice_no"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        "ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "batch_filter",
+      "displayName": "Batch Filter",
+      "datasetIds": [
+        "sales_items",
+        "purchase_items",
+        "stock_summary",
+        "stock_batches",
+        "stock_ledger"
+      ],
+      "columns": [
+        "batch_no"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        "ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "amount_filter",
+      "displayName": "Amount Filter",
+      "datasetIds": [
+        "sales_items",
+        "sales_invoices",
+        "purchase_items",
+        "purchase_invoices",
+        "tax_register"
+      ],
+      "columns": [
+        "taxable_amount",
+        "non_taxable_amount",
+        "tax_amount",
+        "net_amount"
+      ],
+      "operators": [
+        "=",
+        ">",
+        ">=",
+        "<",
+        "<=",
+        "BETWEEN"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "quantity_filter",
+      "displayName": "Quantity Filter",
+      "datasetIds": [
+        "sales_items",
+        "sales_invoices",
+        "purchase_items",
+        "purchase_invoices",
+        "stock_ledger"
+      ],
+      "column": "quantity",
+      "operators": [
+        "=",
+        ">",
+        ">=",
+        "<",
+        "<=",
+        "BETWEEN"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "stock_quantity_filter",
+      "displayName": "Stock Quantity Filter",
+      "datasetIds": [
+        "stock_summary",
+        "stock_batches"
+      ],
+      "columns": [
+        "current_stock",
+        "available_stock"
+      ],
+      "operators": [
+        "=",
+        ">",
+        ">=",
+        "<",
+        "<=",
+        "BETWEEN"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "outstanding_amount_filter",
+      "displayName": "Outstanding Amount Filter",
+      "datasetIds": [
+        "party_outstanding"
+      ],
+      "column": "outstanding_amount",
+      "operators": [
+        "=",
+        ">",
+        ">=",
+        "<",
+        "<=",
+        "BETWEEN"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "party_filter",
+      "displayName": "Party Filter",
+      "datasetIds": [
+        "party_outstanding",
+        "tax_register",
+        "ledger_entries"
+      ],
+      "columns": [
+        "party_code",
+        "party_name"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        "ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "account_filter",
+      "displayName": "Account Filter",
+      "datasetIds": [
+        "ledger_entries"
+      ],
+      "columns": [
+        "account_id",
+        "account_code",
+        "account_name"
+      ],
+      "operators": [
+        "=",
+        "IN",
+        "ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    }
+  ],
+  "timeFields": [
+    {
+      "fieldId": "sales_invoice_date",
+      "datasetId": "sales_items",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "sales date",
+        "invoice date",
+        "bill date"
+      ]
+    },
+    {
+      "fieldId": "sales_bill_date",
+      "datasetId": "sales_invoices",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "sales bill date",
+        "invoice date",
+        "bill date"
+      ]
+    },
+    {
+      "fieldId": "purchase_invoice_date",
+      "datasetId": "purchase_items",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "purchase date",
+        "purchase invoice date",
+        "supplier bill date"
+      ]
+    },
+    {
+      "fieldId": "purchase_bill_date",
+      "datasetId": "purchase_invoices",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "purchase bill date",
+        "supplier bill date"
+      ]
+    },
+    {
+      "fieldId": "stock_last_updated",
+      "datasetId": "stock_summary",
+      "column": "last_updated_at",
+      "default": false,
+      "synonyms": [
+        "stock updated",
+        "last updated"
+      ]
+    },
+    {
+      "fieldId": "batch_expiry_date",
+      "datasetId": "stock_batches",
+      "column": "expiry_date",
+      "default": true,
+      "synonyms": [
+        "expiry",
+        "expiry date",
+        "expired date"
+      ]
+    },
+    {
+      "fieldId": "stock_transaction_date",
+      "datasetId": "stock_ledger",
+      "column": "transaction_date",
+      "default": true,
+      "synonyms": [
+        "movement date",
+        "transaction date",
+        "ledger date"
+      ]
+    },
+    {
+      "fieldId": "outstanding_invoice_date",
+      "datasetId": "party_outstanding",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "due bill date",
+        "invoice date",
+        "outstanding date"
+      ]
+    },
+    {
+      "fieldId": "tax_invoice_date",
+      "datasetId": "tax_register",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "tax date",
+        "invoice date",
+        "bill date"
+      ]
+    },
+    {
+      "fieldId": "ledger_entry_date",
+      "datasetId": "ledger_entries",
+      "column": "entry_date",
+      "default": true,
+      "synonyms": [
+        "ledger date",
+        "entry date",
+        "posting date"
+      ]
+    }
+  ],
+  "synonyms": [
+    {
+      "term": "most selling product",
+      "mapsTo": {
+        "templateId": "top_selling_products",
+        "metricId": "sold_quantity"
+      },
+      "ambiguityRuleId": "most_selling_quantity_default"
+    },
+    {
+      "term": "highest selling item",
+      "mapsTo": {
+        "templateId": "top_selling_products",
+        "metricId": "sold_quantity"
+      }
+    },
+    {
+      "term": "highest sales product",
+      "mapsTo": {
+        "templateId": "top_sales_value_products",
+        "metricId": "net_sales"
+      },
+      "ambiguityRuleId": "highest_sales_value_default"
+    },
+    {
+      "term": "fast moving item",
+      "mapsTo": {
+        "templateId": "top_selling_products",
+        "metricId": "sold_quantity"
+      }
+    },
+    {
+      "term": "top item",
+      "mapsTo": {
+        "templateId": "top_selling_products"
+      }
+    },
+    {
+      "term": "conversion percentage",
+      "mapsTo": {
+        "metricId": "sales_contribution_pct"
+      },
+      "ambiguityRuleId": "conversion_percentage_sales_contribution_default"
+    },
+    {
+      "term": "contribution percentage",
+      "mapsTo": {
+        "metricId": "sales_contribution_pct"
+      }
+    },
+    {
+      "term": "purchase item",
+      "mapsTo": {
+        "datasetId": "purchase_items",
+        "dimensionId": "purchase_product"
+      }
+    },
+    {
+      "term": "most purchasing item",
+      "mapsTo": {
+        "templateId": "top_purchased_products",
+        "metricId": "purchase_quantity"
+      }
+    },
+    {
+      "term": "salesman wise",
+      "mapsTo": {
+        "templateId": "salesman_wise_sales",
+        "dimensionId": "sales_salesman"
+      }
+    },
+    {
+      "term": "party wise",
+      "mapsTo": {
+        "dimensionIds": [
+          "sales_customer",
+          "purchase_supplier",
+          "party"
+        ]
+      },
+      "ambiguityRuleId": "party_context_default"
+    },
+    {
+      "term": "customer wise",
+      "mapsTo": {
+        "templateId": "customer_wise_sales",
+        "dimensionId": "sales_customer"
+      }
+    },
+    {
+      "term": "supplier wise",
+      "mapsTo": {
+        "templateId": "supplier_wise_purchase",
+        "dimensionId": "purchase_supplier"
+      }
+    },
+    {
+      "term": "invoice wise",
+      "mapsTo": {
+        "dimensionIds": [
+          "sales_invoice",
+          "purchase_invoice"
+        ]
+      }
+    },
+    {
+      "term": "bill wise",
+      "mapsTo": {
+        "dimensionIds": [
+          "sales_invoice",
+          "purchase_invoice"
+        ]
+      },
+      "ambiguityRuleId": "bill_means_invoice"
+    },
+    {
+      "term": "item details wise",
+      "mapsTo": {
+        "dimensionIds": [
+          "sales_product",
+          "purchase_product"
+        ]
+      },
+      "ambiguityRuleId": "item_means_product"
+    },
+    {
+      "term": "taxable",
+      "mapsTo": {
+        "metricId": "taxable_amount",
+        "filterId": "tax_filter"
+      }
+    },
+    {
+      "term": "non taxable",
+      "mapsTo": {
+        "metricId": "non_taxable_sales"
+      }
+    },
+    {
+      "term": "VAT",
+      "mapsTo": {
+        "datasetId": "tax_register",
+        "metricId": "tax_amount"
+      }
+    },
+    {
+      "term": "GST",
+      "mapsTo": {
+        "datasetId": "tax_register",
+        "metricId": "tax_amount"
+      }
+    },
+    {
+      "term": "net amount",
+      "mapsTo": {
+        "metricIds": [
+          "net_sales",
+          "net_purchase"
+        ]
+      }
+    },
+    {
+      "term": "gross amount",
+      "mapsTo": {
+        "metricId": "gross_sales"
+      }
+    },
+    {
+      "term": "stock",
+      "mapsTo": {
+        "templateId": "current_stock",
+        "metricId": "current_stock"
+      }
+    },
+    {
+      "term": "low stock",
+      "mapsTo": {
+        "templateId": "low_stock",
+        "filterId": "low_stock_filter"
+      }
+    },
+    {
+      "term": "outstanding",
+      "mapsTo": {
+        "templateId": "party_outstanding"
+      }
+    },
+    {
+      "term": "ledger",
+      "mapsTo": {
+        "templateId": "ledger_entries"
+      }
+    },
+    {
+      "term": "trial balance",
+      "mapsTo": {
+        "templateId": "trial_balance"
+      }
+    }
+  ],
+  "defaultAssumptions": [
+    {
+      "assumptionId": "default_current_financial_year",
+      "description": "If no date range is provided, use the current financial year from the tenant default fiscal calendar when available.",
+      "appliesTo": [
+        "sales_items",
+        "sales_invoices",
+        "purchase_items",
+        "purchase_invoices",
+        "tax_register",
+        "ledger_entries",
+        "party_outstanding"
+      ],
+      "fallback": "If fiscal calendar is unavailable, require the NLQ service to resolve the application's existing date default before execution."
+    },
+    {
+      "assumptionId": "exclude_cancelled_default",
+      "description": "Cancelled invoices are excluded by default where a real cancellation/status field exists or is exposed by the view.",
+      "appliesTo": [
+        "sales_items",
+        "sales_invoices",
+        "purchase_items",
+        "purchase_invoices"
+      ],
+      "implementation": "Apply is_cancelled IS DISTINCT FROM true. The current Marg views expose NULL when cancellation is unavailable."
+    },
+    {
+      "assumptionId": "returns_follow_production_logic",
+      "description": "Sales returns and purchase returns are not invented or netted differently by AI.",
+      "implementation": "Use status RETURN/POSTED and document_type values from approved views. Include or exclude returns only through approved filters/templates."
+    },
+    {
+      "assumptionId": "most_selling_quantity_default",
+      "description": "\"Most selling product\" and similar phrases mean highest sold quantity unless the user asks for value."
+    },
+    {
+      "assumptionId": "highest_sales_value_default",
+      "description": "\"Highest sales product\" means highest net sales value unless the user asks for quantity."
+    },
+    {
+      "assumptionId": "party_context_default",
+      "description": "\"Party wise\" means customer-wise in sales context, supplier-wise in purchase context, and party_type grouped outstanding in outstanding context."
+    },
+    {
+      "assumptionId": "bill_means_invoice",
+      "description": "\"Bill wise\" and \"invoice wise\" are equivalent."
+    },
+    {
+      "assumptionId": "item_means_product",
+      "description": "\"Item wise\" means grouped by product/item using product code and product name."
+    },
+    {
+      "assumptionId": "conversion_percentage_sales_contribution_default",
+      "description": "For top sold item reports, \"conversion percentage\" means percentage contribution to total sold quantity unless the user explicitly asks for forecast, promotion, or UOM conversion."
+    }
+  ],
+  "reportTemplates": [
+    {
+      "templateId": "top_selling_products",
+      "displayName": "Top Selling Products",
+      "datasetId": "sales_items",
+      "analysisType": "ranking",
+      "defaultMetrics": [
+        "sold_quantity",
+        "net_sales",
+        "sales_contribution_pct"
+      ],
+      "defaultDimensions": [
+        "sales_product"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "metricId": "sold_quantity",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 10,
+      "visualization": "bar",
+      "synonyms": [
+        "most selling product",
+        "top selling item",
+        "fast moving product",
+        "highest selling item",
+        "top items sold with conversion percentage",
+        "top items sold and contribution percentage"
+      ],
+      "sourceReportIds": [
+        "sales-overview",
+        "sales-purchase-item-drilldown",
+        "item-360"
+      ]
+    },
+    {
+      "templateId": "top_sales_value_products",
+      "displayName": "Top Products By Sales Value",
+      "datasetId": "sales_items",
+      "analysisType": "ranking",
+      "defaultMetrics": [
+        "net_sales",
+        "sold_quantity"
+      ],
+      "defaultDimensions": [
+        "sales_product"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "metricId": "net_sales",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 10,
+      "visualization": "bar",
+      "synonyms": [
+        "highest sales product",
+        "top sales value item",
+        "highest value product",
+        "item wise sales",
+        "items wise sales",
+        "product wise sales",
+        "items sales"
+      ],
+      "sourceReportIds": [
+        "sales-overview",
+        "sales-purchase-dimension"
+      ]
+    },
+    {
+      "templateId": "salesman_wise_sales",
+      "displayName": "Salesman-wise Sales",
+      "datasetId": "sales_invoices",
+      "analysisType": "grouped_summary",
+      "defaultMetrics": [
+        "invoice_net_sales",
+        "sales_invoice_count"
+      ],
+      "defaultDimensions": [
+        "sales_salesman"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "metricId": "invoice_net_sales",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 100,
+      "visualization": "table",
+      "synonyms": [
+        "salesman wise sales",
+        "mr wise sales",
+        "user wise sales"
+      ],
+      "sourceReportIds": [
+        "sales-purchase-dimension",
+        "sales-bills"
+      ]
+    },
+    {
+      "templateId": "customer_wise_sales",
+      "displayName": "Customer-wise Sales",
+      "datasetId": "sales_invoices",
+      "analysisType": "grouped_summary",
+      "defaultMetrics": [
+        "invoice_net_sales",
+        "sales_invoice_count"
+      ],
+      "defaultDimensions": [
+        "sales_customer"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "metricId": "invoice_net_sales",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 100,
+      "visualization": "table",
+      "synonyms": [
+        "customer wise sales",
+        "party wise sales",
+        "buyer wise sales"
+      ],
+      "sourceReportIds": [
+        "sales-purchase-party-drilldown",
+        "customer-360",
+        "sales-bills"
+      ]
+    },
+    {
+      "templateId": "top_customers_by_sales_product",
+      "displayName": "Top Customers By Sales Product",
+      "datasetId": "sales_items",
+      "analysisType": "ranking",
+      "defaultMetrics": [
+        "sold_quantity",
+        "net_sales",
+        "sales_item_invoice_count"
+      ],
+      "defaultDimensions": [
+        "sales_item_customer"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "metricId": "sold_quantity",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 10,
+      "visualization": "bar",
+      "synonyms": [
+        "top customers purchasing product",
+        "top customer buying item",
+        "customers who are purchasing item",
+        "top parties for product",
+        "customer wise product sales"
+      ],
+      "sourceReportIds": [
+        "sales-purchase-party-drilldown",
+        "customer-360",
+        "sales-purchase-item-drilldown"
+      ]
+    },
+    {
+      "templateId": "invoice_wise_sales",
+      "displayName": "Invoice-wise Sales",
+      "datasetId": "sales_invoices",
+      "analysisType": "detail",
+      "defaultMetrics": [
+        "invoice_net_sales",
+        "invoice_gross_sales",
+        "invoice_sales_tax"
+      ],
+      "defaultDimensions": [
+        "sales_invoice",
+        "sales_customer",
+        "sales_salesman"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "fieldId": "sales_bill_date",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 100,
+      "visualization": "table",
+      "synonyms": [
+        "invoice wise sales",
+        "bill wise sales",
+        "sales bills"
+      ],
+      "sourceReportIds": [
+        "sales-bills",
+        "sales-purchase-bill-drilldown"
+      ],
+      "defaultDisplayColumns": [
+        "sales_invoice_date",
+        "sales_invoice_no",
+        "sales_customer_name",
+        "sales_salesman_name",
+        "sales_invoice_quantity",
+        "sales_invoice_net_amount",
+        "sales_invoice_tax_amount"
+      ]
+    },
+    {
+      "templateId": "top_purchased_products",
+      "displayName": "Top Purchased Products",
+      "datasetId": "purchase_items",
+      "analysisType": "ranking",
+      "defaultMetrics": [
+        "purchase_quantity",
+        "net_purchase"
+      ],
+      "defaultDimensions": [
+        "purchase_product"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "metricId": "purchase_quantity",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 10,
+      "visualization": "bar",
+      "synonyms": [
+        "most purchasing item",
+        "most purchased item",
+        "top purchase item"
+      ],
+      "sourceReportIds": [
+        "purchase-overview",
+        "sales-purchase-item-drilldown",
+        "supplier-360",
+        "item-360"
+      ]
+    },
+    {
+      "templateId": "supplier_wise_purchase",
+      "displayName": "Supplier-wise Purchase",
+      "datasetId": "purchase_invoices",
+      "analysisType": "grouped_summary",
+      "defaultMetrics": [
+        "invoice_net_purchase",
+        "purchase_invoice_count"
+      ],
+      "defaultDimensions": [
+        "purchase_supplier"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "metricId": "invoice_net_purchase",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 100,
+      "visualization": "table",
+      "synonyms": [
+        "supplier wise purchase",
+        "party wise purchase",
+        "vendor wise purchase"
+      ],
+      "sourceReportIds": [
+        "purchase-overview",
+        "purchase-bills",
+        "supplier-360",
+        "supplier-performance"
+      ]
+    },
+    {
+      "templateId": "invoice_wise_purchase",
+      "displayName": "Invoice-wise Purchase",
+      "datasetId": "purchase_invoices",
+      "analysisType": "detail",
+      "defaultMetrics": [
+        "invoice_net_purchase",
+        "invoice_purchase_tax"
+      ],
+      "defaultDimensions": [
+        "purchase_invoice",
+        "purchase_supplier"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "fieldId": "purchase_bill_date",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 100,
+      "visualization": "table",
+      "synonyms": [
+        "purchase bill wise",
+        "purchase invoice wise",
+        "supplier bill wise"
+      ],
+      "sourceReportIds": [
+        "purchase-bills",
+        "sales-purchase-bill-drilldown",
+        "purchase-invoices-list"
+      ],
+      "defaultDisplayColumns": [
+        "purchase_invoice_date",
+        "purchase_invoice_no",
+        "purchase_supplier_name",
+        "purchase_invoice_quantity",
+        "purchase_invoice_net_amount",
+        "purchase_invoice_tax_amount"
+      ]
+    },
+    {
+      "templateId": "current_stock",
+      "displayName": "Current Stock",
+      "datasetId": "stock_summary",
+      "analysisType": "detail",
+      "defaultMetrics": [
+        "current_stock",
+        "available_stock",
+        "stock_value"
+      ],
+      "defaultDimensions": [
+        "stock_product",
+        "stock_warehouse"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "metricId": "stock_value",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 100,
+      "visualization": "table",
+      "synonyms": [
+        "current stock",
+        "stock",
+        "inventory stock",
+        "stock report"
+      ],
+      "sourceReportIds": [
+        "current-stock",
+        "pharma-dashboard-kpis"
+      ],
+      "defaultDisplayColumns": [
+        "stock_product_name",
+        "stock_warehouse_name",
+        "stock_current_quantity",
+        "stock_available_quantity",
+        "stock_value_amount",
+        "stock_status"
+      ]
+    },
+    {
+      "templateId": "low_stock",
+      "displayName": "Low Stock",
+      "datasetId": "stock_summary",
+      "analysisType": "exception_list",
+      "defaultMetrics": [
+        "current_stock",
+        "available_stock",
+        "low_stock_item_count"
+      ],
+      "defaultDimensions": [
+        "stock_product",
+        "stock_warehouse"
+      ],
+      "defaultFilters": [
+        {
+          "filterId": "low_stock_filter",
+          "operator": "IN",
+          "value": [
+            "BELOW_MINIMUM",
+            "BELOW_REORDER",
+            "NEGATIVE"
+          ]
+        }
+      ],
+      "defaultSort": [
+        {
+          "dimensionId": "stock_product",
+          "direction": "asc"
+        }
+      ],
+      "defaultLimit": 100,
+      "visualization": "table",
+      "synonyms": [
+        "low stock",
+        "stock below minimum",
+        "below reorder",
+        "negative stock"
+      ],
+      "sourceReportIds": [
+        "reorder-low-stock",
+        "alerts"
+      ],
+      "defaultDisplayColumns": [
+        "stock_product_name",
+        "stock_warehouse_name",
+        "stock_current_quantity",
+        "stock_available_quantity",
+        "stock_value_amount",
+        "stock_status"
+      ]
+    },
+    {
+      "templateId": "batch_expiry",
+      "displayName": "Batch Expiry",
+      "datasetId": "stock_batches",
+      "analysisType": "exception_list",
+      "defaultMetrics": [
+        "batch_stock",
+        "expired_stock_value"
+      ],
+      "defaultDimensions": [
+        "batch_product",
+        "batch_warehouse",
+        "batch",
+        "batch_expiry"
+      ],
+      "defaultFilters": [
+        {
+          "column": "expiry_date",
+          "operator": "<=",
+          "value": {
+            "relativeDate": "today_plus_90_days"
+          }
+        }
+      ],
+      "defaultSort": [
+        {
+          "fieldId": "batch_expiry_date",
+          "direction": "asc"
+        }
+      ],
+      "defaultLimit": 100,
+      "visualization": "table",
+      "synonyms": [
+        "near expiry",
+        "expired stock",
+        "expiry report",
+        "fefo"
+      ],
+      "sourceReportIds": [
+        "near-expiry",
+        "expired-stock",
+        "fefo-picking",
+        "expiry-risk",
+        "stock-ageing",
+        "expiry-loss-trend"
+      ],
+      "defaultDisplayColumns": [
+        "batch_product_name",
+        "batch_warehouse_name",
+        "batch_no",
+        "batch_expiry_date",
+        "batch_days_to_expiry",
+        "batch_current_stock",
+        "batch_stock_value",
+        "batch_status"
+      ]
+    },
+    {
+      "templateId": "stock_movement_ledger",
+      "displayName": "Stock Movement Ledger",
+      "datasetId": "stock_ledger",
+      "analysisType": "ledger_detail",
+      "defaultMetrics": [
+        "movement_quantity",
+        "movement_value"
+      ],
+      "defaultDimensions": [
+        "ledger_product",
+        "ledger_warehouse",
+        "ledger_batch"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "fieldId": "stock_transaction_date",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 200,
+      "visualization": "table",
+      "synonyms": [
+        "movement ledger",
+        "stock ledger",
+        "inventory ledger"
+      ],
+      "sourceReportIds": [
+        "movement-ledger",
+        "stock-out",
+        "inventory-value-trend"
+      ],
+      "defaultDisplayColumns": [
+        "stock_ledger_transaction_date",
+        "stock_ledger_product_name",
+        "stock_ledger_warehouse_name",
+        "stock_ledger_batch_no",
+        "stock_ledger_entry_type",
+        "stock_ledger_quantity",
+        "stock_ledger_value",
+        "stock_ledger_running_balance"
+      ]
+    },
+    {
+      "templateId": "party_outstanding",
+      "displayName": "Party Outstanding",
+      "datasetId": "party_outstanding",
+      "analysisType": "grouped_summary",
+      "defaultMetrics": [
+        "customer_outstanding",
+        "supplier_outstanding",
+        "outstanding_invoice_count"
+      ],
+      "defaultDimensions": [
+        "party"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_open",
+          "operator": "=",
+          "value": true
+        }
+      ],
+      "defaultSort": [
+        {
+          "metricId": "customer_outstanding",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 100,
+      "visualization": "table",
+      "synonyms": [
+        "outstanding",
+        "receivable",
+        "payable",
+        "customer outstanding",
+        "supplier outstanding"
+      ],
+      "sourceReportIds": [
+        "financial-outstanding",
+        "financial-outstanding-groups",
+        "financial-outstanding-detail",
+        "customer-360",
+        "supplier-360"
+      ]
+    },
+    {
+      "templateId": "tax_summary",
+      "displayName": "Tax Summary",
+      "datasetId": "tax_register",
+      "analysisType": "grouped_summary",
+      "defaultMetrics": [
+        "taxable_amount",
+        "tax_amount"
+      ],
+      "defaultDimensions": [
+        "tax_rate"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "dimensionId": "tax_rate",
+          "direction": "asc"
+        }
+      ],
+      "defaultLimit": 100,
+      "visualization": "table",
+      "synonyms": [
+        "tax summary",
+        "vat report",
+        "gst report",
+        "taxable report"
+      ],
+      "sourceReportIds": [
+        "sales-overview",
+        "purchase-overview"
+      ]
+    },
+    {
+      "templateId": "ledger_entries",
+      "displayName": "Ledger Entries",
+      "datasetId": "ledger_entries",
+      "analysisType": "ledger_detail",
+      "defaultMetrics": [
+        "ledger_debit",
+        "ledger_credit",
+        "ledger_balance"
+      ],
+      "defaultDimensions": [
+        "gl_account",
+        "ledger_party"
+      ],
+      "defaultFilters": [],
+      "defaultSort": [
+        {
+          "fieldId": "ledger_entry_date",
+          "direction": "desc"
+        }
+      ],
+      "defaultLimit": 200,
+      "visualization": "table",
+      "synonyms": [
+        "ledger",
+        "account ledger",
+        "party ledger"
+      ],
+      "sourceReportIds": [
+        "account-ledger",
+        "financial-party-ledger",
+        "journal-entries-list"
+      ],
+      "defaultDisplayColumns": [
+        "ledger_entry_date_column",
+        "ledger_voucher_no",
+        "ledger_account_name",
+        "ledger_party_name",
+        "ledger_debit_amount",
+        "ledger_credit_amount",
+        "ledger_signed_amount",
+        "ledger_source"
+      ]
+    },
+    {
+      "templateId": "trial_balance",
+      "displayName": "Trial Balance",
+      "datasetId": "ledger_entries",
+      "analysisType": "accounting_summary",
+      "defaultMetrics": [
+        "ledger_debit",
+        "ledger_credit",
+        "ledger_balance"
+      ],
+      "defaultDimensions": [
+        "gl_account"
+      ],
+      "defaultFilters": [
+        {
+          "column": "ledger_source",
+          "operator": "=",
+          "value": "CORE_GL"
+        },
+        {
+          "column": "status",
+          "operator": "=",
+          "value": "POSTED"
+        }
+      ],
+      "defaultSort": [
+        {
+          "dimensionId": "gl_account",
+          "direction": "asc"
+        }
+      ],
+      "defaultLimit": 1000,
+      "visualization": "table",
+      "synonyms": [
+        "trial balance",
+        "tb",
+        "account balance"
+      ],
+      "sourceReportIds": [
+        "trial-balance",
+        "gl-accounts-list"
+      ]
+    }
+  ],
+  "dashboardTemplates": [
+    {
+      "dashboardId": "sales_dashboard",
+      "displayName": "Sales Dashboard",
+      "description": "Sales KPIs, trend, top products, top customers, salesman-wise sales, and tax summary",
+      "components": [
+        {
+          "templateId": "top_selling_products",
+          "position": "top_products"
+        },
+        {
+          "templateId": "top_sales_value_products",
+          "position": "top_value_products"
+        },
+        {
+          "templateId": "customer_wise_sales",
+          "position": "top_customers"
+        },
+        {
+          "templateId": "salesman_wise_sales",
+          "position": "salesman_summary"
+        },
+        {
+          "templateId": "tax_summary",
+          "position": "tax_summary",
+          "filters": [
+            {
+              "column": "tax_domain",
+              "operator": "=",
+              "value": "SALES"
+            }
+          ]
+        }
+      ],
+      "synonyms": [
+        "sales dashboard",
+        "generate sales dashboard",
+        "monthly sales dashboard"
+      ],
+      "sourceReportIds": [
+        "sales-overview",
+        "sales-bills",
+        "generic-dashboard"
+      ]
+    },
+    {
+      "dashboardId": "purchase_dashboard",
+      "displayName": "Purchase Dashboard",
+      "description": "Purchase KPIs, top purchased products, supplier-wise purchase, and purchase tax summary",
+      "components": [
+        {
+          "templateId": "top_purchased_products",
+          "position": "top_purchase_items"
+        },
+        {
+          "templateId": "supplier_wise_purchase",
+          "position": "supplier_summary"
+        },
+        {
+          "templateId": "invoice_wise_purchase",
+          "position": "recent_purchase_bills"
+        },
+        {
+          "templateId": "tax_summary",
+          "position": "tax_summary",
+          "filters": [
+            {
+              "column": "tax_domain",
+              "operator": "=",
+              "value": "PURCHASE"
+            }
+          ]
+        }
+      ],
+      "synonyms": [
+        "purchase dashboard",
+        "supplier purchase dashboard"
+      ],
+      "sourceReportIds": [
+        "purchase-overview",
+        "purchase-bills",
+        "supplier-360"
+      ]
+    },
+    {
+      "dashboardId": "inventory_dashboard",
+      "displayName": "Inventory Dashboard",
+      "description": "Current stock value, low stock, expiry risk, batch stock, and movement ledger summaries",
+      "components": [
+        {
+          "templateId": "current_stock",
+          "position": "current_stock"
+        },
+        {
+          "templateId": "low_stock",
+          "position": "low_stock"
+        },
+        {
+          "templateId": "batch_expiry",
+          "position": "expiry_risk"
+        },
+        {
+          "templateId": "stock_movement_ledger",
+          "position": "movement_history"
+        }
+      ],
+      "synonyms": [
+        "inventory dashboard",
+        "stock dashboard",
+        "expiry dashboard"
+      ],
+      "sourceReportIds": [
+        "pharma-dashboard-kpis",
+        "current-stock",
+        "batch-inventory",
+        "expiry-risk",
+        "alerts"
+      ]
+    },
+    {
+      "dashboardId": "finance_dashboard",
+      "displayName": "Finance Dashboard",
+      "description": "Outstanding, trial balance, ledger, receivable, payable, and tax summary views",
+      "components": [
+        {
+          "templateId": "party_outstanding",
+          "position": "outstanding"
+        },
+        {
+          "templateId": "trial_balance",
+          "position": "trial_balance"
+        },
+        {
+          "templateId": "ledger_entries",
+          "position": "ledger_entries"
+        },
+        {
+          "templateId": "tax_summary",
+          "position": "tax_summary"
+        }
+      ],
+      "synonyms": [
+        "finance dashboard",
+        "accounting dashboard",
+        "outstanding dashboard"
+      ],
+      "sourceReportIds": [
+        "financial-outstanding",
+        "trial-balance",
+        "account-ledger",
+        "financial-party-ledger"
+      ]
+    }
+  ],
+  "securityRules": [
+    {
+      "ruleId": "approved_datasets_only",
+      "severity": "block",
+      "description": "AI can only query datasets listed in this catalog with allowedForNlq = true."
+    },
+    {
+      "ruleId": "approved_fields_only",
+      "severity": "block",
+      "description": "AI can only use approved metrics, dimensions, filters, and time fields from this catalog."
+    },
+    {
+      "ruleId": "tenant_filter_mandatory",
+      "severity": "block",
+      "description": "Every generated query must include tenant_id from the authenticated user context."
+    },
+    {
+      "ruleId": "company_filter_mandatory_when_applicable",
+      "severity": "block",
+      "description": "company_id filtering is mandatory for company-scoped users and datasets that expose company_id."
+    },
+    {
+      "ruleId": "branch_filter_from_permissions",
+      "severity": "block",
+      "description": "branch_id or warehouse_id filters must be intersected with user allowed branches/locations."
+    },
+    {
+      "ruleId": "existing_permissions_required",
+      "severity": "block",
+      "description": "Existing JWT auth, roles, module gates, and report permissions must be checked before executing any NLQ report."
+    },
+    {
+      "ruleId": "no_raw_sql_to_users",
+      "severity": "block",
+      "description": "Raw SQL must not be exposed to normal users in prompts, responses, logs visible to users, or exports."
+    },
+    {
+      "ruleId": "sensitive_tax_ids_restricted",
+      "severity": "block",
+      "description": "PAN/VAT/GST fields may be selected only for tax reports or authorized detailed reports."
+    },
+    {
+      "ruleId": "row_limit_required",
+      "severity": "block",
+      "description": "Detail and ranking queries must include backend-enforced row limits."
+    },
+    {
+      "ruleId": "query_timeout_required",
+      "severity": "block",
+      "description": "Backend execution must use configured query timeout and cancellation handling."
+    }
+  ],
+  "disallowedOperations": [
+    {
+      "operation": "raw_table_access",
+      "description": "Do not query Marg or ERP base tables directly from NLQ."
+    },
+    {
+      "operation": "write_sql",
+      "description": "Do not allow INSERT, UPDATE, DELETE, MERGE, TRUNCATE, ALTER, DROP, CREATE, GRANT, REVOKE, COPY, VACUUM, ANALYZE, REFRESH, or function execution from NLQ."
+    },
+    {
+      "operation": "unsafe_sql_generation",
+      "description": "Do not execute model-generated SQL unless compiled from catalog-approved datasets, fields, filters, and templates by backend code."
+    },
+    {
+      "operation": "cross_tenant_query",
+      "description": "Do not query without tenant_id or across tenants."
+    },
+    {
+      "operation": "permission_bypass",
+      "description": "Do not bypass existing report module, role, company, branch, or financial permissions."
+    },
+    {
+      "operation": "unbounded_detail_export",
+      "description": "Do not run unbounded detail queries or exports without pagination and export authorization."
+    },
+    {
+      "operation": "sensitive_identifier_leakage",
+      "description": "Do not include PAN/VAT/GST/customer/supplier legal identifiers unless required by the selected report template and authorized."
+    },
+    {
+      "operation": "invent_business_logic",
+      "description": "Do not invent cancellation, return, tax, net/gross, financial year, or branch logic outside approved views and report rules."
+    },
+    {
+      "operation": "schema_introspection_for_users",
+      "description": "Do not expose database schema, source table names, indexes, or migration SQL to business users."
+    }
+  ],
+  "displayColumns": [
+    {
+      "columnId": "sales_item_invoice_date",
+      "datasetId": "sales_items",
+      "column": "invoice_date",
+      "label": "Invoice Date",
+      "dataType": "date",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill date",
+        "sales date"
+      ]
+    },
+    {
+      "columnId": "sales_item_invoice_no",
+      "datasetId": "sales_items",
+      "column": "invoice_no",
+      "label": "Invoice No",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill no",
+        "invoice number"
+      ]
+    },
+    {
+      "columnId": "sales_item_customer_name",
+      "datasetId": "sales_items",
+      "column": "customer_name",
+      "label": "Customer",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "party",
+        "buyer"
+      ]
+    },
+    {
+      "columnId": "sales_item_salesman_name",
+      "datasetId": "sales_items",
+      "column": "salesman_name",
+      "label": "Salesman",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "mr",
+        "sales person"
+      ]
+    },
+    {
+      "columnId": "sales_item_product_name",
+      "datasetId": "sales_items",
+      "column": "product_name",
+      "label": "Product",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "item",
+        "sku"
+      ]
+    },
+    {
+      "columnId": "sales_item_product_code",
+      "datasetId": "sales_items",
+      "column": "product_code",
+      "label": "Product Code",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "item code"
+      ]
+    },
+    {
+      "columnId": "sales_item_category",
+      "datasetId": "sales_items",
+      "column": "product_category",
+      "label": "Category",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "group",
+        "category"
+      ]
+    },
+    {
+      "columnId": "sales_item_company",
+      "datasetId": "sales_items",
+      "column": "product_company_name",
+      "label": "Manufacturer",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "company",
+        "manufacturer"
+      ]
+    },
+    {
+      "columnId": "sales_item_salt",
+      "datasetId": "sales_items",
+      "column": "salt_name",
+      "label": "Salt",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "composition"
+      ]
+    },
+    {
+      "columnId": "sales_item_batch_no",
+      "datasetId": "sales_items",
+      "column": "batch_no",
+      "label": "Batch No",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "batch"
+      ]
+    },
+    {
+      "columnId": "sales_item_expiry_date",
+      "datasetId": "sales_items",
+      "column": "expiry_date",
+      "label": "Expiry Date",
+      "dataType": "date",
+      "defaultForDetail": false,
+      "synonyms": [
+        "expiry"
+      ]
+    },
+    {
+      "columnId": "sales_item_quantity",
+      "datasetId": "sales_items",
+      "column": "quantity",
+      "label": "Sold Quantity",
+      "dataType": "quantity",
+      "defaultForDetail": true,
+      "synonyms": [
+        "quantity",
+        "qty"
+      ]
+    },
+    {
+      "columnId": "sales_item_free_quantity",
+      "datasetId": "sales_items",
+      "column": "free_quantity",
+      "label": "Free Quantity",
+      "dataType": "quantity",
+      "defaultForDetail": false,
+      "synonyms": [
+        "free qty"
+      ]
+    },
+    {
+      "columnId": "sales_item_rate",
+      "datasetId": "sales_items",
+      "column": "rate",
+      "label": "Rate",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "rate",
+        "price"
+      ]
+    },
+    {
+      "columnId": "sales_item_gross_amount",
+      "datasetId": "sales_items",
+      "column": "gross_amount",
+      "label": "Gross Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "gross"
+      ]
+    },
+    {
+      "columnId": "sales_item_discount_amount",
+      "datasetId": "sales_items",
+      "column": "discount_amount",
+      "label": "Discount Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "discount"
+      ]
+    },
+    {
+      "columnId": "sales_item_taxable_amount",
+      "datasetId": "sales_items",
+      "column": "taxable_amount",
+      "label": "Taxable Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "taxable"
+      ]
+    },
+    {
+      "columnId": "sales_item_tax_amount",
+      "datasetId": "sales_items",
+      "column": "tax_amount",
+      "label": "Tax Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "tax",
+        "gst",
+        "vat"
+      ]
+    },
+    {
+      "columnId": "sales_item_net_amount",
+      "datasetId": "sales_items",
+      "column": "net_amount",
+      "label": "Net Amount",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "net sales"
+      ]
+    },
+    {
+      "columnId": "sales_item_branch_name",
+      "datasetId": "sales_items",
+      "column": "branch_name",
+      "label": "Branch",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "branch",
+        "location"
+      ]
+    },
+    {
+      "columnId": "sales_invoice_date",
+      "datasetId": "sales_invoices",
+      "column": "invoice_date",
+      "label": "Invoice Date",
+      "dataType": "date",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill date",
+        "sales date"
+      ]
+    },
+    {
+      "columnId": "sales_invoice_no",
+      "datasetId": "sales_invoices",
+      "column": "invoice_no",
+      "label": "Invoice No",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill no",
+        "invoice number"
+      ]
+    },
+    {
+      "columnId": "sales_customer_name",
+      "datasetId": "sales_invoices",
+      "column": "customer_name",
+      "label": "Customer",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "party",
+        "buyer"
+      ]
+    },
+    {
+      "columnId": "sales_salesman_name",
+      "datasetId": "sales_invoices",
+      "column": "salesman_name",
+      "label": "Salesman",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "mr",
+        "sales person"
+      ]
+    },
+    {
+      "columnId": "sales_payment_mode",
+      "datasetId": "sales_invoices",
+      "column": "payment_mode",
+      "label": "Payment Mode",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "cash",
+        "credit"
+      ]
+    },
+    {
+      "columnId": "sales_invoice_quantity",
+      "datasetId": "sales_invoices",
+      "column": "quantity",
+      "label": "Quantity",
+      "dataType": "quantity",
+      "defaultForDetail": true,
+      "synonyms": [
+        "quantity",
+        "qty"
+      ]
+    },
+    {
+      "columnId": "sales_invoice_gross_amount",
+      "datasetId": "sales_invoices",
+      "column": "gross_amount",
+      "label": "Gross Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "gross"
+      ]
+    },
+    {
+      "columnId": "sales_invoice_discount_amount",
+      "datasetId": "sales_invoices",
+      "column": "discount_amount",
+      "label": "Discount Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "discount"
+      ]
+    },
+    {
+      "columnId": "sales_invoice_tax_amount",
+      "datasetId": "sales_invoices",
+      "column": "tax_amount",
+      "label": "Tax Amount",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "tax",
+        "gst",
+        "vat"
+      ]
+    },
+    {
+      "columnId": "sales_invoice_net_amount",
+      "datasetId": "sales_invoices",
+      "column": "net_amount",
+      "label": "Net Amount",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "net sales"
+      ]
+    },
+    {
+      "columnId": "sales_branch_name",
+      "datasetId": "sales_invoices",
+      "column": "branch_name",
+      "label": "Branch",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "branch",
+        "location"
+      ]
+    },
+    {
+      "columnId": "purchase_item_invoice_date",
+      "datasetId": "purchase_items",
+      "column": "invoice_date",
+      "label": "Invoice Date",
+      "dataType": "date",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill date",
+        "purchase date"
+      ]
+    },
+    {
+      "columnId": "purchase_item_invoice_no",
+      "datasetId": "purchase_items",
+      "column": "invoice_no",
+      "label": "Invoice No",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill no",
+        "invoice number"
+      ]
+    },
+    {
+      "columnId": "purchase_item_supplier_name",
+      "datasetId": "purchase_items",
+      "column": "supplier_name",
+      "label": "Supplier",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "vendor",
+        "party"
+      ]
+    },
+    {
+      "columnId": "purchase_item_product_name",
+      "datasetId": "purchase_items",
+      "column": "product_name",
+      "label": "Product",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "item",
+        "sku"
+      ]
+    },
+    {
+      "columnId": "purchase_item_product_code",
+      "datasetId": "purchase_items",
+      "column": "product_code",
+      "label": "Product Code",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "item code"
+      ]
+    },
+    {
+      "columnId": "purchase_item_category",
+      "datasetId": "purchase_items",
+      "column": "product_category",
+      "label": "Category",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "group",
+        "category"
+      ]
+    },
+    {
+      "columnId": "purchase_item_company",
+      "datasetId": "purchase_items",
+      "column": "product_company_name",
+      "label": "Manufacturer",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "company",
+        "manufacturer"
+      ]
+    },
+    {
+      "columnId": "purchase_item_salt",
+      "datasetId": "purchase_items",
+      "column": "salt_name",
+      "label": "Salt",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "composition"
+      ]
+    },
+    {
+      "columnId": "purchase_item_batch_no",
+      "datasetId": "purchase_items",
+      "column": "batch_no",
+      "label": "Batch No",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "batch"
+      ]
+    },
+    {
+      "columnId": "purchase_item_expiry_date",
+      "datasetId": "purchase_items",
+      "column": "expiry_date",
+      "label": "Expiry Date",
+      "dataType": "date",
+      "defaultForDetail": false,
+      "synonyms": [
+        "expiry"
+      ]
+    },
+    {
+      "columnId": "purchase_item_quantity",
+      "datasetId": "purchase_items",
+      "column": "quantity",
+      "label": "Purchase Quantity",
+      "dataType": "quantity",
+      "defaultForDetail": true,
+      "synonyms": [
+        "quantity",
+        "qty"
+      ]
+    },
+    {
+      "columnId": "purchase_item_rate",
+      "datasetId": "purchase_items",
+      "column": "rate",
+      "label": "Rate",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "rate",
+        "price"
+      ]
+    },
+    {
+      "columnId": "purchase_item_gross_amount",
+      "datasetId": "purchase_items",
+      "column": "gross_amount",
+      "label": "Gross Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "gross"
+      ]
+    },
+    {
+      "columnId": "purchase_item_discount_amount",
+      "datasetId": "purchase_items",
+      "column": "discount_amount",
+      "label": "Discount Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "discount"
+      ]
+    },
+    {
+      "columnId": "purchase_item_tax_amount",
+      "datasetId": "purchase_items",
+      "column": "tax_amount",
+      "label": "Tax Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "tax",
+        "gst",
+        "vat"
+      ]
+    },
+    {
+      "columnId": "purchase_item_net_amount",
+      "datasetId": "purchase_items",
+      "column": "net_amount",
+      "label": "Net Amount",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "purchase value"
+      ]
+    },
+    {
+      "columnId": "purchase_item_branch_name",
+      "datasetId": "purchase_items",
+      "column": "branch_name",
+      "label": "Branch",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "branch",
+        "location"
+      ]
+    },
+    {
+      "columnId": "purchase_invoice_date",
+      "datasetId": "purchase_invoices",
+      "column": "invoice_date",
+      "label": "Invoice Date",
+      "dataType": "date",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill date",
+        "purchase date"
+      ]
+    },
+    {
+      "columnId": "purchase_invoice_no",
+      "datasetId": "purchase_invoices",
+      "column": "invoice_no",
+      "label": "Invoice No",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill no",
+        "invoice number"
+      ]
+    },
+    {
+      "columnId": "purchase_supplier_name",
+      "datasetId": "purchase_invoices",
+      "column": "supplier_name",
+      "label": "Supplier",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "vendor",
+        "party"
+      ]
+    },
+    {
+      "columnId": "purchase_payment_mode",
+      "datasetId": "purchase_invoices",
+      "column": "payment_mode",
+      "label": "Payment Mode",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "cash",
+        "credit"
+      ]
+    },
+    {
+      "columnId": "purchase_invoice_quantity",
+      "datasetId": "purchase_invoices",
+      "column": "quantity",
+      "label": "Quantity",
+      "dataType": "quantity",
+      "defaultForDetail": true,
+      "synonyms": [
+        "quantity",
+        "qty"
+      ]
+    },
+    {
+      "columnId": "purchase_invoice_gross_amount",
+      "datasetId": "purchase_invoices",
+      "column": "gross_amount",
+      "label": "Gross Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "gross"
+      ]
+    },
+    {
+      "columnId": "purchase_invoice_discount_amount",
+      "datasetId": "purchase_invoices",
+      "column": "discount_amount",
+      "label": "Discount Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "discount"
+      ]
+    },
+    {
+      "columnId": "purchase_invoice_tax_amount",
+      "datasetId": "purchase_invoices",
+      "column": "tax_amount",
+      "label": "Tax Amount",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "tax",
+        "gst",
+        "vat"
+      ]
+    },
+    {
+      "columnId": "purchase_invoice_net_amount",
+      "datasetId": "purchase_invoices",
+      "column": "net_amount",
+      "label": "Net Amount",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "purchase value"
+      ]
+    },
+    {
+      "columnId": "purchase_branch_name",
+      "datasetId": "purchase_invoices",
+      "column": "branch_name",
+      "label": "Branch",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "branch",
+        "location"
+      ]
+    },
+    {
+      "columnId": "stock_product_name",
+      "datasetId": "stock_summary",
+      "column": "product_name",
+      "label": "Product",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "item",
+        "sku"
+      ]
+    },
+    {
+      "columnId": "stock_product_code",
+      "datasetId": "stock_summary",
+      "column": "product_code",
+      "label": "Product Code",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "item code"
+      ]
+    },
+    {
+      "columnId": "stock_category",
+      "datasetId": "stock_summary",
+      "column": "product_category",
+      "label": "Category",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "category"
+      ]
+    },
+    {
+      "columnId": "stock_company",
+      "datasetId": "stock_summary",
+      "column": "product_company_name",
+      "label": "Manufacturer",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "company",
+        "manufacturer"
+      ]
+    },
+    {
+      "columnId": "stock_salt",
+      "datasetId": "stock_summary",
+      "column": "salt_name",
+      "label": "Salt",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "composition"
+      ]
+    },
+    {
+      "columnId": "stock_warehouse_name",
+      "datasetId": "stock_summary",
+      "column": "warehouse_name",
+      "label": "Warehouse",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "warehouse",
+        "location"
+      ]
+    },
+    {
+      "columnId": "stock_current_quantity",
+      "datasetId": "stock_summary",
+      "column": "current_stock",
+      "label": "Current Stock",
+      "dataType": "quantity",
+      "defaultForDetail": true,
+      "synonyms": [
+        "stock qty",
+        "on hand"
+      ]
+    },
+    {
+      "columnId": "stock_available_quantity",
+      "datasetId": "stock_summary",
+      "column": "available_stock",
+      "label": "Available Stock",
+      "dataType": "quantity",
+      "defaultForDetail": true,
+      "synonyms": [
+        "available qty"
+      ]
+    },
+    {
+      "columnId": "stock_value_amount",
+      "datasetId": "stock_summary",
+      "column": "stock_value",
+      "label": "Stock Value",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "inventory value"
+      ]
+    },
+    {
+      "columnId": "stock_minimum_quantity",
+      "datasetId": "stock_summary",
+      "column": "minimum_stock",
+      "label": "Minimum Stock",
+      "dataType": "quantity",
+      "defaultForDetail": false,
+      "synonyms": [
+        "minimum stock"
+      ]
+    },
+    {
+      "columnId": "stock_reorder_level",
+      "datasetId": "stock_summary",
+      "column": "reorder_level",
+      "label": "Reorder Level",
+      "dataType": "quantity",
+      "defaultForDetail": false,
+      "synonyms": [
+        "reorder"
+      ]
+    },
+    {
+      "columnId": "stock_status",
+      "datasetId": "stock_summary",
+      "column": "stock_status",
+      "label": "Stock Status",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "status"
+      ]
+    },
+    {
+      "columnId": "batch_product_name",
+      "datasetId": "stock_batches",
+      "column": "product_name",
+      "label": "Product",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "item",
+        "sku"
+      ]
+    },
+    {
+      "columnId": "batch_warehouse_name",
+      "datasetId": "stock_batches",
+      "column": "warehouse_name",
+      "label": "Warehouse",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "warehouse",
+        "location"
+      ]
+    },
+    {
+      "columnId": "batch_no",
+      "datasetId": "stock_batches",
+      "column": "batch_no",
+      "label": "Batch No",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "batch",
+        "lot"
+      ]
+    },
+    {
+      "columnId": "batch_expiry_date",
+      "datasetId": "stock_batches",
+      "column": "expiry_date",
+      "label": "Expiry Date",
+      "dataType": "date",
+      "defaultForDetail": true,
+      "synonyms": [
+        "expiry"
+      ]
+    },
+    {
+      "columnId": "batch_days_to_expiry",
+      "datasetId": "stock_batches",
+      "column": "days_to_expiry",
+      "label": "Days To Expiry",
+      "dataType": "number",
+      "defaultForDetail": true,
+      "synonyms": [
+        "expiry days"
+      ]
+    },
+    {
+      "columnId": "batch_current_stock",
+      "datasetId": "stock_batches",
+      "column": "current_stock",
+      "label": "Current Stock",
+      "dataType": "quantity",
+      "defaultForDetail": true,
+      "synonyms": [
+        "stock qty"
+      ]
+    },
+    {
+      "columnId": "batch_available_stock",
+      "datasetId": "stock_batches",
+      "column": "available_stock",
+      "label": "Available Stock",
+      "dataType": "quantity",
+      "defaultForDetail": false,
+      "synonyms": [
+        "available qty"
+      ]
+    },
+    {
+      "columnId": "batch_stock_value",
+      "datasetId": "stock_batches",
+      "column": "stock_value",
+      "label": "Stock Value",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "inventory value"
+      ]
+    },
+    {
+      "columnId": "batch_status",
+      "datasetId": "stock_batches",
+      "column": "batch_status",
+      "label": "Batch Status",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "status"
+      ]
+    },
+    {
+      "columnId": "batch_supplier_name",
+      "datasetId": "stock_batches",
+      "column": "supplier_name",
+      "label": "Supplier",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "supplier",
+        "vendor"
+      ]
+    },
+    {
+      "columnId": "stock_ledger_transaction_date",
+      "datasetId": "stock_ledger",
+      "column": "transaction_date",
+      "label": "Transaction Date",
+      "dataType": "date",
+      "defaultForDetail": true,
+      "synonyms": [
+        "movement date"
+      ]
+    },
+    {
+      "columnId": "stock_ledger_product_name",
+      "datasetId": "stock_ledger",
+      "column": "product_name",
+      "label": "Product",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "item",
+        "sku"
+      ]
+    },
+    {
+      "columnId": "stock_ledger_warehouse_name",
+      "datasetId": "stock_ledger",
+      "column": "warehouse_name",
+      "label": "Warehouse",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "warehouse",
+        "location"
+      ]
+    },
+    {
+      "columnId": "stock_ledger_batch_no",
+      "datasetId": "stock_ledger",
+      "column": "batch_no",
+      "label": "Batch No",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "batch",
+        "lot"
+      ]
+    },
+    {
+      "columnId": "stock_ledger_entry_type",
+      "datasetId": "stock_ledger",
+      "column": "entry_type",
+      "label": "Entry Type",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "movement type"
+      ]
+    },
+    {
+      "columnId": "stock_ledger_quantity",
+      "datasetId": "stock_ledger",
+      "column": "quantity",
+      "label": "Quantity",
+      "dataType": "quantity",
+      "defaultForDetail": true,
+      "synonyms": [
+        "qty"
+      ]
+    },
+    {
+      "columnId": "stock_ledger_value",
+      "datasetId": "stock_ledger",
+      "column": "total_cost",
+      "label": "Movement Value",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "value"
+      ]
+    },
+    {
+      "columnId": "stock_ledger_running_balance",
+      "datasetId": "stock_ledger",
+      "column": "running_balance",
+      "label": "Running Balance",
+      "dataType": "quantity",
+      "defaultForDetail": true,
+      "synonyms": [
+        "balance"
+      ]
+    },
+    {
+      "columnId": "stock_ledger_reference_number",
+      "datasetId": "stock_ledger",
+      "column": "reference_number",
+      "label": "Reference No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "reference"
+      ]
+    },
+    {
+      "columnId": "outstanding_party_type",
+      "datasetId": "party_outstanding",
+      "column": "party_type",
+      "label": "Party Type",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "customer supplier"
+      ]
+    },
+    {
+      "columnId": "outstanding_party_name",
+      "datasetId": "party_outstanding",
+      "column": "party_name",
+      "label": "Party",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "customer",
+        "supplier"
+      ]
+    },
+    {
+      "columnId": "outstanding_group_name",
+      "datasetId": "party_outstanding",
+      "column": "group_name",
+      "label": "Group",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "group"
+      ]
+    },
+    {
+      "columnId": "outstanding_invoice_date",
+      "datasetId": "party_outstanding",
+      "column": "invoice_date",
+      "label": "Invoice Date",
+      "dataType": "date",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill date"
+      ]
+    },
+    {
+      "columnId": "outstanding_invoice_no",
+      "datasetId": "party_outstanding",
+      "column": "invoice_no",
+      "label": "Invoice No",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill no"
+      ]
+    },
+    {
+      "columnId": "outstanding_voucher_no",
+      "datasetId": "party_outstanding",
+      "column": "voucher_no",
+      "label": "Voucher No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "voucher"
+      ]
+    },
+    {
+      "columnId": "outstanding_invoice_amount",
+      "datasetId": "party_outstanding",
+      "column": "invoice_amount",
+      "label": "Invoice Amount",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill amount"
+      ]
+    },
+    {
+      "columnId": "outstanding_amount_value",
+      "datasetId": "party_outstanding",
+      "column": "outstanding_amount",
+      "label": "Outstanding Amount",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "balance"
+      ]
+    },
+    {
+      "columnId": "outstanding_credit_balance",
+      "datasetId": "party_outstanding",
+      "column": "credit_balance",
+      "label": "Credit Balance",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "credit"
+      ]
+    },
+    {
+      "columnId": "outstanding_age_days",
+      "datasetId": "party_outstanding",
+      "column": "current_age_days",
+      "label": "Age Days",
+      "dataType": "number",
+      "defaultForDetail": true,
+      "synonyms": [
+        "ageing",
+        "days"
+      ]
+    },
+    {
+      "columnId": "tax_domain",
+      "datasetId": "tax_register",
+      "column": "tax_domain",
+      "label": "Tax Domain",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "sales purchase"
+      ]
+    },
+    {
+      "columnId": "tax_invoice_date",
+      "datasetId": "tax_register",
+      "column": "invoice_date",
+      "label": "Invoice Date",
+      "dataType": "date",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill date"
+      ]
+    },
+    {
+      "columnId": "tax_invoice_no",
+      "datasetId": "tax_register",
+      "column": "invoice_no",
+      "label": "Invoice No",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "bill no"
+      ]
+    },
+    {
+      "columnId": "tax_party_name",
+      "datasetId": "tax_register",
+      "column": "party_name",
+      "label": "Party",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "customer",
+        "supplier"
+      ]
+    },
+    {
+      "columnId": "tax_product_name",
+      "datasetId": "tax_register",
+      "column": "product_name",
+      "label": "Product",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "item",
+        "sku"
+      ]
+    },
+    {
+      "columnId": "tax_hsn_code",
+      "datasetId": "tax_register",
+      "column": "hsn_code",
+      "label": "HSN Code",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "hsn"
+      ]
+    },
+    {
+      "columnId": "taxable_amount_column",
+      "datasetId": "tax_register",
+      "column": "taxable_amount",
+      "label": "Taxable Amount",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "taxable"
+      ]
+    },
+    {
+      "columnId": "non_taxable_amount_column",
+      "datasetId": "tax_register",
+      "column": "non_taxable_amount",
+      "label": "Non Taxable Amount",
+      "dataType": "currency",
+      "defaultForDetail": false,
+      "synonyms": [
+        "non taxable"
+      ]
+    },
+    {
+      "columnId": "tax_rate_column",
+      "datasetId": "tax_register",
+      "column": "tax_rate",
+      "label": "Tax Rate",
+      "dataType": "number",
+      "defaultForDetail": true,
+      "synonyms": [
+        "gst rate",
+        "vat rate"
+      ]
+    },
+    {
+      "columnId": "tax_amount_column",
+      "datasetId": "tax_register",
+      "column": "tax_amount",
+      "label": "Tax Amount",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "gst",
+        "vat",
+        "tax"
+      ]
+    },
+    {
+      "columnId": "tax_net_amount",
+      "datasetId": "tax_register",
+      "column": "net_amount",
+      "label": "Net Amount",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "net amount"
+      ]
+    },
+    {
+      "columnId": "ledger_entry_date_column",
+      "datasetId": "ledger_entries",
+      "column": "entry_date",
+      "label": "Entry Date",
+      "dataType": "date",
+      "defaultForDetail": true,
+      "synonyms": [
+        "ledger date"
+      ]
+    },
+    {
+      "columnId": "ledger_posting_date",
+      "datasetId": "ledger_entries",
+      "column": "posting_date",
+      "label": "Posting Date",
+      "dataType": "date",
+      "defaultForDetail": false,
+      "synonyms": [
+        "posting date"
+      ]
+    },
+    {
+      "columnId": "ledger_voucher_no",
+      "datasetId": "ledger_entries",
+      "column": "voucher_no",
+      "label": "Voucher No",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "voucher",
+        "entry no"
+      ]
+    },
+    {
+      "columnId": "ledger_account_name",
+      "datasetId": "ledger_entries",
+      "column": "account_name",
+      "label": "Account",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "ledger",
+        "account"
+      ]
+    },
+    {
+      "columnId": "ledger_account_code",
+      "datasetId": "ledger_entries",
+      "column": "account_code",
+      "label": "Account Code",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "account no"
+      ]
+    },
+    {
+      "columnId": "ledger_account_type",
+      "datasetId": "ledger_entries",
+      "column": "account_type",
+      "label": "Account Type",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "type"
+      ]
+    },
+    {
+      "columnId": "ledger_party_name",
+      "datasetId": "ledger_entries",
+      "column": "party_name",
+      "label": "Party",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "party"
+      ]
+    },
+    {
+      "columnId": "ledger_counterparty_name",
+      "datasetId": "ledger_entries",
+      "column": "counterparty_name",
+      "label": "Counterparty",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "counterparty"
+      ]
+    },
+    {
+      "columnId": "ledger_debit_amount",
+      "datasetId": "ledger_entries",
+      "column": "debit_amount",
+      "label": "Debit",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "debit"
+      ]
+    },
+    {
+      "columnId": "ledger_credit_amount",
+      "datasetId": "ledger_entries",
+      "column": "credit_amount",
+      "label": "Credit",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "credit"
+      ]
+    },
+    {
+      "columnId": "ledger_signed_amount",
+      "datasetId": "ledger_entries",
+      "column": "signed_amount",
+      "label": "Balance",
+      "dataType": "currency",
+      "defaultForDetail": true,
+      "synonyms": [
+        "balance",
+        "amount"
+      ]
+    },
+    {
+      "columnId": "ledger_source",
+      "datasetId": "ledger_entries",
+      "column": "ledger_source",
+      "label": "Ledger Source",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "source"
+      ]
+    },
+    {
+      "columnId": "ledger_status",
+      "datasetId": "ledger_entries",
+      "column": "status",
+      "label": "Status",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": [
+        "status"
+      ]
+    },
+    {
+      "columnId": "sales_item_customer_gst_no",
+      "datasetId": "sales_items",
+      "column": "customer_gst_no",
+      "label": "Customer GST No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["customer gstin", "buyer gst", "customer gst"]
+    },
+    {
+      "columnId": "sales_item_customer_vat_no",
+      "datasetId": "sales_items",
+      "column": "customer_vat_no",
+      "label": "Customer VAT No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["customer vat", "buyer vat"]
+    },
+    {
+      "columnId": "sales_item_customer_pan_no",
+      "datasetId": "sales_items",
+      "column": "customer_pan_no",
+      "label": "Customer PAN No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["customer pan", "buyer pan"]
+    },
+    {
+      "columnId": "sales_item_customer_address",
+      "datasetId": "sales_items",
+      "column": "customer_address",
+      "label": "Customer Address",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["customer address", "buyer address"]
+    },
+    {
+      "columnId": "sales_item_customer_phone",
+      "datasetId": "sales_items",
+      "column": "customer_phone",
+      "label": "Customer Phone",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["customer phone", "buyer phone"]
+    },
+    {
+      "columnId": "sales_item_hsn_code",
+      "datasetId": "sales_items",
+      "column": "hsn_code",
+      "label": "HSN Code",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "synonyms": ["hsn", "hsn code"]
+    },
+    {
+      "columnId": "sales_invoice_customer_gst_no",
+      "datasetId": "sales_invoices",
+      "column": "customer_gst_no",
+      "label": "Customer GST No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["customer gstin", "buyer gst"]
+    },
+    {
+      "columnId": "sales_invoice_customer_vat_no",
+      "datasetId": "sales_invoices",
+      "column": "customer_vat_no",
+      "label": "Customer VAT No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["customer vat"]
+    },
+    {
+      "columnId": "sales_invoice_customer_pan_no",
+      "datasetId": "sales_invoices",
+      "column": "customer_pan_no",
+      "label": "Customer PAN No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["customer pan"]
+    },
+    {
+      "columnId": "sales_invoice_customer_address",
+      "datasetId": "sales_invoices",
+      "column": "customer_address",
+      "label": "Customer Address",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["customer address"]
+    },
+    {
+      "columnId": "purchase_item_supplier_gst_no",
+      "datasetId": "purchase_items",
+      "column": "supplier_gst_no",
+      "label": "Supplier GST No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["supplier gstin", "vendor gst"]
+    },
+    {
+      "columnId": "purchase_item_supplier_vat_no",
+      "datasetId": "purchase_items",
+      "column": "supplier_vat_no",
+      "label": "Supplier VAT No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["supplier vat"]
+    },
+    {
+      "columnId": "purchase_item_supplier_pan_no",
+      "datasetId": "purchase_items",
+      "column": "supplier_pan_no",
+      "label": "Supplier PAN No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["supplier pan"]
+    },
+    {
+      "columnId": "purchase_item_supplier_address",
+      "datasetId": "purchase_items",
+      "column": "supplier_address",
+      "label": "Supplier Address",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["supplier address"]
+    },
+    {
+      "columnId": "purchase_invoice_supplier_gst_no",
+      "datasetId": "purchase_invoices",
+      "column": "supplier_gst_no",
+      "label": "Supplier GST No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["supplier gstin"]
+    },
+    {
+      "columnId": "purchase_invoice_supplier_vat_no",
+      "datasetId": "purchase_invoices",
+      "column": "supplier_vat_no",
+      "label": "Supplier VAT No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["supplier vat"]
+    },
+    {
+      "columnId": "purchase_invoice_supplier_pan_no",
+      "datasetId": "purchase_invoices",
+      "column": "supplier_pan_no",
+      "label": "Supplier PAN No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["supplier pan"]
+    },
+    {
+      "columnId": "purchase_invoice_supplier_address",
+      "datasetId": "purchase_invoices",
+      "column": "supplier_address",
+      "label": "Supplier Address",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["supplier address"]
+    },
+    {
+      "columnId": "tax_party_gst_no",
+      "datasetId": "tax_register",
+      "column": "party_gst_no",
+      "label": "Party GST No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["party gst", "customer gst", "supplier gst"]
+    },
+    {
+      "columnId": "tax_party_vat_no",
+      "datasetId": "tax_register",
+      "column": "party_vat_no",
+      "label": "Party VAT No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["party vat"]
+    },
+    {
+      "columnId": "tax_party_pan_no",
+      "datasetId": "tax_register",
+      "column": "party_pan_no",
+      "label": "Party PAN No",
+      "dataType": "string",
+      "defaultForDetail": false,
+      "sensitive": true,
+      "synonyms": ["party pan"]
+    }
+  ]
+}

@@ -1,0 +1,1752 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../../../core/database/prisma.service';
+import { MargEdeService } from '../../marg-ede/marg-ede.service';
+import { InventoryReportsService } from './inventory-reports.service';
+import { ProcurementReportsService } from './procurement-reports.service';
+
+type PeriodKey = 'fy' | 'calendar' | 'last12';
+type ThreeSixtySearchType = 'item' | 'customer' | 'supplier';
+
+interface ReportContext {
+  asOf: Date;
+  monthStart: Date;
+  nextMonthStart: Date;
+  lastMonthStart: Date;
+  fiscalStart: Date;
+  priorFiscalStart: Date;
+  priorFiscalEnd: Date;
+  trendStart: Date;
+}
+
+@Injectable()
+export class ThreeSixtyReportsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventoryReports: InventoryReportsService,
+    private readonly procurementReports: ProcurementReportsService,
+    private readonly margEdeService: MargEdeService,
+  ) {}
+
+  async getItem360(tenantId: string, search?: string, period: PeriodKey = 'fy', locationId?: string) {
+    const ctx = await this.getContext(tenantId, period);
+    const item = await this.findItem(tenantId, search);
+    if (!item) {
+      throw new NotFoundException('No item found for the selected search.');
+    }
+
+    const isAllItems = item.is_all === true;
+    const productFilter = isAllItems
+      ? Prisma.sql`TRUE`
+      : item.product_id
+      ? Prisma.sql`a.product_id = ${item.product_id}::uuid`
+      : Prisma.sql`a.product_id IS NULL`;
+    const localProductFilter = isAllItems
+      ? Prisma.sql`TRUE`
+      : item.product_id
+        ? Prisma.sql`il.product_id = ${item.product_id}::uuid`
+        : Prisma.sql`FALSE`;
+    const batchProductFilter = isAllItems
+      ? Prisma.sql`TRUE`
+      : item.product_id
+        ? Prisma.sql`b.product_id = ${item.product_id}::uuid`
+        : Prisma.sql`FALSE`;
+    const poProductFilter = isAllItems
+      ? Prisma.sql`TRUE`
+      : item.product_id
+        ? Prisma.sql`pol.product_id = ${item.product_id}::uuid`
+        : Prisma.sql`FALSE`;
+    const ledgerProductFilter = isAllItems
+      ? Prisma.sql`TRUE`
+      : item.product_id
+        ? Prisma.sql`il.product_id = ${item.product_id}::uuid`
+        : Prisma.sql`FALSE`;
+    const margProductFilter = isAllItems
+      ? Prisma.sql`TRUE`
+      : item.marg_pid
+      ? Prisma.sql`mt.company_id = ${item.company_id} AND mt.pid = ${item.marg_pid}`
+      : Prisma.sql`FALSE`;
+    const margStockProductFilter = isAllItems
+      ? Prisma.sql`TRUE`
+      : item.marg_pid
+        ? Prisma.sql`ms.company_id = ${item.company_id} AND ms.pid = ${item.marg_pid}`
+        : Prisma.sql`FALSE`;
+    const actualLocationFilter = locationId ? Prisma.sql`AND a.location_id = ${locationId}::uuid` : Prisma.empty;
+    const margVoucherLocationFilter = locationId ? Prisma.sql`AND EXISTS (SELECT 1 FROM marg_branches mbf WHERE mbf.tenant_id = mv.tenant_id AND mbf.company_id = mv.company_id AND mbf.location_id = ${locationId}::uuid)` : Prisma.empty;
+    const inventoryLevelLocationFilter = locationId ? Prisma.sql`AND il.location_id = ${locationId}::uuid` : Prisma.empty;
+    const batchLocationFilter = locationId ? Prisma.sql`AND b.location_id = ${locationId}::uuid` : Prisma.empty;
+    const poLocationFilter = locationId ? Prisma.sql`AND po.location_id = ${locationId}::uuid` : Prisma.empty;
+    const ledgerLocationFilter = locationId ? Prisma.sql`AND il.location_id = ${locationId}::uuid` : Prisma.empty;
+    const inventoryFilter = this.inventoryReportFilter(item.product_id, locationId);
+    const [currentStockReport, batchInventoryReport, stockAgeingReport] = await Promise.all([
+        this.inventoryReports.getCurrentStock(tenantId, inventoryFilter),
+        this.inventoryReports.getBatchInventory(tenantId, inventoryFilter),
+        this.inventoryReports.getStockAgeing(tenantId, { ...inventoryFilter, bucketDays: [30, 60, 90] } as any),
+      ]);
+
+    const [kpi] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH movements AS (
+        SELECT
+          mv.date,
+          'SALES'::text AS kind,
+          ABS(COALESCE(mt.qty, 0))::float8 AS quantity,
+          ABS(COALESCE(mt.amount, 0))::float8 AS amount
+        FROM marg_vouchers mv
+        JOIN marg_transactions mt
+          ON mt.tenant_id = mv.tenant_id
+          AND mt.company_id = mv.company_id
+          AND mt.voucher = mv.voucher
+          AND ${this.compatibleSalesLineSql('mv', 'mt')}
+        WHERE mv.tenant_id = ${tenantId}::uuid
+          AND mv.type IN ('S', 'R', 'T')
+          AND ${margProductFilter}
+          ${margVoucherLocationFilter}
+        UNION ALL
+        SELECT
+          mv.date,
+          'PURCHASES'::text AS kind,
+          ABS(COALESCE(mt.qty, 0))::float8 AS quantity,
+          ABS(COALESCE(mt.amount, 0))::float8 AS amount
+        FROM marg_vouchers mv
+        JOIN marg_transactions mt
+          ON mt.tenant_id = mv.tenant_id
+          AND mt.company_id = mv.company_id
+          AND mt.voucher = mv.voucher
+          AND ${this.compatiblePurchaseLineSql('mv', 'mt')}
+        WHERE mv.tenant_id = ${tenantId}::uuid
+          AND mv.type IN ('P', 'B')
+          AND ${margProductFilter}
+          ${margVoucherLocationFilter}
+      )
+      SELECT
+        COALESCE(SUM(quantity) FILTER (WHERE kind = 'SALES' AND date >= ${ctx.monthStart}::date AND date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_sales_qty,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'SALES' AND date >= ${ctx.monthStart}::date AND date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_sales_value,
+        COALESCE(SUM(quantity) FILTER (WHERE kind = 'SALES' AND date >= ${ctx.lastMonthStart}::date AND date < ${ctx.monthStart}::date), 0)::float8 AS last_month_sales_qty,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'SALES' AND date >= ${ctx.lastMonthStart}::date AND date < ${ctx.monthStart}::date), 0)::float8 AS last_month_sales_value,
+        COALESCE(SUM(quantity) FILTER (WHERE kind = 'PURCHASES' AND date >= ${ctx.monthStart}::date AND date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_purchase_qty,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'PURCHASES' AND date >= ${ctx.monthStart}::date AND date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_purchase_value,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'SALES' AND date >= ${ctx.fiscalStart}::date AND date <= ${ctx.asOf}::date), 0)::float8 AS current_year_sales_value,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'SALES' AND date >= ${ctx.priorFiscalStart}::date AND date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS last_year_sales_value,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'PURCHASES' AND date >= ${ctx.fiscalStart}::date AND date <= ${ctx.asOf}::date), 0)::float8 AS current_year_purchase_value
+      FROM movements
+    `);
+
+    const [stock] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(on_hand_qty), 0)::float8 AS current_stock,
+        COALESCE(SUM(stock_value), 0)::float8 AS stock_value,
+        COALESCE(MAX(last_purchase_date), NULL) AS last_purchase_date
+      FROM (
+        SELECT
+          il.on_hand_qty::float8 AS on_hand_qty,
+          COALESCE(il.inventory_value, il.on_hand_qty * COALESCE(il.average_cost, il.standard_cost, p.standard_cost, 0))::float8 AS stock_value,
+          il.last_receipt_date AS last_purchase_date
+        FROM inventory_levels il
+        JOIN products p ON p.id = il.product_id
+        WHERE il.tenant_id = ${tenantId}::uuid AND ${localProductFilter} ${inventoryLevelLocationFilter}
+        UNION ALL
+        SELECT
+          COALESCE(ms.stock, 0)::float8 AS on_hand_qty,
+          (COALESCE(ms.stock, 0) * COALESCE(ms.p_rate, ms.lp_rate, 0))::float8 AS stock_value,
+          ms.sup_date AS last_purchase_date
+        FROM marg_stocks ms
+        WHERE ms.tenant_id = ${tenantId}::uuid
+          AND ms.source_deleted = false
+          AND ${margStockProductFilter}
+      ) s
+    `);
+
+    const [openPo] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(GREATEST(pol.quantity - pol.received_qty, 0)), 0)::float8 AS open_po_qty,
+        COALESCE(SUM(GREATEST(pol.quantity - pol.received_qty, 0) * pol.unit_price), 0)::float8 AS open_po_value,
+        COUNT(DISTINCT po.id)::int AS open_po_count
+      FROM purchase_order_lines pol
+      JOIN purchase_orders po ON po.id = pol.purchase_order_id
+      WHERE po.tenant_id = ${tenantId}::uuid
+        AND po.status NOT IN ('CLOSED', 'CANCELLED')
+        AND ${poProductFilter}
+        ${poLocationFilter}
+    `);
+
+    const [margReturns] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))) FILTER (WHERE mt.type IN ('R', 'T')), 0)::float8 AS sales_return_value,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))) FILTER (WHERE mt.type = 'B'), 0)::float8 AS purchase_return_value
+      FROM marg_transactions mt
+      WHERE mt.tenant_id = ${tenantId}::uuid
+        AND mt.date >= ${ctx.fiscalStart}::date
+        AND mt.date <= ${ctx.asOf}::date
+        AND ${margProductFilter}
+    `);
+
+    const [itemMargin] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(COALESCE(mt.amount, 0)), 0)::float8 AS sales_value,
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, 0)), 0)::float8 AS cost_value
+      FROM marg_transactions mt
+      LEFT JOIN LATERAL (
+        SELECT p_rate, lp_rate
+        FROM marg_stocks ms
+        WHERE ms.tenant_id = mt.tenant_id AND ms.company_id = mt.company_id AND ms.pid = mt.pid
+        ORDER BY ms.updated_at DESC
+        LIMIT 1
+      ) ms ON TRUE
+      WHERE mt.tenant_id = ${tenantId}::uuid
+        AND mt.type = 'S'
+        AND mt.date >= ${ctx.fiscalStart}::date
+        AND mt.date <= ${ctx.asOf}::date
+        AND ${margProductFilter}
+    `);
+
+    const monthlyTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH monthly AS (
+        SELECT
+          date_trunc('month', mv.date) AS month_bucket,
+          'SALES'::text AS kind,
+          ABS(COALESCE(mt.qty, 0))::float8 AS quantity,
+          ABS(COALESCE(mt.amount, 0))::float8 AS amount
+        FROM marg_vouchers mv
+        JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
+        WHERE mv.tenant_id = ${tenantId}::uuid AND mv.type IN ('S', 'R', 'T') AND ${margProductFilter} ${margVoucherLocationFilter}
+        UNION ALL
+        SELECT
+          date_trunc('month', mv.date) AS month_bucket,
+          'PURCHASES'::text AS kind,
+          ABS(COALESCE(mt.qty, 0))::float8 AS quantity,
+          ABS(COALESCE(mt.amount, 0))::float8 AS amount
+        FROM marg_vouchers mv
+        JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatiblePurchaseLineSql('mv', 'mt')}
+        WHERE mv.tenant_id = ${tenantId}::uuid AND mv.type IN ('P', 'B') AND ${margProductFilter} ${margVoucherLocationFilter}
+      )
+      SELECT
+        to_char(buckets.month_bucket, 'Mon YYYY') AS month,
+        COALESCE(SUM(monthly.amount) FILTER (WHERE monthly.kind = 'SALES'), 0)::float8 AS sales_value,
+        COALESCE(SUM(monthly.amount) FILTER (WHERE monthly.kind = 'PURCHASES'), 0)::float8 AS purchase_value,
+        COALESCE(SUM(monthly.quantity) FILTER (WHERE monthly.kind = 'SALES'), 0)::float8 AS sales_qty
+      FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') AS buckets(month_bucket)
+      LEFT JOIN monthly ON monthly.month_bucket = buckets.month_bucket
+      GROUP BY buckets.month_bucket
+      ORDER BY buckets.month_bucket
+    `);
+
+    const topBuyers = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0))) DESC)::int AS rank,
+        COALESCE(c.name, mp.par_name, 'Unmapped Customer') AS name,
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS quantity,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS value
+      FROM marg_vouchers mv
+      JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
+      LEFT JOIN marg_parties mp ON mp.tenant_id = mv.tenant_id AND mp.company_id = mv.company_id AND mp.cid = mv.cid
+      LEFT JOIN customers c ON c.id = mp.customer_id
+      WHERE mv.tenant_id = ${tenantId}::uuid
+        AND mv.type IN ('S', 'R', 'T')
+        AND ${margProductFilter}
+        ${margVoucherLocationFilter}
+        AND mv.date >= ${ctx.monthStart}::date
+        AND mv.date < ${ctx.nextMonthStart}::date
+      GROUP BY COALESCE(c.name, mp.par_name, 'Unmapped Customer')
+      ORDER BY value DESC
+      LIMIT 5
+    `);
+
+    const locationSales = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(l.code, l.name, mb.name, mb.branch, 'Unmapped') AS location,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS sales_value
+      FROM marg_vouchers mv
+      JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
+      LEFT JOIN marg_branches mb ON mb.tenant_id = mv.tenant_id AND mb.company_id = mv.company_id
+      LEFT JOIN locations l ON l.id = mb.location_id
+      WHERE mv.tenant_id = ${tenantId}::uuid
+        AND mv.type IN ('S', 'R', 'T')
+        AND ${margProductFilter}
+        ${margVoucherLocationFilter}
+        AND mv.date >= ${ctx.fiscalStart}::date
+        AND mv.date <= ${ctx.asOf}::date
+      GROUP BY COALESCE(l.code, l.name, mb.name, mb.branch, 'Unmapped')
+      ORDER BY sales_value DESC
+      LIMIT 6
+    `);
+
+    const batches = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT * FROM (
+        SELECT
+          b.batch_number,
+          COALESCE(b.available_qty, b.quantity, 0)::float8 AS quantity,
+          b.expiry_date,
+          CASE WHEN b.expiry_date IS NOT NULL THEN (b.expiry_date::date - CURRENT_DATE) ELSE NULL END::int AS days_left,
+          COALESCE(b.cost_per_unit, 0)::float8 AS rate
+        FROM batches b
+        WHERE b.tenant_id = ${tenantId}::uuid AND ${batchProductFilter} ${batchLocationFilter}
+        UNION ALL
+        SELECT
+          ms.batch AS batch_number,
+          COALESCE(ms.stock, 0)::float8 AS quantity,
+          ms.expiry AS expiry_date,
+          CASE WHEN ms.expiry IS NOT NULL THEN (ms.expiry::date - CURRENT_DATE) ELSE NULL END::int AS days_left,
+          COALESCE(ms.p_rate, ms.lp_rate, 0)::float8 AS rate
+        FROM marg_stocks ms
+        WHERE ms.tenant_id = ${tenantId}::uuid
+          AND ms.source_deleted = false
+          AND COALESCE(ms.stock, 0) > 0
+          AND ${margStockProductFilter}
+      ) b
+      ORDER BY expiry_date ASC NULLS LAST
+      LIMIT 8
+    `);
+
+    const stockAgeing = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH stock_rows AS (
+        SELECT
+          GREATEST((CURRENT_DATE - COALESCE(b.created_at::date, b.manufacturing_date, CURRENT_DATE)), 0)::int AS age_days,
+          COALESCE(b.available_qty, b.quantity, 0)::float8 AS quantity,
+          (COALESCE(b.available_qty, b.quantity, 0) * COALESCE(b.cost_per_unit, 0))::float8 AS value
+        FROM batches b
+        WHERE b.tenant_id = ${tenantId}::uuid
+          AND ${batchProductFilter}
+          ${batchLocationFilter}
+        UNION ALL
+        SELECT
+          GREATEST((CURRENT_DATE - COALESCE(ms.sup_date, ms.bat_date, ms.created_at::date, CURRENT_DATE)), 0)::int AS age_days,
+          COALESCE(ms.stock, 0)::float8 AS quantity,
+          (COALESCE(ms.stock, 0) * COALESCE(ms.p_rate, ms.lp_rate, 0))::float8 AS value
+        FROM marg_stocks ms
+        WHERE ms.tenant_id = ${tenantId}::uuid
+          AND ms.source_deleted = false
+          AND COALESCE(ms.stock, 0) > 0
+          AND ${margStockProductFilter}
+      ),
+      bucketed AS (
+        SELECT
+          CASE
+            WHEN age_days <= 30 THEN '0-30'
+            WHEN age_days <= 60 THEN '31-60'
+            WHEN age_days <= 90 THEN '61-90'
+            ELSE '91+'
+          END AS bucket,
+          CASE
+            WHEN age_days <= 30 THEN 1
+            WHEN age_days <= 60 THEN 2
+            WHEN age_days <= 90 THEN 3
+            ELSE 4
+          END AS sort_order,
+          quantity,
+          value
+        FROM stock_rows
+        WHERE quantity > 0
+      )
+      SELECT
+        bucket,
+        COALESCE(SUM(quantity), 0)::float8 AS quantity,
+        COALESCE(SUM(value), 0)::float8 AS value,
+        CASE bucket WHEN '0-30' THEN 'Fresh' WHEN '31-60' THEN 'Healthy' WHEN '61-90' THEN 'Monitor' ELSE 'Slow' END AS status
+      FROM bucketed
+      GROUP BY bucket, sort_order
+      ORDER BY sort_order
+    `);
+
+    const stockMovement = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        to_char(month_bucket, 'Mon YYYY') AS month,
+        COALESCE(SUM(il.quantity) FILTER (WHERE il.entry_type::text IN ('LEDGER_RECEIPT', 'LEDGER_TRANSFER_IN', 'LEDGER_PRODUCTION_RECEIPT', 'LEDGER_RETURN')), 0)::float8 AS receipt_qty,
+        COALESCE(SUM(ABS(il.quantity)) FILTER (WHERE il.entry_type::text IN ('LEDGER_ISSUE', 'LEDGER_TRANSFER_OUT', 'LEDGER_PRODUCTION_ISSUE', 'LEDGER_SCRAP')), 0)::float8 AS issue_qty
+      FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') month_bucket
+      LEFT JOIN inventory_ledger il
+        ON il.tenant_id = ${tenantId}::uuid
+        AND ${ledgerProductFilter}
+        ${ledgerLocationFilter}
+        AND date_trunc('month', il.transaction_date) = month_bucket
+      GROUP BY month_bucket
+      ORDER BY month_bucket
+    `);
+
+    const openPoRows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        po.order_number,
+        po.order_date,
+        po.expected_date,
+        COALESCE(s.name, '-') AS supplier_name,
+        COALESCE(SUM(pol.quantity), 0)::float8 AS ordered_qty,
+        COALESCE(SUM(pol.received_qty), 0)::float8 AS received_qty,
+        COALESCE(SUM(GREATEST(pol.quantity - pol.received_qty, 0)), 0)::float8 AS pending_qty,
+        COALESCE(SUM(GREATEST(pol.quantity - pol.received_qty, 0) * pol.unit_price), 0)::float8 AS pending_value,
+        po.status::text AS status
+      FROM purchase_order_lines pol
+      JOIN purchase_orders po ON po.id = pol.purchase_order_id
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
+      WHERE po.tenant_id = ${tenantId}::uuid
+        AND po.status NOT IN ('CLOSED', 'CANCELLED')
+        AND ${poProductFilter}
+        ${poLocationFilter}
+      GROUP BY po.id, po.order_number, po.order_date, po.expected_date, s.name, po.status
+      ORDER BY po.expected_date ASC
+      LIMIT 8
+    `);
+
+    const totalSales = Number(kpi.current_month_sales_value ?? 0);
+    const lastSales = Number(kpi.last_month_sales_value ?? 0);
+    const reportStock = this.currentStockFromReport(currentStockReport?.data ?? []);
+    const stockQty = reportStock.hasRows ? reportStock.currentStock : Number(stock.current_stock ?? 0);
+    const stockValue = reportStock.hasRows ? reportStock.stockValue : Number(stock.stock_value ?? 0);
+    const effectiveBatches = batchInventoryReport?.data?.length
+      ? this.batchesFromInventoryReport(batchInventoryReport.data)
+      : batches;
+    const effectiveStockAgeing = stockAgeingReport?.summary?.length
+      ? this.stockAgeingFromInventoryReport(stockAgeingReport.summary)
+      : this.addQuantityShare(stockAgeing);
+    const avgDailySales = Number(kpi.current_month_sales_qty ?? 0) / Math.max(1, this.daysElapsedInMonth(ctx.asOf));
+
+    return {
+      asOf: ctx.asOf,
+      profile: {
+        code: item.sku,
+        name: item.product_name,
+        category: item.category,
+        brand: item.brand,
+        company: item.company,
+        companyName: item.company_name,
+        companyDisplay: item.company_display,
+        salt: item.salt,
+        saltName: item.salt_name,
+        saltDisplay: item.salt_display,
+        productGroup: item.product_group,
+        productGroupName: item.product_group_name,
+        productGroupDisplay: item.product_group_display,
+        hsnCode: item.hsn_code,
+        uom: item.uom,
+        uomName: item.uom_name,
+        uomDisplay: item.uom_display,
+        mrp: item.mrp,
+        sellingPrice: item.selling_price,
+        lastPurchaseDate: reportStock.lastUpdated ?? stock.last_purchase_date,
+      },
+      kpis: {
+        currentStock: stockQty,
+        stockValue,
+        currentMonthSalesQty: Number(kpi.current_month_sales_qty ?? 0),
+        currentMonthSalesValue: totalSales,
+        currentMonthPurchaseQty: Number(kpi.current_month_purchase_qty ?? 0),
+        currentMonthPurchaseValue: Number(kpi.current_month_purchase_value ?? 0),
+        currentYearSalesValue: Number(kpi.current_year_sales_value ?? 0),
+        currentYearPurchaseValue: Number(kpi.current_year_purchase_value ?? 0),
+        momSalesChangePct: this.pctChange(totalSales, lastSales),
+        yoySalesChangePct: this.pctChange(Number(kpi.current_year_sales_value ?? 0), Number(kpi.last_year_sales_value ?? 0)),
+        openPoQty: Number(openPo.open_po_qty ?? 0),
+        openPoValue: Number(openPo.open_po_value ?? 0),
+        openPoCount: Number(openPo.open_po_count ?? 0),
+        daysStockCover: avgDailySales > 0 ? stockQty / avgDailySales : null,
+        returnPct: totalSales > 0 ? Number(margReturns.sales_return_value ?? 0) / totalSales * 100 : null,
+        grossMargin: Number(itemMargin.sales_value ?? 0) - Number(itemMargin.cost_value ?? 0),
+        marginPct: Number(itemMargin.sales_value ?? 0) > 0
+          ? (Number(itemMargin.sales_value ?? 0) - Number(itemMargin.cost_value ?? 0)) / Number(itemMargin.sales_value ?? 0) * 100
+          : null,
+      },
+      charts: { monthlyTrend, locationSales, stockMovement },
+      tables: {
+        topBuyers: this.addShare(topBuyers),
+        batches: effectiveBatches,
+        stockAgeing: effectiveStockAgeing,
+        openPurchaseOrders: openPoRows,
+      },
+      insights: this.itemInsights(stockQty, avgDailySales, Number(openPo.open_po_qty ?? 0), effectiveBatches),
+    };
+  }
+
+  async searchOptions(
+    tenantId: string,
+    type: ThreeSixtySearchType,
+    search?: string,
+    limit = 25,
+  ): Promise<Array<{
+    value: string;
+    label: string;
+    code: string | null;
+    description: string | null;
+    source: 'LOCAL' | 'MARG';
+  }>> {
+    const safeLimit = Math.min(Math.max(Number(limit) || 25, 1), 50);
+    const term = this.searchTerm(search);
+
+    if (type === 'item') {
+      const rows = await this.prisma.$queryRaw<Array<{ value: string; label: string; code: string | null; description: string | null; source: 'LOCAL' | 'MARG'; rank: number }>>(Prisma.sql`
+        SELECT value, label, code, description, source, rank
+        FROM (
+          SELECT
+            p.code AS value,
+            p.name AS label,
+            p.code,
+            NULLIF(CONCAT_WS(' | ', NULLIF(p.category, ''), NULLIF(p.unit_of_measure, '')), '') AS description,
+            'LOCAL'::text AS source,
+            CASE
+              WHEN p.code ILIKE ${term} THEN 0
+              WHEN p.name ILIKE ${term} THEN 1
+              ELSE 2
+            END AS rank
+          FROM products p
+          WHERE p.tenant_id = ${tenantId}::uuid
+            AND (${term} = '%%' OR p.code ILIKE ${term} OR p.name ILIKE ${term})
+          UNION ALL
+          SELECT
+            mp.code AS value,
+            mp.name AS label,
+            mp.code,
+            NULLIF(CONCAT_WS(' | ', NULLIF(mp.g_code, ''), NULLIF(mp.g_code3, ''), NULLIF(mp.g_code5, ''), NULLIF(mp.g_code6, ''), NULLIF(mp.unit, ''), mp.pid), '') AS description,
+            'MARG'::text AS source,
+            CASE
+              WHEN mp.code ILIKE ${term} THEN 0
+              WHEN mp.name ILIKE ${term} THEN 1
+              ELSE 2
+            END AS rank
+          FROM marg_products mp
+          WHERE mp.tenant_id = ${tenantId}::uuid
+            AND (${term} = '%%' OR mp.code ILIKE ${term} OR mp.name ILIKE ${term} OR mp.pid ILIKE ${term})
+            AND NOT EXISTS (
+              SELECT 1 FROM products p
+              WHERE p.tenant_id = mp.tenant_id AND (p.id = mp.product_id OR p.code = mp.code)
+            )
+        ) options
+        ORDER BY rank, label
+        LIMIT ${safeLimit}
+      `);
+      return rows;
+    }
+
+    if (type === 'customer') {
+      const rows = await this.prisma.$queryRaw<Array<{ value: string; label: string; code: string | null; description: string | null; source: 'LOCAL' | 'MARG'; rank: number }>>(Prisma.sql`
+        SELECT value, label, code, description, source, rank
+        FROM (
+          SELECT
+            c.code AS value,
+            c.name AS label,
+            c.code,
+            NULLIF(CONCAT_WS(' | ', NULLIF(c.segment, ''), NULLIF(mp.gst_no, ''), NULLIF(COALESCE(mp.phone1, mp.phone2, mp.phone3, mp.phone4), '')), '') AS description,
+            'LOCAL'::text AS source,
+            CASE
+              WHEN c.code ILIKE ${term} THEN 0
+              WHEN c.name ILIKE ${term} THEN 1
+              ELSE 2
+            END AS rank
+          FROM customers c
+          LEFT JOIN marg_parties mp ON mp.customer_id = c.id
+          WHERE c.tenant_id = ${tenantId}::uuid
+            AND (${term} = '%%' OR c.code ILIKE ${term} OR c.name ILIKE ${term} OR COALESCE(mp.gst_no, '') ILIKE ${term})
+          UNION ALL
+          SELECT
+            mp.cid AS value,
+            mp.par_name AS label,
+            mp.cid AS code,
+            NULLIF(CONCAT_WS(' | ', NULLIF(mp.gst_no, ''), NULLIF(COALESCE(mp.phone1, mp.phone2, mp.phone3, mp.phone4), ''), NULLIF(mp.area, ''), NULLIF(mp.route, '')), '') AS description,
+            'MARG'::text AS source,
+            CASE
+              WHEN mp.cid ILIKE ${term} THEN 0
+              WHEN mp.par_name ILIKE ${term} THEN 1
+              ELSE 2
+            END AS rank
+          FROM marg_parties mp
+          WHERE mp.tenant_id = ${tenantId}::uuid
+            AND mp.is_deleted = false
+            AND (${term} = '%%' OR mp.cid ILIKE ${term} OR mp.par_name ILIKE ${term} OR COALESCE(mp.gst_no, '') ILIKE ${term} OR COALESCE(mp.phone1, '') ILIKE ${term})
+            AND EXISTS (
+              SELECT 1 FROM marg_vouchers mv
+              WHERE mv.tenant_id = mp.tenant_id AND mv.company_id = mp.company_id AND mv.cid = mp.cid AND mv.type = 'S'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM customers c
+              WHERE c.tenant_id = mp.tenant_id AND (c.id = mp.customer_id OR c.code = mp.cid)
+            )
+        ) options
+        ORDER BY rank, label
+        LIMIT ${safeLimit}
+      `);
+      return rows;
+    }
+
+    if (type === 'supplier') {
+      const rows = await this.prisma.$queryRaw<Array<{ value: string; label: string; code: string | null; description: string | null; source: 'LOCAL' | 'MARG'; rank: number }>>(Prisma.sql`
+        SELECT value, label, code, description, source, rank
+        FROM (
+          SELECT
+            s.code AS value,
+            s.name AS label,
+            s.code,
+            NULLIF(CONCAT_WS(' | ', NULLIF(s.contact_name, ''), NULLIF(s.phone, ''), NULLIF(s.payment_terms, ''), NULLIF(mp.gst_no, '')), '') AS description,
+            'LOCAL'::text AS source,
+            CASE
+              WHEN s.code ILIKE ${term} THEN 0
+              WHEN s.name ILIKE ${term} THEN 1
+              ELSE 2
+            END AS rank
+          FROM suppliers s
+          LEFT JOIN marg_parties mp
+            ON mp.tenant_id = s.tenant_id
+            AND (
+              s.external_id = CONCAT('marg:', mp.company_id::text, ':', mp.cid)
+              OR COALESCE(s.attributes->>'margCid', '') = mp.cid
+            )
+          WHERE s.tenant_id = ${tenantId}::uuid
+            AND (${term} = '%%' OR s.code ILIKE ${term} OR s.name ILIKE ${term} OR COALESCE(mp.gst_no, '') ILIKE ${term})
+          UNION ALL
+          SELECT
+            mp.cid AS value,
+            mp.par_name AS label,
+            mp.cid AS code,
+            NULLIF(CONCAT_WS(' | ', NULLIF(mp.gst_no, ''), NULLIF(COALESCE(mp.phone1, mp.phone2, mp.phone3, mp.phone4), ''), NULLIF(mp.area, ''), NULLIF(mp.route, '')), '') AS description,
+            'MARG'::text AS source,
+            CASE
+              WHEN mp.cid ILIKE ${term} THEN 0
+              WHEN mp.par_name ILIKE ${term} THEN 1
+              ELSE 2
+            END AS rank
+          FROM marg_parties mp
+          WHERE mp.tenant_id = ${tenantId}::uuid
+            AND mp.is_deleted = false
+            AND (${term} = '%%' OR mp.cid ILIKE ${term} OR mp.par_name ILIKE ${term} OR COALESCE(mp.gst_no, '') ILIKE ${term} OR COALESCE(mp.phone1, '') ILIKE ${term})
+            AND EXISTS (
+              SELECT 1 FROM marg_vouchers mv
+              WHERE mv.tenant_id = mp.tenant_id AND mv.company_id = mp.company_id AND mv.cid = mp.cid AND mv.type = 'P'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM suppliers s
+              WHERE s.tenant_id = mp.tenant_id
+                AND (
+                  s.code = mp.cid
+                  OR s.external_id = CONCAT('marg:', mp.company_id::text, ':', mp.cid)
+                  OR COALESCE(s.attributes->>'margCid', '') = mp.cid
+                )
+            )
+        ) options
+        ORDER BY rank, label
+        LIMIT ${safeLimit}
+      `);
+      return rows;
+    }
+
+    throw new BadRequestException('type must be item, customer, or supplier');
+  }
+
+  async getCustomer360(tenantId: string, search?: string, period: PeriodKey = 'fy', locationId?: string) {
+    const ctx = await this.getContext(tenantId, period);
+    const customer = await this.findCustomer(tenantId, search);
+    if (!customer) throw new NotFoundException('No customer found for the selected search.');
+
+    const isAllCustomers = customer.is_all === true;
+    const margCustomerFilter = isAllCustomers
+      ? Prisma.sql`TRUE`
+      : customer.cid
+      ? Prisma.sql`mv.company_id = ${customer.company_id} AND mv.cid = ${customer.cid}`
+      : Prisma.sql`FALSE`;
+    const outstandingFilter = isAllCustomers
+      ? Prisma.sql`TRUE`
+      : customer.cid
+      ? Prisma.sql`mo.company_id = ${customer.company_id} AND mo.ord = ${customer.cid}`
+      : Prisma.sql`FALSE`;
+    const [voucherSales] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date), 0)::float8 AS current_year_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.priorFiscalStart}::date AND mv.date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS last_year_sales,
+        COUNT(DISTINCT mv.voucher) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date)::int AS invoice_count,
+        MAX(mv.date) AS last_invoice_date
+      FROM marg_vouchers mv
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.type = 'S' AND ${margCustomerFilter}
+    `);
+
+    const salesBase = voucherSales;
+    const outstanding = await this.getOutstandingSnapshot(tenantId, customer.cid, customer.company_id, 'CUSTOMER');
+
+    const monthlyTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        to_char(month_bucket, 'Mon YYYY') AS month,
+        COALESCE(SUM(mv.final_amt), 0)::float8 AS sales_value
+      FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') month_bucket
+      LEFT JOIN marg_vouchers mv
+        ON mv.tenant_id = ${tenantId}::uuid
+        AND mv.type = 'S'
+        AND ${margCustomerFilter}
+        AND date_trunc('month', mv.date) = month_bucket
+      GROUP BY month_bucket
+      ORDER BY month_bucket
+    `);
+
+    const topItems = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0))) DESC)::int AS rank,
+        COALESCE(p.name, mprod.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference') AS name,
+        COALESCE(p.code, mprod.code, mt.pid) AS code,
+        CASE WHEN NULLIF(TRIM(COALESCE(p.product_company, mprod.g_code)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.product_company, mprod.g_code)) || ' - ' || COALESCE(pc.name, 'Unknown company (' || TRIM(COALESCE(p.product_company, mprod.g_code)) || ')') END AS company,
+        CASE WHEN NULLIF(TRIM(COALESCE(p.salt, mprod.g_code3)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.salt, mprod.g_code3)) || ' - ' || COALESCE(ps.name, 'Unknown salt (' || TRIM(COALESCE(p.salt, mprod.g_code3)) || ')') END AS salt,
+        CASE WHEN NULLIF(TRIM(COALESCE(p.product_group, mprod.g_code5)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.product_group, mprod.g_code5)) || ' - ' || COALESCE(pg.name, 'Unknown group (' || TRIM(COALESCE(p.product_group, mprod.g_code5)) || ')') END AS "productGroup",
+        mprod.g_code6 AS "hsnCode",
+        CASE WHEN p.id IS NOT NULL THEN 'MAPPED' WHEN mprod.id IS NOT NULL THEN 'STAGED_PRODUCT_NOT_PROJECTED' ELSE 'MISSING_MARG_PRODUCT_MASTER' END AS "mappingStatus",
+        NULL::text AS "missingReason",
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS quantity,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS value
+      FROM marg_vouchers mv
+      JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
+      LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
+      LEFT JOIN products p ON p.tenant_id = mt.tenant_id AND p.id = mprod.product_id
+      LEFT JOIN product_companies pc ON pc.tenant_id = mt.tenant_id AND pc.code = NULLIF(TRIM(COALESCE(p.product_company, mprod.g_code)), '')
+      LEFT JOIN product_salts ps ON ps.tenant_id = mt.tenant_id AND ps.code = NULLIF(TRIM(COALESCE(p.salt, mprod.g_code3)), '')
+      LEFT JOIN product_categories pg ON pg.tenant_id = mt.tenant_id AND pg.code = NULLIF(TRIM(COALESCE(p.product_group, mprod.g_code5)), '')
+      WHERE mv.tenant_id = ${tenantId}::uuid
+        AND mv.type IN ('S', 'R', 'T')
+        AND ${margCustomerFilter}
+        AND mv.date >= ${ctx.fiscalStart}::date
+        AND mv.date <= ${ctx.asOf}::date
+      GROUP BY COALESCE(p.name, mprod.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference'),
+        COALESCE(p.code, mprod.code, mt.pid), COALESCE(p.product_company, mprod.g_code), COALESCE(p.salt, mprod.g_code3),
+        COALESCE(p.product_group, mprod.g_code5), pc.name, ps.name, pg.name, mprod.g_code6, mt.tenant_id,
+        CASE WHEN p.id IS NOT NULL THEN 'MAPPED' WHEN mprod.id IS NOT NULL THEN 'STAGED_PRODUCT_NOT_PROJECTED' ELSE 'MISSING_MARG_PRODUCT_MASTER' END
+      ORDER BY value DESC
+      LIMIT 5
+    `);
+
+    const paymentDelayTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        to_char(month_bucket, 'Mon YYYY') AS month,
+        COALESCE(AVG(GREATEST(GREATEST(COALESCE(NULLIF(mo.days, 0), CURRENT_DATE - mo.date::date), 0) - COALESCE(${customer.credit_days ?? 0}, 0), 0)), 0)::float8 AS delay_days
+      FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') month_bucket
+      LEFT JOIN marg_outstandings mo
+        ON mo.tenant_id = ${tenantId}::uuid
+        AND ${outstandingFilter}
+        AND COALESCE(mo.balance, 0) <> 0
+        AND COALESCE(mo.group_code, '') LIKE 'C%'
+        AND date_trunc('month', mo.date) = month_bucket
+      GROUP BY month_bucket
+      ORDER BY month_bucket
+    `);
+
+    const [returnInsight] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS return_value,
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS return_qty,
+        COUNT(DISTINCT mv.company_id || ':' || mv.voucher)::int AS return_count
+      FROM marg_vouchers mv
+      JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
+      WHERE mv.tenant_id = ${tenantId}::uuid
+        AND mv.type IN ('R', 'T')
+        AND ${margCustomerFilter}
+        AND mv.date >= ${ctx.fiscalStart}::date
+        AND mv.date <= ${ctx.asOf}::date
+    `);
+
+    const [profitability] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS sales_value,
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0)), 0)::float8 AS estimated_cost
+      FROM marg_vouchers mv
+      JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
+      LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
+      LEFT JOIN products p ON p.tenant_id = mt.tenant_id AND p.id = mprod.product_id
+      LEFT JOIN LATERAL (
+        SELECT p_rate, lp_rate FROM marg_stocks ms
+        WHERE ms.tenant_id = mt.tenant_id AND ms.company_id = mt.company_id AND ms.pid = mt.pid
+        ORDER BY ms.updated_at DESC LIMIT 1
+      ) ms ON TRUE
+      WHERE mv.tenant_id = ${tenantId}::uuid
+        AND mv.type = 'S'
+        AND ${margCustomerFilter}
+        AND mv.date >= ${ctx.fiscalStart}::date
+        AND mv.date <= ${ctx.asOf}::date
+    `);
+
+    const [lastPayment] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        map.date AS last_payment_date,
+        ABS(map.amount)::float8 AS last_payment_amount
+      FROM marg_account_postings map
+      WHERE map.tenant_id = ${tenantId}::uuid
+        AND ${isAllCustomers ? Prisma.sql`TRUE` : customer.cid ? Prisma.sql`map.company_id = ${customer.company_id} AND (map.code = ${customer.cid} OR map.code1 = ${customer.cid})` : Prisma.sql`FALSE`}
+        AND map.date <= ${ctx.asOf}::date
+      ORDER BY map.date DESC, ABS(map.amount) DESC
+      LIMIT 1
+    `);
+
+    const currentMonthSales = Number(salesBase.current_month_sales ?? 0);
+    const lastMonthSales = Number(salesBase.last_month_sales ?? 0);
+    const totalOutstanding = Number(outstanding.total_outstanding ?? 0);
+    const creditLimit = Number(customer.credit_limit ?? customer.marg_credit ?? 0);
+    const invoiceCount = Number(salesBase.invoice_count ?? 0);
+    const selectedDays = this.periodDays(ctx);
+
+    return {
+      asOf: ctx.asOf,
+      profile: {
+        code: customer.code,
+        name: customer.name,
+        type: customer.type,
+        gstNo: customer.gst_no,
+        phone: customer.phone,
+        creditLimit,
+        creditDays: isAllCustomers ? null : customer.credit_days,
+        salesPerson: customer.sales_person,
+        lastInvoiceDate: salesBase.last_invoice_date,
+      },
+      kpis: {
+        currentMonthSales,
+        lastMonthSales,
+        momSalesChangePct: this.pctChange(currentMonthSales, lastMonthSales),
+        currentYearSales: Number(salesBase.current_year_sales ?? 0),
+        yoySalesChangePct: this.pctChange(Number(salesBase.current_year_sales ?? 0), Number(salesBase.last_year_sales ?? 0)),
+        outstandingAmount: totalOutstanding,
+        creditBalance: Number(outstanding.credit_balance ?? 0),
+        notDueAmount: Number(outstanding.bucket_0_30 ?? 0),
+        dueThisWeekAmount: Number(outstanding.bucket_31_60 ?? 0),
+        overdueAmount: Number(outstanding.bucket_31_60 ?? 0) + Number(outstanding.bucket_61_90 ?? 0) + Number(outstanding.bucket_91_plus ?? 0),
+        averagePaymentDays: Number(outstanding.avg_payment_days ?? 0),
+        lastPaymentAmount: lastPayment?.last_payment_amount == null ? null : Number(lastPayment.last_payment_amount),
+        creditLimitUsagePct: creditLimit > 0 ? totalOutstanding / creditLimit * 100 : null,
+        invoiceCount,
+        riskScore: this.customerRiskScore(totalOutstanding, creditLimit, Number(outstanding.bucket_91_plus ?? 0)),
+      },
+      ageing: this.ageingRows(outstanding, isAllCustomers ? 'Party' : 'Invoice'),
+      charts: { monthlyTrend, paymentDelayTrend },
+      tables: {
+        topItems: this.addShare(topItems),
+        returnInsight: {
+          returnValue: Number(returnInsight.return_value ?? 0),
+          returnQty: Number(returnInsight.return_qty ?? 0),
+          returnCount: Number(returnInsight.return_count ?? 0),
+          returnPct: currentMonthSales > 0 ? Number(returnInsight.return_value ?? 0) / currentMonthSales * 100 : null,
+        },
+        profitability: {
+          salesValue: Number(profitability.sales_value ?? 0),
+          estimatedCost: Number(profitability.estimated_cost ?? 0),
+          grossMargin: Number(profitability.sales_value ?? 0) - Number(profitability.estimated_cost ?? 0),
+          marginPct: Number(profitability.sales_value ?? 0) > 0
+            ? (Number(profitability.sales_value ?? 0) - Number(profitability.estimated_cost ?? 0)) / Number(profitability.sales_value ?? 0) * 100
+            : null,
+        },
+        loyalty: {
+          invoiceCount,
+          purchaseFrequency: invoiceCount / selectedDays,
+          inactiveDays: this.daysSince(salesBase.last_invoice_date, ctx.asOf),
+          lastInvoiceDate: salesBase.last_invoice_date,
+          lastPaymentDate: lastPayment?.last_payment_date ?? null,
+          averagePaymentDays: Number(outstanding.avg_payment_days ?? 0),
+        },
+      },
+      insights: this.customerInsights(totalOutstanding, creditLimit, Number(outstanding.bucket_91_plus ?? 0), currentMonthSales, lastMonthSales),
+    };
+  }
+
+  async getSupplier360(tenantId: string, search?: string, period: PeriodKey = 'fy', locationId?: string) {
+    const ctx = await this.getContext(tenantId, period);
+    const supplier = await this.findSupplier(tenantId, search);
+    if (!supplier) throw new NotFoundException('No supplier found for the selected search.');
+
+    const isAllSuppliers = supplier.is_all === true;
+    const margSupplierFilter = isAllSuppliers
+      ? Prisma.sql`TRUE`
+      : supplier.cid
+      ? Prisma.sql`mv.company_id = ${supplier.company_id} AND mv.cid = ${supplier.cid}`
+      : Prisma.sql`FALSE`;
+    const localSupplierFilter = isAllSuppliers
+      ? Prisma.sql`TRUE`
+      : supplier.supplier_id
+      ? Prisma.sql`po.supplier_id = ${supplier.supplier_id}::uuid`
+      : Prisma.sql`FALSE`;
+    const poLocationFilter = locationId ? Prisma.sql`AND po.location_id = ${locationId}::uuid` : Prisma.empty;
+
+    const [purchase] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_purchase,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_purchase,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date), 0)::float8 AS current_year_purchase,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.priorFiscalStart}::date AND mv.date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS last_year_purchase,
+        COUNT(DISTINCT mv.voucher) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date)::int AS purchase_invoice_count,
+        MAX(mv.date) AS last_purchase_date
+      FROM marg_vouchers mv
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.type = 'P' AND ${margSupplierFilter}
+    `);
+
+    const payable = await this.getOutstandingSnapshot(tenantId, supplier.cid, supplier.company_id, 'SUPPLIER');
+
+    const [performance] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH filtered_pos AS (
+        SELECT po.*
+        FROM purchase_orders po
+        WHERE po.tenant_id = ${tenantId}::uuid
+          AND ${localSupplierFilter}
+          ${poLocationFilter}
+      ),
+      po_line_rollup AS (
+        SELECT
+          pol.purchase_order_id,
+          COALESCE(SUM(pol.quantity), 0)::float8 AS ordered_qty,
+          COALESCE(SUM(pol.received_qty), 0)::float8 AS received_qty,
+          COALESCE(SUM(GREATEST(pol.quantity - pol.received_qty, 0)), 0)::float8 AS pending_qty,
+          COALESCE(SUM(GREATEST(pol.quantity - pol.received_qty, 0) * pol.unit_price), 0)::float8 AS open_po_value
+        FROM purchase_order_lines pol
+        JOIN filtered_pos po ON po.id = pol.purchase_order_id
+        GROUP BY pol.purchase_order_id
+      ),
+      receipt_rollup AS (
+        SELECT
+          po.id AS purchase_order_id,
+          MIN(gr.receipt_date) FILTER (WHERE gr.status = 'POSTED') AS first_receipt_date,
+          COALESCE(SUM(grl.quantity) FILTER (WHERE gr.status = 'POSTED'), 0)::float8 AS received_qty
+        FROM filtered_pos po
+        LEFT JOIN goods_receipts gr ON gr.purchase_order_id = po.id
+        LEFT JOIN goods_receipt_lines grl ON grl.goods_receipt_id = gr.id
+        GROUP BY po.id
+      ),
+      quality_rollup AS (
+        SELECT
+          COALESCE(SUM(qi.inspected_qty), 0)::float8 AS inspected_qty,
+          COALESCE(SUM(qi.rejected_qty), 0)::float8 AS rejected_qty,
+          COUNT(*) FILTER (WHERE COALESCE(qi.rejected_qty, 0) > 0)::int AS rejection_cases,
+          MAX(qi.inspection_date) FILTER (WHERE COALESCE(qi.rejected_qty, 0) > 0) AS last_qc_issue_date
+        FROM filtered_pos po
+        JOIN quality_inspections qi ON qi.purchase_order_id = po.id AND qi.tenant_id = ${tenantId}::uuid
+      )
+      SELECT
+        COUNT(po.id)::int AS total_orders,
+        COALESCE(AVG(CASE WHEN rr.first_receipt_date IS NOT NULL THEN GREATEST((rr.first_receipt_date::date - po.order_date::date), 0) END), NULL)::float8 AS avg_lead_time_days,
+        COALESCE(MIN(CASE WHEN rr.first_receipt_date IS NOT NULL THEN GREATEST((rr.first_receipt_date::date - po.order_date::date), 0) END), NULL)::float8 AS best_lead_time_days,
+        CASE WHEN COUNT(rr.first_receipt_date) > 0
+          THEN COUNT(*) FILTER (WHERE rr.first_receipt_date <= po.expected_date)::float8 / COUNT(rr.first_receipt_date)::float8 * 100
+          ELSE NULL
+        END::float8 AS on_time_delivery_pct,
+        COUNT(*) FILTER (WHERE rr.first_receipt_date IS NOT NULL AND rr.first_receipt_date > po.expected_date)::int AS delayed_deliveries,
+        CASE WHEN SUM(COALESCE(pl.ordered_qty, 0)) > 0 THEN LEAST(SUM(COALESCE(rr.received_qty, 0)), SUM(COALESCE(pl.ordered_qty, 0)))::float8 / SUM(COALESCE(pl.ordered_qty, 0))::float8 * 100 ELSE NULL END::float8 AS fulfillment_rate_pct,
+        CASE WHEN SUM(COALESCE(pl.ordered_qty, 0)) > 0 THEN SUM(COALESCE(pl.pending_qty, 0))::float8 / SUM(COALESCE(pl.ordered_qty, 0))::float8 * 100 ELSE NULL END::float8 AS short_supply_pct,
+        COALESCE(SUM(pl.open_po_value) FILTER (WHERE po.status NOT IN ('CLOSED', 'CANCELLED')), 0)::float8 AS open_po_value,
+        COALESCE(SUM(pl.pending_qty) FILTER (WHERE po.status NOT IN ('CLOSED', 'CANCELLED')), 0)::float8 AS pending_po_qty,
+        COUNT(DISTINCT po.id) FILTER (WHERE po.status NOT IN ('CLOSED', 'CANCELLED') AND COALESCE(pl.pending_qty, 0) > 0)::int AS open_po_count,
+        CASE WHEN MAX(qr.inspected_qty) > 0 THEN MAX(qr.rejected_qty) / MAX(qr.inspected_qty) * 100 ELSE NULL END::float8 AS rejection_rate_pct,
+        COALESCE(MAX(qr.rejection_cases), 0)::int AS rejection_cases,
+        COALESCE(MAX(qr.rejected_qty), 0)::float8 AS damaged_qty,
+        MAX(qr.last_qc_issue_date) AS last_qc_issue_date
+      FROM filtered_pos po
+      LEFT JOIN po_line_rollup pl ON pl.purchase_order_id = po.id
+      LEFT JOIN receipt_rollup rr ON rr.purchase_order_id = po.id
+      CROSS JOIN quality_rollup qr
+    `);
+
+    const topItems = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0))) DESC)::int AS rank,
+        COALESCE(p.name, mp.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference') AS name,
+        COALESCE(p.code, mp.code, mt.pid) AS code,
+        CASE WHEN NULLIF(TRIM(COALESCE(p.product_company, mp.g_code)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.product_company, mp.g_code)) || ' - ' || COALESCE(pc.name, 'Unknown company (' || TRIM(COALESCE(p.product_company, mp.g_code)) || ')') END AS company,
+        CASE WHEN NULLIF(TRIM(COALESCE(p.salt, mp.g_code3)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.salt, mp.g_code3)) || ' - ' || COALESCE(ps.name, 'Unknown salt (' || TRIM(COALESCE(p.salt, mp.g_code3)) || ')') END AS salt,
+        CASE WHEN NULLIF(TRIM(COALESCE(p.product_group, mp.g_code5)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.product_group, mp.g_code5)) || ' - ' || COALESCE(pg.name, 'Unknown group (' || TRIM(COALESCE(p.product_group, mp.g_code5)) || ')') END AS "productGroup",
+        mp.g_code6 AS "hsnCode",
+        CASE
+          WHEN p.id IS NOT NULL THEN 'MAPPED'
+          WHEN mp.id IS NOT NULL THEN 'STAGED_PRODUCT_NOT_PROJECTED'
+          WHEN mt.pid IS NOT NULL THEN 'MISSING_MARG_PRODUCT_MASTER'
+          ELSE 'ACTUAL_MISSING_PRODUCT_ID'
+        END AS "mappingStatus",
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS quantity,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS value
+      FROM marg_transactions mt
+      LEFT JOIN marg_products mp ON mp.tenant_id = mt.tenant_id AND mp.company_id = mt.company_id AND mp.pid = mt.pid
+      LEFT JOIN products p ON p.id = mp.product_id
+      LEFT JOIN product_companies pc ON pc.tenant_id = mt.tenant_id AND pc.code = NULLIF(TRIM(COALESCE(p.product_company, mp.g_code)), '')
+      LEFT JOIN product_salts ps ON ps.tenant_id = mt.tenant_id AND ps.code = NULLIF(TRIM(COALESCE(p.salt, mp.g_code3)), '')
+      LEFT JOIN product_categories pg ON pg.tenant_id = mt.tenant_id AND pg.code = NULLIF(TRIM(COALESCE(p.product_group, mp.g_code5)), '')
+      JOIN marg_vouchers mv
+        ON mv.tenant_id = mt.tenant_id
+        AND mv.company_id = mt.company_id
+        AND mv.voucher = mt.voucher
+        AND ${this.compatiblePurchaseLineSql('mv', 'mt')}
+      WHERE mt.tenant_id = ${tenantId}::uuid
+        AND mt.type = 'P'
+        AND ${margSupplierFilter}
+        AND mt.date >= ${ctx.fiscalStart}::date
+        AND mt.date <= ${ctx.asOf}::date
+      GROUP BY COALESCE(p.name, mp.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference'),
+        COALESCE(p.code, mp.code, mt.pid),
+        COALESCE(p.product_company, mp.g_code),
+        COALESCE(p.salt, mp.g_code3),
+        COALESCE(p.product_group, mp.g_code5),
+        pc.name,
+        ps.name,
+        pg.name,
+        mp.g_code6,
+        mt.tenant_id,
+        CASE
+          WHEN p.id IS NOT NULL THEN 'MAPPED'
+          WHEN mp.id IS NOT NULL THEN 'STAGED_PRODUCT_NOT_PROJECTED'
+          WHEN mt.pid IS NOT NULL THEN 'MISSING_MARG_PRODUCT_MASTER'
+          ELSE 'ACTUAL_MISSING_PRODUCT_ID'
+        END
+      ORDER BY value DESC
+      LIMIT 5
+    `);
+
+    const monthlyTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        to_char(month_bucket, 'Mon YYYY') AS month,
+        COALESCE(SUM(mv.final_amt), 0)::float8 AS purchase_value
+      FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') month_bucket
+      LEFT JOIN marg_vouchers mv
+        ON mv.tenant_id = ${tenantId}::uuid
+        AND mv.type = 'P'
+        AND ${margSupplierFilter}
+        AND date_trunc('month', mv.date) = month_bucket
+      GROUP BY month_bucket
+      ORDER BY month_bucket
+    `);
+
+    const openOrders = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        po.order_number,
+        po.order_date,
+        po.expected_date,
+        COALESCE(po.total_amount, SUM(pol.quantity * pol.unit_price), 0)::float8 AS po_value,
+        COALESCE(SUM(pol.quantity), 0)::float8 AS ordered_qty,
+        COALESCE(SUM(pol.received_qty), 0)::float8 AS received_qty,
+        COALESCE(SUM(GREATEST(pol.quantity - pol.received_qty, 0)), 0)::float8 AS pending_qty,
+        CASE WHEN SUM(pol.quantity) > 0 THEN SUM(pol.received_qty)::float8 / SUM(pol.quantity)::float8 * 100 ELSE NULL END::float8 AS received_pct,
+        CASE WHEN SUM(pol.quantity) > 0 THEN SUM(GREATEST(pol.quantity - pol.received_qty, 0))::float8 / SUM(pol.quantity)::float8 * 100 ELSE NULL END::float8 AS pending_pct,
+        po.status::text AS status
+      FROM purchase_orders po
+      JOIN purchase_order_lines pol ON pol.purchase_order_id = po.id
+      WHERE po.tenant_id = ${tenantId}::uuid
+        AND ${localSupplierFilter}
+        ${poLocationFilter}
+        AND po.status NOT IN ('CLOSED', 'CANCELLED')
+      GROUP BY po.id, po.order_number, po.order_date, po.expected_date, po.total_amount, po.status
+      ORDER BY po.expected_date ASC
+      LIMIT 8
+    `);
+
+    const deliveryTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH receipt_rollup AS (
+        SELECT
+          po.id AS purchase_order_id,
+          MIN(gr.receipt_date) FILTER (WHERE gr.status = 'POSTED') AS first_receipt_date
+        FROM purchase_orders po
+        LEFT JOIN goods_receipts gr ON gr.purchase_order_id = po.id
+        WHERE po.tenant_id = ${tenantId}::uuid
+          AND ${localSupplierFilter}
+          ${poLocationFilter}
+        GROUP BY po.id
+      )
+      SELECT
+        to_char(month_bucket, 'Mon YYYY') AS month,
+        COUNT(po.id)::int AS total_orders,
+        COUNT(po.id) FILTER (WHERE rr.first_receipt_date IS NOT NULL AND rr.first_receipt_date <= po.expected_date)::int AS on_time_orders,
+        CASE WHEN COUNT(po.id) FILTER (WHERE rr.first_receipt_date IS NOT NULL) > 0
+          THEN COUNT(po.id) FILTER (WHERE rr.first_receipt_date IS NOT NULL AND rr.first_receipt_date <= po.expected_date)::float8
+            / COUNT(po.id) FILTER (WHERE rr.first_receipt_date IS NOT NULL)::float8 * 100
+          ELSE NULL
+        END::float8 AS on_time_delivery_pct
+      FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') month_bucket
+      LEFT JOIN purchase_orders po
+        ON po.tenant_id = ${tenantId}::uuid
+        AND ${localSupplierFilter}
+        ${poLocationFilter}
+        AND date_trunc('month', po.order_date) = month_bucket
+      LEFT JOIN receipt_rollup rr ON rr.purchase_order_id = po.id
+      GROUP BY month_bucket
+      ORDER BY month_bucket
+    `);
+
+    const [priceVariance] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH item_rates AS (
+        SELECT
+          mt.pid,
+          COALESCE(p.name, mp.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference') AS item_name,
+          AVG(COALESCE(mt.rate, 0)) FILTER (WHERE mt.date >= ${ctx.fiscalStart}::date AND mt.date <= ${ctx.asOf}::date) AS current_rate,
+          AVG(COALESCE(mt.rate, 0)) FILTER (WHERE mt.date >= ${ctx.priorFiscalStart}::date AND mt.date < ${ctx.fiscalStart}::date) AS previous_rate
+        FROM marg_transactions mt
+        LEFT JOIN marg_products mp ON mp.tenant_id = mt.tenant_id AND mp.company_id = mt.company_id AND mp.pid = mt.pid
+        LEFT JOIN products p ON p.id = mp.product_id
+      JOIN marg_vouchers mv
+        ON mv.tenant_id = mt.tenant_id
+        AND mv.company_id = mt.company_id
+        AND mv.voucher = mt.voucher
+        AND ${this.compatiblePurchaseLineSql('mv', 'mt')}
+        WHERE mt.tenant_id = ${tenantId}::uuid
+          AND mt.type = 'P'
+          AND ${margSupplierFilter}
+          AND mt.date >= ${ctx.priorFiscalStart}::date
+          AND mt.date <= ${ctx.asOf}::date
+        GROUP BY mt.pid, COALESCE(p.name, mp.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference')
+      ),
+      variances AS (
+        SELECT
+          item_name,
+          COALESCE(current_rate, 0)::float8 AS current_rate,
+          COALESCE(previous_rate, 0)::float8 AS previous_rate,
+          CASE WHEN COALESCE(previous_rate, 0) > 0 THEN (COALESCE(current_rate, 0) - previous_rate) / previous_rate * 100 ELSE NULL END::float8 AS variance_pct,
+          (COALESCE(current_rate, 0) - COALESCE(previous_rate, 0))::float8 AS variance_amount
+        FROM item_rates
+        WHERE current_rate IS NOT NULL
+      )
+      SELECT
+        COALESCE(AVG(variance_pct) FILTER (WHERE variance_pct IS NOT NULL), 0)::float8 AS avg_rate_increase_pct,
+        COUNT(*) FILTER (WHERE COALESCE(variance_pct, 0) > 0)::int AS items_with_price_increase,
+        (ARRAY_AGG(item_name ORDER BY COALESCE(variance_pct, -999999) DESC))[1] AS highest_variance_item,
+        COALESCE(MAX(variance_amount), 0)::float8 AS variance_amount
+      FROM variances
+    `);
+
+    const supplierPerformance = isAllSuppliers ? null : await this.getSupplierPerformanceSnapshot(tenantId, supplier, ctx);
+    const performanceView = {
+      ...performance,
+      on_time_delivery_pct: supplierPerformance?.on_time_delivery_pct ?? performance.on_time_delivery_pct,
+      avg_lead_time_days: supplierPerformance?.avg_lead_time_days ?? performance.avg_lead_time_days,
+      fulfillment_rate_pct: supplierPerformance?.fulfillment_rate_pct ?? performance.fulfillment_rate_pct,
+      short_supply_pct: supplierPerformance?.fulfillment_rate_pct == null
+        ? performance.short_supply_pct
+        : Math.max(0, 100 - Number(supplierPerformance.fulfillment_rate_pct)),
+      rejection_rate_pct: supplierPerformance?.rejection_rate_pct ?? performance.rejection_rate_pct,
+      total_orders: supplierPerformance?.total_orders ?? performance.total_orders,
+    };
+    const currentMonthPurchase = Number(purchase.current_month_purchase ?? 0);
+    const lastMonthPurchase = Number(purchase.last_month_purchase ?? 0);
+    const score = this.supplierScore(Number(performanceView.on_time_delivery_pct ?? 0), Number(performanceView.fulfillment_rate_pct ?? 0), Number(payable.bucket_91_plus ?? 0));
+
+    return {
+      asOf: ctx.asOf,
+      profile: {
+        code: supplier.code,
+        name: supplier.name,
+        type: supplier.type,
+        gstNo: supplier.gst_no,
+        phone: supplier.phone,
+        contactPerson: supplier.contact_name,
+        paymentTerms: supplier.payment_terms,
+        avgLeadTimeDays: performanceView.avg_lead_time_days,
+        lastPurchaseDate: purchase.last_purchase_date,
+      },
+      kpis: {
+        currentMonthPurchase,
+        lastMonthPurchase,
+        momPurchaseChangePct: this.pctChange(currentMonthPurchase, lastMonthPurchase),
+        currentYearPurchase: Number(purchase.current_year_purchase ?? 0),
+        yoyPurchaseChangePct: this.pctChange(Number(purchase.current_year_purchase ?? 0), Number(purchase.last_year_purchase ?? 0)),
+        payableAmount: Number(payable.total_outstanding ?? 0),
+        supplierAdvanceAmount: Number(payable.credit_balance ?? 0),
+        overduePayable: Number(payable.bucket_31_60 ?? 0) + Number(payable.bucket_61_90 ?? 0) + Number(payable.bucket_91_plus ?? 0),
+        openPoValue: Number(performanceView.open_po_value ?? 0),
+        openPoCount: Number(performanceView.open_po_count ?? 0),
+        onTimeDeliveryPct: performanceView.on_time_delivery_pct,
+        fulfillmentRatePct: performanceView.fulfillment_rate_pct,
+        score,
+      },
+      ageing: this.ageingRows(payable, isAllSuppliers ? 'Party' : 'Bill'),
+      charts: { monthlyTrend, deliveryTrend },
+      tables: {
+        topItems: this.addShare(topItems),
+        openOrders,
+        deliveryPerformance: {
+          onTimeDeliveryPct: performanceView.on_time_delivery_pct,
+          delayedDeliveries: Number(performanceView.delayed_deliveries ?? 0),
+          averageLeadTimeDays: performanceView.avg_lead_time_days,
+          bestDeliveryTimeDays: performanceView.best_lead_time_days,
+          shortSupplyPct: performanceView.short_supply_pct,
+          status: Number(performanceView.on_time_delivery_pct ?? 0) >= 85 ? 'Strong' : 'Needs Review',
+        },
+        quality: {
+          rejectionRatePct: performanceView.rejection_rate_pct,
+          shortSupplyCases: Number(performanceView.rejection_cases ?? 0),
+          damagedQty: Number(performanceView.damaged_qty ?? 0),
+          lastQcIssueDate: performanceView.last_qc_issue_date,
+          status: Number(performanceView.rejection_rate_pct ?? 0) <= 2 ? 'Good' : 'Review',
+        },
+        priceVariance: {
+          avgRateIncreasePct: priceVariance?.avg_rate_increase_pct == null ? null : Number(priceVariance.avg_rate_increase_pct),
+          itemsWithPriceIncrease: Number(priceVariance?.items_with_price_increase ?? 0),
+          highestVarianceItem: priceVariance?.highest_variance_item ?? null,
+          varianceAmount: Number(priceVariance?.variance_amount ?? 0),
+          status: Number(priceVariance?.avg_rate_increase_pct ?? 0) <= 5 ? 'Controlled' : 'Review',
+        },
+      },
+      insights: this.supplierInsights(score, Number(payable.bucket_91_plus ?? 0), Number(performanceView.open_po_value ?? 0), currentMonthPurchase, lastMonthPurchase),
+    };
+  }
+
+  private async getContext(tenantId: string, period: PeriodKey): Promise<ReportContext> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { fiscalYearStart: true },
+    });
+    const asOf = new Date();
+    const monthStart = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), 1));
+    const nextMonthStart = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() + 1, 1));
+    const lastMonthStart = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() - 1, 1));
+    const fiscalMonth = Math.max(1, Math.min(12, tenant?.fiscalYearStart ?? 4)) - 1;
+    const fiscalYear = asOf.getUTCMonth() >= fiscalMonth ? asOf.getUTCFullYear() : asOf.getUTCFullYear() - 1;
+    const fiscalStart = period === 'calendar'
+      ? new Date(Date.UTC(asOf.getUTCFullYear(), 0, 1))
+      : period === 'last12'
+        ? new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() - 11, 1))
+        : new Date(Date.UTC(fiscalYear, fiscalMonth, 1));
+    const priorFiscalStart = new Date(Date.UTC(fiscalStart.getUTCFullYear() - 1, fiscalStart.getUTCMonth(), 1));
+    const priorFiscalEnd = new Date(Date.UTC(fiscalStart.getUTCFullYear() - 1, asOf.getUTCMonth(), asOf.getUTCDate() + 1));
+    const trendStart = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() - 11, 1));
+
+    return { asOf, monthStart, nextMonthStart, lastMonthStart, fiscalStart, priorFiscalStart, priorFiscalEnd, trendStart };
+  }
+
+  private compatibleSalesLineSql(voucherAlias: string, transactionAlias: string): Prisma.Sql {
+    const mv = Prisma.raw(voucherAlias);
+    const mt = Prisma.raw(transactionAlias);
+    return Prisma.sql`(
+      (${mv}.type = 'S' AND ${mt}.type IN ('G', 'S', 'O'))
+      OR (${mv}.type = 'R' AND ${mt}.type = 'R')
+      OR (${mv}.type = 'T' AND ${mt}.type IN ('X', 'T'))
+    )`;
+  }
+
+  private compatiblePurchaseLineSql(voucherAlias: string, transactionAlias: string): Prisma.Sql {
+    const mv = Prisma.raw(voucherAlias);
+    const mt = Prisma.raw(transactionAlias);
+    return Prisma.sql`(
+      (${mv}.type = 'P' AND ${mt}.type = 'P')
+      OR (${mv}.type = 'B' AND ${mt}.type = 'B')
+    )`;
+  }
+
+  private async findItem(tenantId: string, search?: string) {
+    if (!(search ?? '').trim()) {
+      return {
+        is_all: true,
+        product_id: null,
+        sku: 'ALL',
+        product_name: 'All Items',
+        category: 'Portfolio',
+        brand: null,
+        company: null,
+        salt: null,
+        product_group: null,
+        hsn_code: null,
+        uom: 'All',
+        selling_price: null,
+        mrp: null,
+        marg_pid: null,
+        company_id: null,
+      };
+    }
+
+    const term = this.searchTerm(search);
+    const rows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        p.id::text AS product_id,
+        p.code AS sku,
+        p.name AS product_name,
+        p.category,
+        NULL::text AS brand,
+        NULLIF(TRIM(COALESCE(p.product_company, mp.g_code)), '') AS company,
+        COALESCE(pc.name, CASE WHEN NULLIF(TRIM(COALESCE(p.product_company, mp.g_code)), '') IS NULL THEN NULL ELSE 'Unknown company (' || TRIM(COALESCE(p.product_company, mp.g_code)) || ')' END) AS company_name,
+        CASE WHEN NULLIF(TRIM(COALESCE(p.product_company, mp.g_code)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.product_company, mp.g_code)) || ' - ' || COALESCE(pc.name, 'Unknown company (' || TRIM(COALESCE(p.product_company, mp.g_code)) || ')') END AS company_display,
+        NULLIF(TRIM(COALESCE(p.salt, mp.g_code3)), '') AS salt,
+        COALESCE(ps.name, CASE WHEN NULLIF(TRIM(COALESCE(p.salt, mp.g_code3)), '') IS NULL THEN NULL ELSE 'Unknown salt (' || TRIM(COALESCE(p.salt, mp.g_code3)) || ')' END) AS salt_name,
+        CASE WHEN NULLIF(TRIM(COALESCE(p.salt, mp.g_code3)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.salt, mp.g_code3)) || ' - ' || COALESCE(ps.name, 'Unknown salt (' || TRIM(COALESCE(p.salt, mp.g_code3)) || ')') END AS salt_display,
+        NULLIF(TRIM(COALESCE(p.product_group, mp.g_code5)), '') AS product_group,
+        COALESCE(pg.name, CASE WHEN NULLIF(TRIM(COALESCE(p.product_group, mp.g_code5)), '') IS NULL THEN NULL ELSE 'Unknown group (' || TRIM(COALESCE(p.product_group, mp.g_code5)) || ')' END) AS product_group_name,
+        CASE WHEN NULLIF(TRIM(COALESCE(p.product_group, mp.g_code5)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.product_group, mp.g_code5)) || ' - ' || COALESCE(pg.name, 'Unknown group (' || TRIM(COALESCE(p.product_group, mp.g_code5)) || ')') END AS product_group_display,
+        COALESCE(p.hsn_code, mp.g_code6) AS hsn_code,
+        NULLIF(TRIM(COALESCE(p.unit_of_measure, mp.unit)), '') AS uom,
+        COALESCE(uom.name, CASE WHEN NULLIF(TRIM(COALESCE(p.unit_of_measure, mp.unit)), '') IS NULL THEN NULL ELSE 'Unknown UOM (' || TRIM(COALESCE(p.unit_of_measure, mp.unit)) || ')' END) AS uom_name,
+        CASE WHEN NULLIF(TRIM(COALESCE(p.unit_of_measure, mp.unit)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.unit_of_measure, mp.unit)) || ' - ' || COALESCE(uom.name, 'Unknown UOM (' || TRIM(COALESCE(p.unit_of_measure, mp.unit)) || ')') END AS uom_display,
+        COALESCE(p.list_price, 0)::float8 AS selling_price,
+        COALESCE(p.list_price, 0)::float8 AS mrp,
+        mp.pid AS marg_pid,
+        mp.company_id
+      FROM products p
+      LEFT JOIN marg_products mp ON mp.product_id = p.id
+      LEFT JOIN product_companies pc ON pc.tenant_id = p.tenant_id AND pc.code = NULLIF(TRIM(COALESCE(p.product_company, mp.g_code)), '')
+      LEFT JOIN product_salts ps ON ps.tenant_id = p.tenant_id AND ps.code = NULLIF(TRIM(COALESCE(p.salt, mp.g_code3)), '')
+      LEFT JOIN product_categories pg ON pg.tenant_id = p.tenant_id AND pg.code = NULLIF(TRIM(COALESCE(p.product_group, mp.g_code5)), '')
+      LEFT JOIN unit_of_measures uom ON uom.tenant_id = p.tenant_id AND uom.code = NULLIF(TRIM(COALESCE(p.unit_of_measure, mp.unit)), '')
+      WHERE p.tenant_id = ${tenantId}::uuid
+        AND (${term} = '%%' OR p.code ILIKE ${term} OR p.name ILIKE ${term} OR COALESCE(mp.pid, '') ILIKE ${term})
+      ORDER BY
+        CASE WHEN p.code ILIKE ${term} THEN 0 WHEN p.name ILIKE ${term} THEN 1 ELSE 2 END,
+        p.name
+      LIMIT 1
+    `);
+    if (rows[0]) return rows[0];
+
+    const margRows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        NULL::text AS product_id,
+        mp.code AS sku,
+        mp.name AS product_name,
+        mp.g_code5 AS category,
+        NULL::text AS brand,
+        NULLIF(TRIM(mp.g_code), '') AS company,
+        COALESCE(pc.name, CASE WHEN NULLIF(TRIM(mp.g_code), '') IS NULL THEN NULL ELSE 'Unknown company (' || TRIM(mp.g_code) || ')' END) AS company_name,
+        CASE WHEN NULLIF(TRIM(mp.g_code), '') IS NULL THEN NULL ELSE TRIM(mp.g_code) || ' - ' || COALESCE(pc.name, 'Unknown company (' || TRIM(mp.g_code) || ')') END AS company_display,
+        NULLIF(TRIM(mp.g_code3), '') AS salt,
+        COALESCE(ps.name, CASE WHEN NULLIF(TRIM(mp.g_code3), '') IS NULL THEN NULL ELSE 'Unknown salt (' || TRIM(mp.g_code3) || ')' END) AS salt_name,
+        CASE WHEN NULLIF(TRIM(mp.g_code3), '') IS NULL THEN NULL ELSE TRIM(mp.g_code3) || ' - ' || COALESCE(ps.name, 'Unknown salt (' || TRIM(mp.g_code3) || ')') END AS salt_display,
+        NULLIF(TRIM(mp.g_code5), '') AS product_group,
+        COALESCE(pg.name, CASE WHEN NULLIF(TRIM(mp.g_code5), '') IS NULL THEN NULL ELSE 'Unknown group (' || TRIM(mp.g_code5) || ')' END) AS product_group_name,
+        CASE WHEN NULLIF(TRIM(mp.g_code5), '') IS NULL THEN NULL ELSE TRIM(mp.g_code5) || ' - ' || COALESCE(pg.name, 'Unknown group (' || TRIM(mp.g_code5) || ')') END AS product_group_display,
+        mp.g_code6 AS hsn_code,
+        NULLIF(TRIM(mp.unit), '') AS uom,
+        COALESCE(uom.name, CASE WHEN NULLIF(TRIM(mp.unit), '') IS NULL THEN NULL ELSE 'Unknown UOM (' || TRIM(mp.unit) || ')' END) AS uom_name,
+        CASE WHEN NULLIF(TRIM(mp.unit), '') IS NULL THEN NULL ELSE TRIM(mp.unit) || ' - ' || COALESCE(uom.name, 'Unknown UOM (' || TRIM(mp.unit) || ')') END AS uom_display,
+        COALESCE(ms.rate_a, ms.mrp, 0)::float8 AS selling_price,
+        COALESCE(ms.mrp, 0)::float8 AS mrp,
+        mp.pid AS marg_pid,
+        mp.company_id
+      FROM marg_products mp
+      LEFT JOIN product_companies pc ON pc.tenant_id = mp.tenant_id AND pc.code = NULLIF(TRIM(mp.g_code), '')
+      LEFT JOIN product_salts ps ON ps.tenant_id = mp.tenant_id AND ps.code = NULLIF(TRIM(mp.g_code3), '')
+      LEFT JOIN product_categories pg ON pg.tenant_id = mp.tenant_id AND pg.code = NULLIF(TRIM(mp.g_code5), '')
+      LEFT JOIN unit_of_measures uom ON uom.tenant_id = mp.tenant_id AND uom.code = NULLIF(TRIM(mp.unit), '')
+      LEFT JOIN LATERAL (
+        SELECT rate_a, mrp FROM marg_stocks ms
+        WHERE ms.tenant_id = mp.tenant_id AND ms.company_id = mp.company_id AND ms.pid = mp.pid
+        ORDER BY ms.updated_at DESC
+        LIMIT 1
+      ) ms ON TRUE
+      WHERE mp.tenant_id = ${tenantId}::uuid
+        AND (${term} = '%%' OR mp.code ILIKE ${term} OR mp.name ILIKE ${term} OR mp.pid ILIKE ${term})
+      ORDER BY mp.name
+      LIMIT 1
+    `);
+    return margRows[0] ?? null;
+  }
+
+  private async findCustomer(tenantId: string, search?: string) {
+    if (!(search ?? '').trim()) {
+      return {
+        is_all: true,
+        customer_id: null,
+        code: 'ALL',
+        name: 'All Customers',
+        type: 'Portfolio',
+        credit_limit: null,
+        payment_terms: null,
+        company_id: null,
+        cid: null,
+        gst_no: null,
+        phone: null,
+        marg_credit: null,
+        credit_days: null,
+        sales_person: null,
+      };
+    }
+
+    const term = this.searchTerm(search);
+    const rows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        c.id::text AS customer_id,
+        c.code,
+        c.name,
+        COALESCE(c.segment, c.type::text) AS type,
+        c.credit_limit::float8 AS credit_limit,
+        c.payment_terms,
+        mp.company_id,
+        mp.cid,
+        mp.gst_no,
+        COALESCE(mp.phone1, mp.phone2, mp.phone3, mp.phone4) AS phone,
+        mp.credit::float8 AS marg_credit,
+        mp.cr_days AS credit_days,
+        CASE
+          WHEN NULLIF(TRIM(COALESCE(mp.mr, mp.s_code)), '') IS NULL THEN NULL
+          ELSE TRIM(COALESCE(mp.mr, mp.s_code)) || ' - ' || COALESCE(
+            (SELECT s.name FROM salesmen s WHERE s.tenant_id = mp.tenant_id AND s.code = NULLIF(TRIM(COALESCE(mp.mr, mp.s_code)), '') LIMIT 1),
+            (SELECT NULLIF(TRIM(REGEXP_REPLACE(sp.par_name, '[[:cntrl:]]', '', 'g')), '') FROM marg_parties sp WHERE sp.tenant_id = mp.tenant_id AND sp.company_id = mp.company_id AND sp.cid = NULLIF(TRIM(COALESCE(mp.mr, mp.s_code)), '') AND sp.is_deleted = false LIMIT 1),
+            'Unknown salesman (' || TRIM(COALESCE(mp.mr, mp.s_code)) || ')'
+          )
+        END AS sales_person
+      FROM customers c
+      LEFT JOIN marg_parties mp ON mp.customer_id = c.id
+      WHERE c.tenant_id = ${tenantId}::uuid
+        AND (${term} = '%%' OR c.code ILIKE ${term} OR c.name ILIKE ${term} OR COALESCE(mp.gst_no, '') ILIKE ${term})
+      ORDER BY c.name
+      LIMIT 1
+    `);
+    if (rows[0]) return rows[0];
+
+    const margRows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        NULL::text AS customer_id,
+        mp.cid AS code,
+        mp.par_name AS name,
+        COALESCE(mp.area, mp.route, 'Marg Party') AS type,
+        NULL::float8 AS credit_limit,
+        NULL::text AS payment_terms,
+        mp.company_id,
+        mp.cid,
+        mp.gst_no,
+        COALESCE(mp.phone1, mp.phone2, mp.phone3, mp.phone4) AS phone,
+        mp.credit::float8 AS marg_credit,
+        mp.cr_days AS credit_days,
+        CASE
+          WHEN NULLIF(TRIM(COALESCE(mp.mr, mp.s_code)), '') IS NULL THEN NULL
+          ELSE TRIM(COALESCE(mp.mr, mp.s_code)) || ' - ' || COALESCE(
+            (SELECT s.name FROM salesmen s WHERE s.tenant_id = mp.tenant_id AND s.code = NULLIF(TRIM(COALESCE(mp.mr, mp.s_code)), '') LIMIT 1),
+            (SELECT NULLIF(TRIM(REGEXP_REPLACE(sp.par_name, '[[:cntrl:]]', '', 'g')), '') FROM marg_parties sp WHERE sp.tenant_id = mp.tenant_id AND sp.company_id = mp.company_id AND sp.cid = NULLIF(TRIM(COALESCE(mp.mr, mp.s_code)), '') AND sp.is_deleted = false LIMIT 1),
+            'Unknown salesman (' || TRIM(COALESCE(mp.mr, mp.s_code)) || ')'
+          )
+        END AS sales_person
+      FROM marg_parties mp
+      WHERE mp.tenant_id = ${tenantId}::uuid
+        AND mp.is_deleted = false
+        AND (${term} = '%%' OR mp.cid ILIKE ${term} OR mp.par_name ILIKE ${term} OR COALESCE(mp.gst_no, '') ILIKE ${term} OR COALESCE(mp.phone1, '') ILIKE ${term})
+        AND EXISTS (
+          SELECT 1 FROM marg_vouchers mv
+          WHERE mv.tenant_id = mp.tenant_id AND mv.company_id = mp.company_id AND mv.cid = mp.cid AND mv.type = 'S'
+        )
+      ORDER BY mp.par_name
+      LIMIT 1
+    `);
+    return margRows[0] ?? null;
+  }
+
+  private async findSupplier(tenantId: string, search?: string) {
+    if (!(search ?? '').trim()) {
+      return {
+        is_all: true,
+        supplier_id: null,
+        code: 'ALL',
+        name: 'All Suppliers',
+        type: 'Portfolio',
+        contact_name: null,
+        phone: null,
+        payment_terms: null,
+        company_id: null,
+        cid: null,
+        gst_no: null,
+      };
+    }
+
+    const term = this.searchTerm(search);
+    const rows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        s.id::text AS supplier_id,
+        s.code,
+        s.name,
+        'Supplier'::text AS type,
+        s.contact_name,
+        s.phone,
+        s.payment_terms,
+        mp.company_id,
+        mp.cid,
+        mp.gst_no
+      FROM suppliers s
+      LEFT JOIN marg_parties mp
+        ON mp.tenant_id = s.tenant_id
+        AND (
+          s.external_id = CONCAT('marg:', mp.company_id::text, ':', mp.cid)
+          OR COALESCE(s.attributes->>'margCid', '') = mp.cid
+        )
+      WHERE s.tenant_id = ${tenantId}::uuid
+        AND (${term} = '%%' OR s.code ILIKE ${term} OR s.name ILIKE ${term} OR COALESCE(mp.gst_no, '') ILIKE ${term})
+      ORDER BY s.name
+      LIMIT 1
+    `);
+    if (rows[0]) return rows[0];
+
+    const margRows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        NULL::text AS supplier_id,
+        mp.cid AS code,
+        mp.par_name AS name,
+        COALESCE(mp.area, mp.route, 'Marg Supplier') AS type,
+        NULL::text AS contact_name,
+        COALESCE(mp.phone1, mp.phone2, mp.phone3, mp.phone4) AS phone,
+        CASE WHEN mp.cr_days IS NOT NULL THEN CONCAT(mp.cr_days::text, ' Days') ELSE NULL END AS payment_terms,
+        mp.company_id,
+        mp.cid,
+        mp.gst_no
+      FROM marg_parties mp
+      WHERE mp.tenant_id = ${tenantId}::uuid
+        AND mp.is_deleted = false
+        AND (${term} = '%%' OR mp.cid ILIKE ${term} OR mp.par_name ILIKE ${term} OR COALESCE(mp.gst_no, '') ILIKE ${term} OR COALESCE(mp.phone1, '') ILIKE ${term})
+        AND EXISTS (
+          SELECT 1 FROM marg_vouchers mv
+          WHERE mv.tenant_id = mp.tenant_id AND mv.company_id = mp.company_id AND mv.cid = mp.cid AND mv.type = 'P'
+        )
+      ORDER BY mp.par_name
+      LIMIT 1
+    `);
+    return margRows[0] ?? null;
+  }
+
+  private inventoryReportFilter(productId?: string | null, locationId?: string) {
+    return {
+      limit: 100000,
+      offset: 0,
+      ...(productId ? { productIds: [productId] } : {}),
+      ...(locationId ? { locationIds: [locationId] } : {}),
+    } as any;
+  }
+
+  private currentStockFromReport(rows: any[]) {
+    let lastUpdated: Date | null = null;
+    const summary = rows.reduce(
+      (acc, row) => {
+        acc.currentStock += Number(row.on_hand_qty ?? 0);
+        acc.stockValue += Number(row.inventory_value ?? 0);
+        const updated = row.last_updated ? new Date(row.last_updated) : null;
+        if (updated && (!lastUpdated || updated > lastUpdated)) lastUpdated = updated;
+        return acc;
+      },
+      { currentStock: 0, stockValue: 0 },
+    );
+    return {
+      ...summary,
+      hasRows: rows.length > 0,
+      lastUpdated,
+    };
+  }
+
+  private batchesFromInventoryReport(rows: any[]) {
+    return rows
+      .map((row) => ({
+        batch_number: row.batch_number,
+        quantity: Number(row.available_qty ?? row.quantity ?? 0),
+        expiry_date: row.expiry_date,
+        days_left: row.days_to_expiry,
+        rate: Number(row.cost_per_unit ?? 0),
+        status: row.batch_status,
+      }))
+      .filter((row) => row.quantity > 0)
+      .sort((left, right) => {
+        const leftDays = left.days_left == null ? Number.POSITIVE_INFINITY : Number(left.days_left);
+        const rightDays = right.days_left == null ? Number.POSITIVE_INFINITY : Number(right.days_left);
+        return leftDays - rightDays;
+      })
+      .slice(0, 8);
+  }
+
+  private stockAgeingFromInventoryReport(summary: any[]) {
+    const rows = summary.map((row) => ({
+      bucket: String(row.bucket ?? ''),
+      quantity: Number(row.total_qty ?? 0),
+      value: Number(row.total_value ?? 0),
+      status: this.stockAgeingStatus(String(row.bucket ?? '')),
+    }));
+    return this.addQuantityShare(rows);
+  }
+
+  private stockAgeingStatus(bucket: string): string {
+    if (bucket.startsWith('0-30')) return 'Fresh';
+    if (bucket.startsWith('31-60')) return 'Healthy';
+    if (bucket.startsWith('61-90')) return 'Monitor';
+    if (bucket === 'UNKNOWN') return 'Unknown';
+    return 'Slow / Dead Stock';
+  }
+
+  private async getOutstandingSnapshot(
+    tenantId: string,
+    partyCode: string | null | undefined,
+    companyId: number | null | undefined,
+    partyType: 'CUSTOMER' | 'SUPPLIER',
+  ) {
+    try {
+      if (!partyCode || companyId == null) {
+        const summary = await this.margEdeService.getMargOutstandingSummary(tenantId, {
+          partyType,
+          limit: 10000,
+        });
+        return {
+          total_outstanding: Number(summary.summary.totalOutstanding ?? 0),
+          credit_balance: Number(summary.summary.creditBalance ?? 0),
+          signed_balance: Number(summary.summary.signedBalance ?? 0),
+          bucket_0_30: Number(summary.summary.currentBucket ?? 0),
+          bucket_31_60: Number(summary.summary.days31To60Bucket ?? 0),
+          bucket_61_90: Number(summary.summary.days61To90Bucket ?? 0),
+          bucket_91_plus: Number(summary.summary.days91PlusBucket ?? 0),
+          count_0_30: summary.rows.filter((row) => Number(row.currentBucket ?? 0) > 0).length,
+          count_31_60: summary.rows.filter((row) => Number(row.days31To60 ?? 0) > 0).length,
+          count_61_90: summary.rows.filter((row) => Number(row.days61To90 ?? 0) > 0).length,
+          count_91_plus: summary.rows.filter((row) => Number(row.days91Plus ?? 0) > 0).length,
+          open_invoice_count: Number(summary.summary.openInvoiceCount ?? 0),
+          avg_payment_days: 0,
+        };
+      }
+
+      const [summary, detail] = await Promise.all([
+        this.margEdeService.getMargOutstandingSummary(tenantId, {
+          partyType,
+          companyId,
+          limit: 10000,
+        }),
+        this.margEdeService.getMargOutstandingDetail(tenantId, partyCode, {
+          companyId,
+          limit: 10000,
+        }),
+      ]);
+      const invoices = detail.invoices ?? [];
+      const exposureInvoices = invoices
+        .map((invoice) => {
+          const signedBalance = Number(invoice.balance ?? 0);
+          const exposure = partyType === 'CUSTOMER'
+            ? Math.max(signedBalance, 0)
+            : Math.max(-signedBalance, 0);
+          const credit = partyType === 'CUSTOMER'
+            ? Math.max(-signedBalance, 0)
+            : Math.max(signedBalance, 0);
+          return { ...invoice, exposure, credit };
+        });
+      const row = summary.rows.find((entry) => entry.companyId === companyId && entry.partyCode === partyCode);
+      const bucketSum = (bucket: string) => exposureInvoices
+        .filter((invoice) => invoice.bucket === bucket)
+        .reduce((sum, invoice) => sum + invoice.exposure, 0);
+      const bucketCount = (bucket: string) => exposureInvoices
+        .filter((invoice) => invoice.bucket === bucket && invoice.exposure > 0)
+        .length;
+      const exposureRows = exposureInvoices.filter((invoice) => invoice.exposure > 0);
+      return {
+        total_outstanding: exposureRows.reduce((sum, invoice) => sum + invoice.exposure, 0),
+        credit_balance: exposureInvoices.reduce((sum, invoice) => sum + invoice.credit, 0),
+        signed_balance: Number(row?.signedBalance ?? 0),
+        bucket_0_30: bucketSum('CURRENT'),
+        bucket_31_60: bucketSum('DAYS_31_60'),
+        bucket_61_90: bucketSum('DAYS_61_90'),
+        bucket_91_plus: bucketSum('DAYS_91_PLUS'),
+        count_0_30: bucketCount('CURRENT'),
+        count_31_60: bucketCount('DAYS_31_60'),
+        count_61_90: bucketCount('DAYS_61_90'),
+        count_91_plus: bucketCount('DAYS_91_PLUS'),
+        open_invoice_count: exposureRows.length,
+        avg_payment_days: exposureRows.length
+          ? exposureRows.reduce((sum, invoice) => sum + Number(invoice.days ?? 0), 0) / exposureRows.length
+          : 0,
+      };
+    } catch {
+      return this.emptyOutstandingSnapshot();
+    }
+  }
+
+  private emptyOutstandingSnapshot() {
+    return {
+      total_outstanding: 0,
+      bucket_0_30: 0,
+      bucket_31_60: 0,
+      bucket_61_90: 0,
+      bucket_91_plus: 0,
+      credit_balance: 0,
+      signed_balance: 0,
+      count_0_30: 0,
+      count_31_60: 0,
+      count_61_90: 0,
+      count_91_plus: 0,
+      open_invoice_count: 0,
+      avg_payment_days: 0,
+    };
+  }
+
+  private async getSupplierPerformanceSnapshot(tenantId: string, supplier: any, ctx: ReportContext) {
+    const filters = {
+      limit: 10000,
+      offset: 0,
+      startDate: this.dateOnly(ctx.fiscalStart),
+      endDate: this.dateOnly(ctx.asOf),
+      ...(supplier.supplier_id ? { supplierIds: [supplier.supplier_id] } : {}),
+    } as any;
+    const report = await this.procurementReports.getSupplierPerformanceReport(tenantId, filters);
+    return report.data.find((row) => {
+      if (supplier.supplier_id && row.supplier_key === `supplier:${supplier.supplier_id}`) return true;
+      if (supplier.code && row.supplier_code === supplier.code) return true;
+      return supplier.name && row.supplier_name === supplier.name;
+    }) ?? null;
+  }
+
+  private dateOnly(date: Date): string {
+    return date.toISOString().slice(0, 10);
+  }
+
+  private periodDays(ctx: ReportContext): number {
+    return Math.max(1, Math.floor((ctx.asOf.getTime() - ctx.fiscalStart.getTime()) / 86_400_000) + 1);
+  }
+
+  private daysSince(value: Date | string | null | undefined, asOf: Date): number | null {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return Math.max(0, Math.floor((asOf.getTime() - date.getTime()) / 86_400_000));
+  }
+
+  private searchTerm(search?: string): string {
+    const value = (search ?? '').trim();
+    return value ? `%${value}%` : '%%';
+  }
+
+  private pctChange(current: number, previous: number): number | null {
+    if (!Number.isFinite(previous) || previous === 0) return null;
+    return (current - previous) / Math.abs(previous) * 100;
+  }
+
+  private daysElapsedInMonth(asOf: Date): number {
+    return Math.max(1, asOf.getUTCDate());
+  }
+
+  private addShare(rows: any[]) {
+    const total = rows.reduce((sum, row) => sum + Number(row.value ?? 0), 0);
+    return rows.map((row) => ({
+      ...row,
+      share: total > 0 ? Number(row.value ?? 0) / total * 100 : 0,
+    }));
+  }
+
+  private addQuantityShare(rows: any[]) {
+    const total = rows.reduce((sum, row) => sum + Number(row.quantity ?? 0), 0);
+    return rows.map((row) => ({
+      ...row,
+      share: total > 0 ? Number(row.quantity ?? 0) / total * 100 : 0,
+    }));
+  }
+
+  private ageingRows(row: any, countLabel: string) {
+    return [
+      { bucket: '0-30', countLabel, count: Number(row.count_0_30 ?? 0), amount: Number(row.bucket_0_30 ?? 0), status: 'Not Due' },
+      { bucket: '31-60', countLabel, count: Number(row.count_31_60 ?? 0), amount: Number(row.bucket_31_60 ?? 0), status: 'Due Soon' },
+      { bucket: '61-90', countLabel, count: Number(row.count_61_90 ?? 0), amount: Number(row.bucket_61_90 ?? 0), status: 'Overdue' },
+      { bucket: '91+', countLabel, count: Number(row.count_91_plus ?? 0), amount: Number(row.bucket_91_plus ?? 0), status: 'High Risk' },
+    ];
+  }
+
+  private customerRiskScore(outstanding: number, creditLimit: number, oldOverdue: number): number {
+    let score = 90;
+    if (creditLimit > 0 && outstanding / creditLimit > 0.8) score -= 20;
+    if (oldOverdue > 0) score -= 25;
+    if (outstanding > 0 && creditLimit <= 0) score -= 10;
+    return Math.max(0, Math.min(100, score));
+  }
+
+  private supplierScore(onTime: number, fulfillment: number, oldPayable: number): number {
+    const delivery = Number.isFinite(onTime) && onTime > 0 ? onTime : 70;
+    const fulfil = Number.isFinite(fulfillment) && fulfillment > 0 ? fulfillment : 70;
+    let score = delivery * 0.55 + fulfil * 0.35 + 10;
+    if (oldPayable > 0) score -= 10;
+    return Math.round(Math.max(0, Math.min(100, score)));
+  }
+
+  private itemInsights(stockQty: number, avgDailySales: number, openPoQty: number, batches: any[]): string[] {
+    const insights: string[] = [];
+    const cover = avgDailySales > 0 ? stockQty / avgDailySales : null;
+    if (cover != null && cover < 7) insights.push('Stock cover is below 7 days. Raise or expedite purchase orders.');
+    if (cover != null && cover > 60) insights.push('Stock cover is above 60 days. Review slow-moving inventory and purchase plans.');
+    if (openPoQty > 0) insights.push('Open purchase quantity exists. Track pending receipts against current demand.');
+    if (batches.some((b) => b.days_left != null && Number(b.days_left) <= 30)) insights.push('Near-expiry batches exist. Prioritize FEFO picking and liquidation.');
+    if (!insights.length) insights.push('No immediate item risk detected from stock, purchase, and expiry signals.');
+    return insights;
+  }
+
+  private customerInsights(outstanding: number, creditLimit: number, oldOverdue: number, currentSales: number, lastSales: number): string[] {
+    const insights: string[] = [];
+    if (creditLimit > 0 && outstanding / creditLimit > 0.8) insights.push('Credit utilization is high. Review credit exposure before new dispatches.');
+    if (oldOverdue > 0) insights.push('Old overdue balance exists. Prioritize collection follow-up.');
+    if (this.pctChange(currentSales, lastSales) != null && (this.pctChange(currentSales, lastSales) ?? 0) < -10) insights.push('Current month sales are down more than 10% versus last month.');
+    if (!insights.length) insights.push('Customer sales and receivable signals are within normal control limits.');
+    return insights;
+  }
+
+  private supplierInsights(score: number, oldPayable: number, openPoValue: number, currentPurchase: number, lastPurchase: number): string[] {
+    const insights: string[] = [];
+    if (score < 70) insights.push('Supplier score is below target. Review delivery and fulfilment performance.');
+    if (oldPayable > 0) insights.push('Old payable exists. Align payment follow-up with procurement priority.');
+    if (openPoValue > 0) insights.push('Open PO value is pending. Track expected receipts and shortages.');
+    if (this.pctChange(currentPurchase, lastPurchase) != null && (this.pctChange(currentPurchase, lastPurchase) ?? 0) > 20) insights.push('Purchase value is up sharply versus last month. Validate demand and price changes.');
+    if (!insights.length) insights.push('Supplier performance and payable signals are within normal control limits.');
+    return insights;
+  }
+}

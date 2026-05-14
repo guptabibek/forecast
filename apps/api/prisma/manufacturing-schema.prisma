@@ -1,0 +1,1162 @@
+// ============================================================================
+// MANUFACTURING EXTENSION SCHEMA
+// This file contains additional models for enterprise manufacturing features
+// Merge with main schema.prisma when implementing
+// ============================================================================
+
+// ============================================================================
+// FISCAL CALENDAR & TIME HIERARCHY
+// ============================================================================
+
+model FiscalCalendar {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  name            String    @db.VarChar(100)
+  type            FiscalCalendarType @default(CALENDAR)
+  startMonth      Int       @default(1) @map("start_month") // 1-12
+  weekStartDay    Int       @default(0) @map("week_start_day") // 0=Sunday
+  patternType     String?   @map("pattern_type") @db.VarChar(20) // "4-4-5", "4-5-4", etc.
+  isDefault       Boolean   @default(false) @map("is_default")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  periods         FiscalPeriod[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("fiscal_calendars")
+}
+
+enum FiscalCalendarType {
+  CALENDAR      // Standard calendar months
+  FISCAL_445    // 4-4-5 week pattern
+  FISCAL_454    // 4-5-4 week pattern
+  FISCAL_544    // 5-4-4 week pattern
+  CUSTOM        // Custom defined
+}
+
+model FiscalPeriod {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  calendarId      String    @map("calendar_id") @db.Uuid
+  fiscalYear      Int       @map("fiscal_year")
+  fiscalQuarter   Int       @map("fiscal_quarter") // 1-4
+  fiscalMonth     Int       @map("fiscal_month") // 1-12
+  fiscalWeek      Int?      @map("fiscal_week") // 1-53
+  periodName      String    @map("period_name") @db.VarChar(50)
+  startDate       DateTime  @map("start_date") @db.Date
+  endDate         DateTime  @map("end_date") @db.Date
+  workingDays     Int       @default(0) @map("working_days")
+  isClosed        Boolean   @default(false) @map("is_closed")
+  isFrozen        Boolean   @default(false) @map("is_frozen")
+
+  calendar        FiscalCalendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+
+  @@unique([calendarId, fiscalYear, fiscalMonth])
+  @@index([calendarId])
+  @@index([startDate, endDate])
+  @@map("fiscal_periods")
+}
+
+// ============================================================================
+// PRODUCT HIERARCHY & BOM
+// ============================================================================
+
+model ProductHierarchy {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  name            String    @db.VarChar(100)
+  description     String?   @db.Text
+  levelCount      Int       @default(4) @map("level_count")
+  levelNames      String[]  @map("level_names") // ["Division", "Category", "SubCategory", "SKU"]
+  isDefault       Boolean   @default(false) @map("is_default")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  nodes           ProductHierarchyNode[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("product_hierarchies")
+}
+
+model ProductHierarchyNode {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  hierarchyId     String    @map("hierarchy_id") @db.Uuid
+  parentId        String?   @map("parent_id") @db.Uuid
+  productId       String?   @map("product_id") @db.Uuid // Link to SKU (leaf only)
+  code            String    @db.VarChar(50)
+  name            String    @db.VarChar(255)
+  level           Int
+  path            String    @db.VarChar(500) // Materialized path: "/1/2/3/"
+  sortOrder       Int       @default(0) @map("sort_order")
+  attributes      Json      @default("{}")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  hierarchy       ProductHierarchy @relation(fields: [hierarchyId], references: [id], onDelete: Cascade)
+  parent          ProductHierarchyNode? @relation("NodeHierarchy", fields: [parentId], references: [id])
+  children        ProductHierarchyNode[] @relation("NodeHierarchy")
+
+  @@unique([hierarchyId, code])
+  @@index([hierarchyId])
+  @@index([parentId])
+  @@index([path])
+  @@map("product_hierarchy_nodes")
+}
+
+model BillOfMaterial {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  parentProductId String    @map("parent_product_id") @db.Uuid
+  name            String    @db.VarChar(255)
+  version         String    @default("1.0") @db.VarChar(20)
+  type            BOMType   @default(MANUFACTURING)
+  status          BOMStatus @default(ACTIVE)
+  effectiveFrom   DateTime  @map("effective_from") @db.Date
+  effectiveTo     DateTime? @map("effective_to") @db.Date
+  baseQuantity    Decimal   @default(1) @map("base_quantity") @db.Decimal(18, 4)
+  baseUOM         String    @map("base_uom") @db.VarChar(20)
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  components      BOMComponent[]
+  routings        Routing[]
+
+  @@unique([tenantId, parentProductId, version])
+  @@index([tenantId])
+  @@index([parentProductId])
+  @@map("bills_of_material")
+}
+
+enum BOMType {
+  MANUFACTURING   // Standard manufacturing BOM
+  ENGINEERING     // Engineering/prototype BOM
+  SALES           // Sales/kit BOM
+  PHANTOM         // Phantom/planning BOM
+}
+
+enum BOMStatus {
+  DRAFT
+  ACTIVE
+  OBSOLETE
+  PENDING_APPROVAL
+}
+
+model BOMComponent {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  bomId           String    @map("bom_id") @db.Uuid
+  componentProductId String @map("component_product_id") @db.Uuid
+  sequence        Int       @default(10)
+  quantity        Decimal   @db.Decimal(18, 6)
+  uom             String    @db.VarChar(20)
+  scrapPercent    Decimal   @default(0) @map("scrap_percent") @db.Decimal(5, 2)
+  leadTimeOffset  Int       @default(0) @map("lead_time_offset") // Days
+  isPhantom       Boolean   @default(false) @map("is_phantom")
+  isCritical      Boolean   @default(false) @map("is_critical")
+  supplyType      SupplyType @default(STOCK) @map("supply_type")
+  operationId     String?   @map("operation_id") @db.Uuid // Which operation consumes this
+  effectiveFrom   DateTime? @map("effective_from") @db.Date
+  effectiveTo     DateTime? @map("effective_to") @db.Date
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  bom             BillOfMaterial @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  operation       RoutingOperation? @relation(fields: [operationId], references: [id])
+
+  @@index([bomId])
+  @@index([componentProductId])
+  @@map("bom_components")
+}
+
+enum SupplyType {
+  STOCK           // Pull from stock
+  DIRECT_PURCHASE // Purchase to order
+  SUBCONTRACT     // Outsource production
+  TRANSFER        // Inter-plant transfer
+}
+
+// ============================================================================
+// ROUTING & CAPACITY
+// ============================================================================
+
+model WorkCenter {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  code            String    @db.VarChar(50)
+  name            String    @db.VarChar(255)
+  description     String?   @db.Text
+  type            WorkCenterType @default(MACHINE)
+  locationId      String?   @map("location_id") @db.Uuid
+  costPerHour     Decimal   @default(0) @map("cost_per_hour") @db.Decimal(18, 4)
+  setupCostPerHour Decimal  @default(0) @map("setup_cost_per_hour") @db.Decimal(18, 4)
+  efficiency      Decimal   @default(100) @db.Decimal(5, 2) // Percentage
+  utilization     Decimal   @default(100) @db.Decimal(5, 2) // Target utilization %
+  status          DimensionStatus @default(ACTIVE)
+  attributes      Json      @default("{}")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  capacities      WorkCenterCapacity[]
+  operations      RoutingOperation[]
+  shifts          WorkCenterShift[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("work_centers")
+}
+
+enum WorkCenterType {
+  MACHINE
+  LABOR
+  TOOL
+  SUBCONTRACT
+  MIXED
+}
+
+model WorkCenterCapacity {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  workCenterId    String    @map("work_center_id") @db.Uuid
+  effectiveFrom   DateTime  @map("effective_from") @db.Date
+  effectiveTo     DateTime? @map("effective_to") @db.Date
+  capacityPerDay  Decimal   @map("capacity_per_day") @db.Decimal(18, 4) // Hours or units
+  capacityUOM     String    @map("capacity_uom") @db.VarChar(20) // HOURS, UNITS
+  numberOfMachines Int      @default(1) @map("number_of_machines")
+  numberOfShifts  Int       @default(1) @map("number_of_shifts")
+  hoursPerShift   Decimal   @default(8) @map("hours_per_shift") @db.Decimal(5, 2)
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  workCenter      WorkCenter @relation(fields: [workCenterId], references: [id], onDelete: Cascade)
+
+  @@index([workCenterId])
+  @@map("work_center_capacities")
+}
+
+model WorkCenterShift {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  workCenterId    String    @map("work_center_id") @db.Uuid
+  shiftName       String    @map("shift_name") @db.VarChar(50)
+  startTime       String    @map("start_time") @db.VarChar(8) // "08:00:00"
+  endTime         String    @map("end_time") @db.VarChar(8) // "16:00:00"
+  daysOfWeek      Int[]     @map("days_of_week") // [1,2,3,4,5] Mon-Fri
+  breakMinutes    Int       @default(0) @map("break_minutes")
+  isActive        Boolean   @default(true) @map("is_active")
+
+  workCenter      WorkCenter @relation(fields: [workCenterId], references: [id], onDelete: Cascade)
+
+  @@unique([workCenterId, shiftName])
+  @@map("work_center_shifts")
+}
+
+model Routing {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  bomId           String    @map("bom_id") @db.Uuid
+  name            String    @db.VarChar(255)
+  version         String    @default("1.0") @db.VarChar(20)
+  status          BOMStatus @default(ACTIVE)
+  totalLeadTime   Int       @default(0) @map("total_lead_time") // Days
+  totalSetupTime  Decimal   @default(0) @map("total_setup_time") @db.Decimal(10, 2) // Hours
+  totalRunTime    Decimal   @default(0) @map("total_run_time") @db.Decimal(10, 2) // Hours per unit
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  bom             BillOfMaterial @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  operations      RoutingOperation[]
+
+  @@unique([bomId, version])
+  @@index([tenantId])
+  @@map("routings")
+}
+
+model RoutingOperation {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  routingId       String    @map("routing_id") @db.Uuid
+  workCenterId    String    @map("work_center_id") @db.Uuid
+  sequence        Int       @default(10)
+  operationCode   String    @map("operation_code") @db.VarChar(50)
+  operationName   String    @map("operation_name") @db.VarChar(255)
+  description     String?   @db.Text
+  setupTime       Decimal   @map("setup_time") @db.Decimal(10, 4) // Hours
+  runTimePerUnit  Decimal   @map("run_time_per_unit") @db.Decimal(10, 6) // Hours
+  waitTime        Decimal   @default(0) @map("wait_time") @db.Decimal(10, 4) // Hours
+  moveTime        Decimal   @default(0) @map("move_time") @db.Decimal(10, 4) // Hours
+  queueTime       Decimal   @default(0) @map("queue_time") @db.Decimal(10, 4) // Hours
+  overlapPercent  Decimal   @default(0) @map("overlap_percent") @db.Decimal(5, 2)
+  minimumTransferQty Decimal? @map("minimum_transfer_qty") @db.Decimal(18, 4)
+  yieldPercent    Decimal   @default(100) @map("yield_percent") @db.Decimal(5, 2)
+  isSubcontracted Boolean   @default(false) @map("is_subcontracted")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  routing         Routing   @relation(fields: [routingId], references: [id], onDelete: Cascade)
+  workCenter      WorkCenter @relation(fields: [workCenterId], references: [id])
+  components      BOMComponent[]
+
+  @@unique([routingId, sequence])
+  @@index([routingId])
+  @@map("routing_operations")
+}
+
+// ============================================================================
+// INVENTORY MANAGEMENT
+// ============================================================================
+
+model InventoryPolicy {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  productId       String    @map("product_id") @db.Uuid
+  locationId      String    @map("location_id") @db.Uuid
+  
+  // Planning parameters
+  planningMethod  PlanningMethod @default(MRP) @map("planning_method")
+  lotSizingRule   LotSizingRule @default(LFL) @map("lot_sizing_rule")
+  
+  // Safety stock
+  safetyStockMethod SafetyStockMethod @default(FIXED) @map("safety_stock_method")
+  safetyStockQty  Decimal?  @map("safety_stock_qty") @db.Decimal(18, 4)
+  safetyStockDays Int?      @map("safety_stock_days")
+  serviceLevel    Decimal   @default(95) @map("service_level") @db.Decimal(5, 2) // Target %
+  
+  // Reorder parameters
+  reorderPoint    Decimal?  @map("reorder_point") @db.Decimal(18, 4)
+  reorderQty      Decimal?  @map("reorder_qty") @db.Decimal(18, 4)
+  minOrderQty     Decimal?  @map("min_order_qty") @db.Decimal(18, 4)
+  maxOrderQty     Decimal?  @map("max_order_qty") @db.Decimal(18, 4)
+  multipleOrderQty Decimal? @map("multiple_order_qty") @db.Decimal(18, 4)
+  
+  // Lead times
+  leadTimeDays    Int       @default(0) @map("lead_time_days")
+  safetyLeadTime  Int       @default(0) @map("safety_lead_time") // Buffer days
+  
+  // Classification
+  abcClass        String?   @map("abc_class") @db.VarChar(1) // A, B, C
+  xyzClass        String?   @map("xyz_class") @db.VarChar(1) // X, Y, Z
+  
+  // Shelf life (for perishables)
+  shelfLifeDays   Int?      @map("shelf_life_days")
+  minRemainingShelfLife Int? @map("min_remaining_shelf_life")
+  
+  effectiveFrom   DateTime  @map("effective_from") @db.Date
+  effectiveTo     DateTime? @map("effective_to") @db.Date
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tenantId, productId, locationId])
+  @@index([tenantId])
+  @@index([productId])
+  @@map("inventory_policies")
+}
+
+enum PlanningMethod {
+  MRP             // Material Requirements Planning
+  REORDER_POINT   // Fixed reorder point
+  MIN_MAX         // Min-max inventory
+  KANBAN          // Pull-based
+  VMI             // Vendor managed
+}
+
+enum LotSizingRule {
+  LFL             // Lot-for-lot
+  FOQ             // Fixed order quantity
+  EOQ             // Economic order quantity
+  POQ             // Periodic order quantity
+  MIN_MAX         // Min-max ordering
+}
+
+enum SafetyStockMethod {
+  FIXED           // Fixed quantity
+  DAYS_OF_SUPPLY  // Days of average demand
+  SERVICE_LEVEL   // Statistical (based on demand variability)
+  DYNAMIC         // ML-based dynamic calculation
+}
+
+model InventoryLevel {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  productId       String    @map("product_id") @db.Uuid
+  locationId      String    @map("location_id") @db.Uuid
+  
+  // Current quantities
+  onHandQty       Decimal   @default(0) @map("on_hand_qty") @db.Decimal(18, 4)
+  allocatedQty    Decimal   @default(0) @map("allocated_qty") @db.Decimal(18, 4)
+  availableQty    Decimal   @default(0) @map("available_qty") @db.Decimal(18, 4) // Calculated
+  inTransitQty    Decimal   @default(0) @map("in_transit_qty") @db.Decimal(18, 4)
+  onOrderQty      Decimal   @default(0) @map("on_order_qty") @db.Decimal(18, 4)
+  reservedQty     Decimal   @default(0) @map("reserved_qty") @db.Decimal(18, 4)
+  quarantineQty   Decimal   @default(0) @map("quarantine_qty") @db.Decimal(18, 4)
+  
+  // Valuation
+  standardCost    Decimal?  @map("standard_cost") @db.Decimal(18, 4)
+  averageCost     Decimal?  @map("average_cost") @db.Decimal(18, 4)
+  inventoryValue  Decimal?  @map("inventory_value") @db.Decimal(18, 4)
+  
+  // Tracking
+  lastReceiptDate DateTime? @map("last_receipt_date") @db.Date
+  lastIssueDate   DateTime? @map("last_issue_date") @db.Date
+  lastCountDate   DateTime? @map("last_count_date") @db.Date
+  
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tenantId, productId, locationId])
+  @@index([tenantId])
+  @@index([productId])
+  @@map("inventory_levels")
+}
+
+// ============================================================================
+// MRP & SUPPLY PLANNING
+// ============================================================================
+
+model MRPRun {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  name            String    @db.VarChar(255)
+  runType         MRPRunType @default(REGENERATIVE) @map("run_type")
+  status          JobStatus @default(PENDING)
+  planningHorizonDays Int   @map("planning_horizon_days")
+  frozenPeriodDays Int      @default(0) @map("frozen_period_days")
+  
+  // Scope
+  locationIds     String[]  @map("location_ids")
+  productIds      String[]  @map("product_ids") // Empty = all
+  
+  // Parameters
+  respectLeadTimes Boolean  @default(true) @map("respect_lead_times")
+  considerSafetyStock Boolean @default(true) @map("consider_safety_stock")
+  netChange       Boolean   @default(false) @map("net_change")
+  
+  // Results
+  plannedOrderCount Int?    @map("planned_order_count")
+  exceptionCount  Int?      @map("exception_count")
+  
+  startedAt       DateTime? @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  requirements    MRPRequirement[]
+  plannedOrders   PlannedOrder[]
+  exceptions      MRPException[]
+
+  @@index([tenantId])
+  @@map("mrp_runs")
+}
+
+enum MRPRunType {
+  REGENERATIVE    // Full recalculation
+  NET_CHANGE      // Only changed items
+  SELECTIVE       // Specific items only
+}
+
+model MRPRequirement {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  mrpRunId        String    @map("mrp_run_id") @db.Uuid
+  productId       String    @map("product_id") @db.Uuid
+  locationId      String    @map("location_id") @db.Uuid
+  periodDate      DateTime  @map("period_date") @db.Date
+  
+  // Quantities
+  grossRequirement Decimal  @map("gross_requirement") @db.Decimal(18, 4)
+  scheduledReceipts Decimal @default(0) @map("scheduled_receipts") @db.Decimal(18, 4)
+  projectedOnHand Decimal   @map("projected_on_hand") @db.Decimal(18, 4)
+  netRequirement  Decimal   @map("net_requirement") @db.Decimal(18, 4)
+  plannedOrderReceipt Decimal @default(0) @map("planned_order_receipt") @db.Decimal(18, 4)
+  plannedOrderRelease Decimal @default(0) @map("planned_order_release") @db.Decimal(18, 4)
+  
+  // Pegging
+  demandSource    String?   @map("demand_source") @db.VarChar(100) // Forecast, Customer Order, etc.
+  demandSourceId  String?   @map("demand_source_id") @db.Uuid
+
+  mrpRun          MRPRun    @relation(fields: [mrpRunId], references: [id], onDelete: Cascade)
+
+  @@index([mrpRunId])
+  @@index([productId])
+  @@map("mrp_requirements")
+}
+
+model PlannedOrder {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  mrpRunId        String?   @map("mrp_run_id") @db.Uuid
+  productId       String    @map("product_id") @db.Uuid
+  locationId      String    @map("location_id") @db.Uuid
+  
+  orderType       PlannedOrderType @map("order_type")
+  status          PlannedOrderStatus @default(PLANNED)
+  
+  // Dates
+  startDate       DateTime  @map("start_date") @db.Date
+  dueDate         DateTime  @map("due_date") @db.Date
+  releaseDate     DateTime? @map("release_date") @db.Date
+  
+  // Quantities
+  quantity        Decimal   @db.Decimal(18, 4)
+  releasedQty     Decimal   @default(0) @map("released_qty") @db.Decimal(18, 4)
+  
+  // Source
+  supplierId      String?   @map("supplier_id") @db.Uuid
+  sourceLocationId String?  @map("source_location_id") @db.Uuid // For transfers
+  
+  // Firming
+  isFirmed        Boolean   @default(false) @map("is_firmed")
+  firmedAt        DateTime? @map("firmed_at")
+  firmedBy        String?   @map("firmed_by") @db.Uuid
+  
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  mrpRun          MRPRun?   @relation(fields: [mrpRunId], references: [id])
+  supplier        Supplier? @relation(fields: [supplierId], references: [id])
+
+  @@index([tenantId])
+  @@index([productId])
+  @@index([status])
+  @@map("planned_orders")
+}
+
+enum PlannedOrderType {
+  PURCHASE        // Buy from supplier
+  PRODUCTION      // Make in-house
+  TRANSFER        // Move between locations
+  SUBCONTRACT     // Outsource production
+}
+
+enum PlannedOrderStatus {
+  PLANNED         // Generated by MRP
+  FIRMED          // Manually confirmed
+  RELEASED        // Converted to actual order
+  CANCELLED       // Cancelled
+}
+
+model MRPException {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  mrpRunId        String    @map("mrp_run_id") @db.Uuid
+  productId       String    @map("product_id") @db.Uuid
+  locationId      String    @map("location_id") @db.Uuid
+  
+  exceptionType   MRPExceptionType @map("exception_type")
+  severity        ExceptionSeverity
+  message         String    @db.Text
+  
+  // Context
+  affectedDate    DateTime? @map("affected_date") @db.Date
+  currentValue    Decimal?  @map("current_value") @db.Decimal(18, 4)
+  requiredValue   Decimal?  @map("required_value") @db.Decimal(18, 4)
+  
+  // Resolution
+  status          ExceptionStatus @default(OPEN)
+  resolvedAt      DateTime? @map("resolved_at")
+  resolvedBy      String?   @map("resolved_by") @db.Uuid
+  resolution      String?   @db.Text
+  
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  mrpRun          MRPRun    @relation(fields: [mrpRunId], references: [id], onDelete: Cascade)
+
+  @@index([mrpRunId])
+  @@index([status])
+  @@map("mrp_exceptions")
+}
+
+enum MRPExceptionType {
+  PAST_DUE_ORDER      // Order due date is in the past
+  EXPEDITE            // Need to speed up order
+  DEFER               // Can push out order
+  CANCEL              // Order no longer needed
+  SHORTAGE            // Cannot meet requirement
+  EXCESS_INVENTORY    // Projected excess
+  LEAD_TIME_VIOLATION // Cannot meet lead time
+  LOT_SIZE_VIOLATION  // Below minimum quantity
+  CAPACITY_OVERLOAD   // Exceeds capacity
+}
+
+enum ExceptionSeverity {
+  CRITICAL        // Immediate action required
+  HIGH            // Action required within 24h
+  MEDIUM          // Action required within week
+  LOW             // Informational
+}
+
+enum ExceptionStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  IGNORED
+}
+
+// ============================================================================
+// SUPPLIER MANAGEMENT
+// ============================================================================
+
+model Supplier {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  code            String    @db.VarChar(50)
+  name            String    @db.VarChar(255)
+  contactName     String?   @map("contact_name") @db.VarChar(255)
+  email           String?   @db.VarChar(255)
+  phone           String?   @db.VarChar(50)
+  address         String?   @db.Text
+  country         String?   @db.VarChar(100)
+  currency        String    @default("USD") @db.VarChar(3)
+  paymentTerms    String?   @map("payment_terms") @db.VarChar(50)
+  
+  // Performance
+  onTimeDeliveryRate Decimal? @map("on_time_delivery_rate") @db.Decimal(5, 2)
+  qualityRating   Decimal?  @map("quality_rating") @db.Decimal(3, 2) // 0-5
+  
+  status          DimensionStatus @default(ACTIVE)
+  externalId      String?   @map("external_id") @db.VarChar(100)
+  attributes      Json      @default("{}")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  products        SupplierProduct[]
+  plannedOrders   PlannedOrder[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("suppliers")
+}
+
+model SupplierProduct {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  supplierId      String    @map("supplier_id") @db.Uuid
+  productId       String    @map("product_id") @db.Uuid
+  
+  // Sourcing details
+  supplierPartNumber String? @map("supplier_part_number") @db.VarChar(100)
+  unitPrice       Decimal   @map("unit_price") @db.Decimal(18, 4)
+  currency        String    @default("USD") @db.VarChar(3)
+  minOrderQty     Decimal   @default(1) @map("min_order_qty") @db.Decimal(18, 4)
+  orderMultiple   Decimal   @default(1) @map("order_multiple") @db.Decimal(18, 4)
+  leadTimeDays    Int       @map("lead_time_days")
+  
+  // Priority
+  isPrimary       Boolean   @default(false) @map("is_primary")
+  priority        Int       @default(1) // Lower = higher priority
+  
+  // Capacity
+  dailyCapacity   Decimal?  @map("daily_capacity") @db.Decimal(18, 4)
+  
+  effectiveFrom   DateTime  @map("effective_from") @db.Date
+  effectiveTo     DateTime? @map("effective_to") @db.Date
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  supplier        Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([supplierId, productId])
+  @@index([productId])
+  @@map("supplier_products")
+}
+
+// ============================================================================
+// WORKFLOW & APPROVALS
+// ============================================================================
+
+model WorkflowTemplate {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  name            String    @db.VarChar(255)
+  description     String?   @db.Text
+  entityType      WorkflowEntityType @map("entity_type")
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  steps           WorkflowStep[]
+  instances       WorkflowInstance[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("workflow_templates")
+}
+
+enum WorkflowEntityType {
+  PLAN_VERSION
+  FORECAST
+  PLANNED_ORDER
+  BOM
+  PROMOTION
+  PRICE_CHANGE
+}
+
+model WorkflowStep {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  templateId      String    @map("template_id") @db.Uuid
+  sequence        Int
+  name            String    @db.VarChar(255)
+  description     String?   @db.Text
+  
+  // Approvers
+  approverType    ApproverType @map("approver_type")
+  approverRole    UserRole?   @map("approver_role")
+  approverUserId  String?     @map("approver_user_id") @db.Uuid
+  
+  // Rules
+  requiredApprovals Int      @default(1) @map("required_approvals")
+  autoApproveAfterDays Int?  @map("auto_approve_after_days")
+  canReject       Boolean   @default(true) @map("can_reject")
+  canDelegate     Boolean   @default(false) @map("can_delegate")
+  
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  template        WorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, sequence])
+  @@map("workflow_steps")
+}
+
+enum ApproverType {
+  USER            // Specific user
+  ROLE            // Any user with role
+  MANAGER         // Submitter's manager
+  DYNAMIC         // Based on rules
+}
+
+model WorkflowInstance {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  templateId      String    @map("template_id") @db.Uuid
+  entityType      WorkflowEntityType @map("entity_type")
+  entityId        String    @map("entity_id") @db.Uuid
+  
+  status          WorkflowStatus @default(IN_PROGRESS)
+  currentStep     Int       @default(1) @map("current_step")
+  
+  submittedBy     String    @map("submitted_by") @db.Uuid
+  submittedAt     DateTime  @default(now()) @map("submitted_at")
+  completedAt     DateTime? @map("completed_at")
+  
+  notes           String?   @db.Text
+
+  template        WorkflowTemplate @relation(fields: [templateId], references: [id])
+  actions         WorkflowAction[]
+
+  @@index([tenantId])
+  @@index([entityType, entityId])
+  @@map("workflow_instances")
+}
+
+enum WorkflowStatus {
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  CANCELLED
+  ON_HOLD
+}
+
+model WorkflowAction {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  instanceId      String    @map("instance_id") @db.Uuid
+  stepNumber      Int       @map("step_number")
+  action          WorkflowActionType
+  
+  performedBy     String    @map("performed_by") @db.Uuid
+  performedAt     DateTime  @default(now()) @map("performed_at")
+  
+  comments        String?   @db.Text
+  attachments     Json?     // Array of file URLs
+
+  instance        WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId])
+  @@map("workflow_actions")
+}
+
+enum WorkflowActionType {
+  SUBMIT
+  APPROVE
+  REJECT
+  DELEGATE
+  RETURN
+  COMMENT
+  ESCALATE
+}
+
+// ============================================================================
+// PROMOTIONAL PLANNING
+// ============================================================================
+
+model Promotion {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  code            String    @db.VarChar(50)
+  name            String    @db.VarChar(255)
+  description     String?   @db.Text
+  type            PromotionType
+  status          PromotionStatus @default(DRAFT)
+  
+  // Timing
+  startDate       DateTime  @map("start_date") @db.Date
+  endDate         DateTime  @map("end_date") @db.Date
+  preOrderStartDate DateTime? @map("pre_order_start_date") @db.Date
+  
+  // Financials
+  budget          Decimal?  @db.Decimal(18, 2)
+  actualSpend     Decimal?  @map("actual_spend") @db.Decimal(18, 2)
+  expectedROI     Decimal?  @map("expected_roi") @db.Decimal(8, 2)
+  actualROI       Decimal?  @map("actual_roi") @db.Decimal(8, 2)
+  
+  // Scope
+  productIds      String[]  @map("product_ids")
+  locationIds     String[]  @map("location_ids")
+  customerIds     String[]  @map("customer_ids")
+  channelIds      String[]  @map("channel_ids")
+  
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  liftFactors     PromotionLiftFactor[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([startDate, endDate])
+  @@map("promotions")
+}
+
+enum PromotionType {
+  PRICE_DISCOUNT
+  BOGO            // Buy one get one
+  BUNDLE
+  REBATE
+  LOYALTY_POINTS
+  FREE_SHIPPING
+  FEATURE_AD
+  DISPLAY
+  COUPON
+  CLEARANCE
+}
+
+enum PromotionStatus {
+  DRAFT
+  PLANNED
+  APPROVED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model PromotionLiftFactor {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  promotionId     String    @map("promotion_id") @db.Uuid
+  productId       String?   @map("product_id") @db.Uuid
+  locationId      String?   @map("location_id") @db.Uuid
+  
+  // Expected lift
+  expectedLift    Decimal   @map("expected_lift") @db.Decimal(8, 4) // 1.5 = 50% increase
+  expectedCannibalization Decimal @default(0) @map("expected_cannibalization") @db.Decimal(5, 2)
+  expectedHalo    Decimal   @default(0) @map("expected_halo") @db.Decimal(5, 2)
+  
+  // Actual results
+  actualLift      Decimal?  @map("actual_lift") @db.Decimal(8, 4)
+  actualCannibalization Decimal? @map("actual_cannibalization") @db.Decimal(5, 2)
+  actualHalo      Decimal?  @map("actual_halo") @db.Decimal(5, 2)
+  
+  // Learning
+  confidenceLevel Decimal?  @map("confidence_level") @db.Decimal(5, 2)
+
+  promotion       Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  @@index([promotionId])
+  @@map("promotion_lift_factors")
+}
+
+// ============================================================================
+// S&OP PROCESS
+// ============================================================================
+
+model SOPCycle {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  name            String    @db.VarChar(255) // "2024-Q2 S&OP"
+  fiscalYear      Int       @map("fiscal_year")
+  fiscalPeriod    Int       @map("fiscal_period") // Month or quarter
+  status          SOPStatus @default(PLANNING)
+  
+  // Timeline
+  planningStart   DateTime  @map("planning_start") @db.Date
+  demandReviewDate DateTime @map("demand_review_date") @db.Date
+  supplyReviewDate DateTime @map("supply_review_date") @db.Date
+  preSopDate      DateTime  @map("pre_sop_date") @db.Date
+  executiveSopDate DateTime @map("executive_sop_date") @db.Date
+  planningEnd     DateTime  @map("planning_end") @db.Date
+  
+  // Participants
+  demandManager   String?   @map("demand_manager") @db.Uuid
+  supplyManager   String?   @map("supply_manager") @db.Uuid
+  financeManager  String?   @map("finance_manager") @db.Uuid
+  executiveSponsor String?  @map("executive_sponsor") @db.Uuid
+  
+  notes           String?   @db.Text
+  decisions       Json?     // Array of decisions made
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  forecasts       SOPForecast[]
+  assumptions     SOPAssumption[]
+
+  @@unique([tenantId, fiscalYear, fiscalPeriod])
+  @@index([tenantId])
+  @@map("sop_cycles")
+}
+
+enum SOPStatus {
+  PLANNING
+  DEMAND_REVIEW
+  SUPPLY_REVIEW
+  PRE_SOP
+  EXECUTIVE_SOP
+  APPROVED
+  CLOSED
+}
+
+model SOPForecast {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  cycleId         String    @map("cycle_id") @db.Uuid
+  source          SOPForecastSource
+  
+  // Aggregated values
+  totalUnits      Decimal   @map("total_units") @db.Decimal(18, 4)
+  totalRevenue    Decimal   @map("total_revenue") @db.Decimal(18, 2)
+  
+  // Detail by period
+  periodForecasts Json      @map("period_forecasts") // [{period, units, revenue}]
+  
+  submittedBy     String    @map("submitted_by") @db.Uuid
+  submittedAt     DateTime  @default(now()) @map("submitted_at")
+  comments        String?   @db.Text
+
+  cycle           SOPCycle  @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+
+  @@unique([cycleId, source])
+  @@map("sop_forecasts")
+}
+
+enum SOPForecastSource {
+  STATISTICAL     // From forecast engine
+  SALES           // Sales team input
+  MARKETING       // Marketing team input
+  FINANCE         // Finance team input
+  OPERATIONS      // Operations team input
+  CONSENSUS       // Final agreed forecast
+}
+
+model SOPAssumption {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  cycleId         String    @map("cycle_id") @db.Uuid
+  category        String    @db.VarChar(100) // "Market", "Pricing", "Capacity"
+  assumption      String    @db.Text
+  impact          String?   @db.Text // Description of impact
+  quantifiedImpact Decimal? @map("quantified_impact") @db.Decimal(18, 2)
+  risk            RiskLevel @default(MEDIUM)
+  owner           String?   @db.Uuid
+  status          AssumptionStatus @default(PENDING)
+  
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  cycle           SOPCycle  @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+
+  @@index([cycleId])
+  @@map("sop_assumptions")
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AssumptionStatus {
+  PENDING
+  VALIDATED
+  CHALLENGED
+  ACCEPTED
+  REJECTED
+}
+
+// ============================================================================
+// NEW PRODUCT INTRODUCTION (NPI)
+// ============================================================================
+
+model NewProductIntroduction {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  productId       String    @map("product_id") @db.Uuid
+  
+  // Lifecycle
+  status          NPIStatus @default(CONCEPT)
+  conceptDate     DateTime? @map("concept_date") @db.Date
+  developmentDate DateTime? @map("development_date") @db.Date
+  pilotDate       DateTime? @map("pilot_date") @db.Date
+  launchDate      DateTime? @map("launch_date") @db.Date
+  maturityDate    DateTime? @map("maturity_date") @db.Date
+  declineDate     DateTime? @map("decline_date") @db.Date
+  
+  // Planning
+  targetMarket    String?   @map("target_market") @db.VarChar(255)
+  targetLocations String[]  @map("target_locations")
+  analogProductIds String[] @map("analog_product_ids") // Similar products for forecasting
+  launchCurveType LaunchCurveType @default(STANDARD) @map("launch_curve_type")
+  
+  // Projections
+  year1Units      Decimal?  @map("year1_units") @db.Decimal(18, 4)
+  year2Units      Decimal?  @map("year2_units") @db.Decimal(18, 4)
+  year3Units      Decimal?  @map("year3_units") @db.Decimal(18, 4)
+  peakUnits       Decimal?  @map("peak_units") @db.Decimal(18, 4)
+  
+  // Cannibalization
+  cannibalizedProducts Json? @map("cannibalized_products") // [{productId, percentage}]
+  
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tenantId, productId])
+  @@index([tenantId])
+  @@map("new_product_introductions")
+}
+
+enum NPIStatus {
+  CONCEPT
+  DEVELOPMENT
+  PILOT
+  LAUNCH
+  GROWTH
+  MATURITY
+  DECLINE
+  DISCONTINUED
+}
+
+enum LaunchCurveType {
+  STANDARD        // Normal S-curve
+  AGGRESSIVE      // Fast ramp
+  CONSERVATIVE    // Slow ramp
+  LINEAR          // Steady growth
+  CUSTOM          // User-defined
+}
+
+// ============================================================================
+// DEMAND SENSING EXTERNAL DATA
+// ============================================================================
+
+model ExternalDataSource {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  name            String    @db.VarChar(255)
+  type            ExternalDataType
+  connectionConfig Json     @map("connection_config") // Encrypted credentials
+  isActive        Boolean   @default(true) @map("is_active")
+  syncFrequency   String    @map("sync_frequency") @db.VarChar(50) // Cron expression
+  lastSyncAt      DateTime? @map("last_sync_at")
+  lastSyncStatus  String?   @map("last_sync_status") @db.VarChar(50)
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  dataPoints      ExternalDataPoint[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("external_data_sources")
+}
+
+enum ExternalDataType {
+  POS             // Point of sale
+  WEATHER         // Weather data
+  ECONOMIC        // Economic indicators
+  SOCIAL_MEDIA    // Social sentiment
+  GOOGLE_TRENDS   // Search trends
+  COMPETITOR      // Competitor intelligence
+  IOT             // IoT sensors
+  CUSTOM_API      // Custom integration
+}
+
+model ExternalDataPoint {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sourceId        String    @map("source_id") @db.Uuid
+  dataDate        DateTime  @map("data_date") @db.Date
+  productId       String?   @map("product_id") @db.Uuid
+  locationId      String?   @map("location_id") @db.Uuid
+  metricName      String    @map("metric_name") @db.VarChar(100)
+  metricValue     Decimal   @map("metric_value") @db.Decimal(18, 6)
+  metadata        Json?
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  source          ExternalDataSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId, dataDate])
+  @@index([productId])
+  @@map("external_data_points")
+}
+
+// ============================================================================
+// FINANCIAL INTEGRATION
+// ============================================================================
+
+model FinancialPlan {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  planVersionId   String    @map("plan_version_id") @db.Uuid
+  name            String    @db.VarChar(255)
+  type            FinancialPlanType
+  status          BOMStatus @default(DRAFT)
+  
+  fiscalYear      Int       @map("fiscal_year")
+  currency        String    @default("USD") @db.VarChar(3)
+  exchangeRate    Decimal   @default(1) @map("exchange_rate") @db.Decimal(18, 6)
+  
+  // Summary totals (calculated)
+  totalRevenue    Decimal?  @map("total_revenue") @db.Decimal(18, 2)
+  totalCOGS       Decimal?  @map("total_cogs") @db.Decimal(18, 2)
+  grossMargin     Decimal?  @map("gross_margin") @db.Decimal(18, 2)
+  grossMarginPct  Decimal?  @map("gross_margin_pct") @db.Decimal(8, 4)
+  
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  lineItems       FinancialPlanLine[]
+
+  @@unique([tenantId, planVersionId, type])
+  @@index([tenantId])
+  @@map("financial_plans")
+}
+
+enum FinancialPlanType {
+  OPERATING_PLAN
+  BUDGET
+  FORECAST
+  ROLLING_FORECAST
+  STRATEGIC_PLAN
+}
+
+model FinancialPlanLine {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  financialPlanId String    @map("financial_plan_id") @db.Uuid
+  accountId       String    @map("account_id") @db.Uuid
+  productId       String?   @map("product_id") @db.Uuid
+  locationId      String?   @map("location_id") @db.Uuid
+  customerId      String?   @map("customer_id") @db.Uuid
+  costCenterId    String?   @map("cost_center_id") @db.Uuid
+  
+  fiscalPeriod    Int       @map("fiscal_period")
+  amount          Decimal   @db.Decimal(18, 2)
+  quantity        Decimal?  @db.Decimal(18, 4)
+  unitPrice       Decimal?  @map("unit_price") @db.Decimal(18, 4)
+  
+  // Variance tracking
+  budgetAmount    Decimal?  @map("budget_amount") @db.Decimal(18, 2)
+  priorYearAmount Decimal?  @map("prior_year_amount") @db.Decimal(18, 2)
+  
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  financialPlan   FinancialPlan @relation(fields: [financialPlanId], references: [id], onDelete: Cascade)
+
+  @@index([financialPlanId])
+  @@index([accountId])
+  @@map("financial_plan_lines")
+}
+
+// ============================================================================
+// END OF MANUFACTURING EXTENSION SCHEMA
+// ============================================================================
