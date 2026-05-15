@@ -9659,14 +9659,59 @@ export class MargEdeService {
     init: RequestInit,
     timeoutMs = this.requestTimeoutMs,
   ): Promise<unknown> {
+    // We use `timeoutMs` as an *idle* timeout, not a total wall-clock deadline.
+    // Marg responses for inventory/accounting pages can be hundreds of MB; the
+    // server keeps streaming bytes for many minutes. A single hard deadline
+    // aborts healthy long downloads. Resetting the timer whenever the headers
+    // arrive or a body chunk lands aborts only when the connection truly stalls.
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let idleTimer: NodeJS.Timeout | null = null;
+    let timedOut = false;
+    const armIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs);
+    };
+    armIdleTimer();
 
     try {
       const response = await fetch(url, { ...init, signal: controller.signal });
-      const text = await response.text();
-      let parsed: unknown = {};
+      armIdleTimer();
 
+      let text = '';
+      let receivedBytes = 0;
+      if (response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        try {
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value) {
+              receivedBytes += value.byteLength;
+              text += decoder.decode(value, { stream: true });
+              armIdleTimer();
+            }
+          }
+        } finally {
+          text += decoder.decode();
+          try { reader.releaseLock(); } catch { /* noop */ }
+        }
+      } else {
+        text = await response.text();
+        receivedBytes = text.length;
+      }
+
+      if (receivedBytes > 25 * 1024 * 1024) {
+        this.logger.log(
+          `Marg API streamed large response: ${(receivedBytes / (1024 * 1024)).toFixed(1)} MB from ${url}`,
+        );
+      }
+
+      let parsed: unknown = {};
       if (text.trim()) {
         try {
           parsed = JSON.parse(text);
@@ -9689,13 +9734,17 @@ export class MargEdeService {
         throw error;
       }
 
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new BadRequestException(`Marg API request timed out after ${timeoutMs}ms`);
+      if (timedOut || (error instanceof Error && error.name === 'AbortError')) {
+        throw new BadRequestException(
+          `Marg API request timed out after ${timeoutMs}ms of inactivity ` +
+          `(no bytes received within the idle window). ` +
+          `Increase MARG_DATA_HTTP_TIMEOUT_MS if Marg is genuinely this slow between chunks.`,
+        );
       }
 
       throw new BadRequestException(`Marg API request error: ${String(error)}`);
     } finally {
-      clearTimeout(timeout);
+      if (idleTimer) clearTimeout(idleTimer);
     }
   }
 
