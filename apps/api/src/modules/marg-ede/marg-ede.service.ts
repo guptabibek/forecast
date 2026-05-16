@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import {
   ActualType,
   AuditAction,
@@ -29,8 +29,20 @@ import {
   UpdateMargConfigDto,
   UpdateMargGlMappingRuleDto,
 } from './dto';
+import { MargSyncLogStatusDto, toMargSyncLogStatusDto } from './dto/marg-sync-log-status.dto';
 import { decryptMargCompressedPayload, decryptMargPayload } from './marg-decrypt.util';
-import { MARG_SYNC_MODE, MARG_SYNC_SCOPE, MargSyncMode, MargSyncScope } from './marg-sync.types';
+import { MargRawPageStorage } from './marg-raw-page-storage';
+import {
+  classifyMargSyncError,
+  MARG_FAILURE_TYPE,
+  MARG_RAW_PAGE_STATUS,
+  MARG_SYNC_MODE,
+  MARG_SYNC_SCOPE,
+  MARG_SYNC_STAGE,
+  MargSyncMode,
+  MargSyncScope,
+  MargSyncStage,
+} from './marg-sync.types';
 
 /** Shape of the Marg EDE POST response before decryption */
 interface MargRawResponse {
@@ -316,10 +328,31 @@ export class MargEdeService {
   private readonly maxPagesPerSync = this.parsePositiveInt(process.env.MARG_SYNC_MAX_PAGES, 500);
   private readonly encryptionKey = this.resolveEncryptionKey();
 
+  // Configurable batch sizes / timeouts for the resumable pipeline. Read from
+  // env once at construction so changes require a restart (matches existing
+  // pattern with maxPagesPerSync and dataRequestTimeoutMs).
+  private readonly stagingBatchSize = this.parsePositiveInt(process.env.MARG_STAGING_BATCH_SIZE, 5000);
+  private readonly transformBatchSize = this.parsePositiveInt(process.env.MARG_TRANSFORM_BATCH_SIZE, 2000);
+  private readonly projectionBatchSize = this.parsePositiveInt(process.env.MARG_PROJECTION_BATCH_SIZE, 1000);
+  private readonly dbTxTimeoutMs = this.parsePositiveInt(process.env.MARG_DB_TX_TIMEOUT_MS, 300000);
+  private readonly accountingProjectionTxTimeoutMs = this.parsePositiveInt(
+    process.env.MARG_ACCOUNTING_PROJECTION_TX_TIMEOUT_MS,
+    MARG_ACCOUNTING_PROJECTION_TX_TIMEOUT_MS,
+  );
+  // How long without a heartbeat before a RUNNING sync log is considered
+  // stale and may be marked FAILED_RETRYABLE for recovery. Default 30 min
+  // — long enough to safely cover a slow projection batch, short enough
+  // that an operator does not wait hours after a worker crash.
+  private readonly staleSyncAfterMs = this.parsePositiveInt(process.env.MARG_SYNC_STALE_AFTER_MS, 30 * 60 * 1000);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly accountingService: AccountingService,
+    // Optional so existing tests that build the service with `new MargEdeService(prisma, audit, accounting)`
+    // continue to work. When undefined, raw-page persistence is silently
+    // skipped — the sync still runs, but it is not resumable from disk.
+    @Optional() private readonly rawPageStorage?: MargRawPageStorage,
   ) {}
 
   private get margPrisma(): any {
@@ -695,12 +728,32 @@ export class MargEdeService {
 
   // ===================== SYNC STATUS =====================
 
-  async getSyncLogs(configId: string, user: AuthUser) {
-    return this.margPrisma.margSyncLog.findMany({
+  async getSyncLogs(configId: string, user: AuthUser): Promise<MargSyncLogStatusDto[]> {
+    const rows = await this.margPrisma.margSyncLog.findMany({
       where: { configId, tenantId: user.tenantId },
       orderBy: { startedAt: 'desc' },
       take: 50,
     });
+    return rows.map((row: Record<string, unknown>) => toMargSyncLogStatusDto(row, this.staleSyncAfterMs));
+  }
+
+  /**
+   * Single-log status fetch for the resume / status endpoint. Refuses to
+   * return a log that does not belong to the (tenant, config) tuple — UI
+   * cannot probe for foreign sync logs by guessing IDs.
+   */
+  async getSyncLogStatus(
+    configId: string,
+    syncLogId: string,
+    user: AuthUser,
+  ): Promise<MargSyncLogStatusDto> {
+    const row = await this.margPrisma.margSyncLog.findFirst({
+      where: { id: syncLogId, configId, tenantId: user.tenantId },
+    });
+    if (!row) {
+      throw new NotFoundException(`Marg sync log ${syncLogId} not found for this config`);
+    }
+    return toMargSyncLogStatusDto(row as Record<string, unknown>, this.staleSyncAfterMs);
   }
 
   // ===================== MARG API CALLS =====================
@@ -727,7 +780,18 @@ export class MargEdeService {
     return Array.isArray(rows) ? rows : [];
   }
 
-  /** Fetch main data (POST, encrypted response) */
+  /**
+   * Fetch main data (POST, encrypted response).
+   *
+   * Thin orchestrator over fetchRawMargPage → decryptMargPage → parseMargPayload.
+   * Public surface preserved exactly: same signature, same return shape. Both
+   * runSync call sites and the existing test mocks rely on this API.
+   *
+   * For the resumable-pipeline path that needs to persist the raw page to
+   * durable storage before staging, use fetchMargPageWithMetadata which
+   * exposes encrypted/decrypted sizes, hash, parse durations, and per-section
+   * row counts.
+   */
   async fetchData(config: {
     apiBaseUrl: string;
     companyCode: string;
@@ -738,9 +802,105 @@ export class MargEdeService {
     datetime: string;
     apiType?: '1' | '2';
   }): Promise<MargParsedPayload> {
+    const result = await this.fetchMargPageWithMetadata(config);
+    return result.payload;
+  }
+
+  /**
+   * Fetch + decrypt + parse a single Marg page and return both the parsed
+   * payload and the metadata required to persist a marg_raw_sync_pages row.
+   *
+   * Behavior is bit-for-bit identical to the previous monolithic fetchData()
+   * for the parsed payload. The new return shape adds size/hash/duration
+   * metadata captured along the way at zero extra cost.
+   *
+   * Memory note: the caller receives the parsed payload by reference. Once
+   * the caller has consumed each section, it should drop its references
+   * (processPayloadSections does this automatically) so V8 can reclaim the
+   * large arrays mid-staging.
+   */
+  async fetchMargPageWithMetadata(config: {
+    apiBaseUrl: string;
+    companyCode: string;
+    margKey: string;
+    decryptionKey: string;
+    companyId: number;
+    index: number;
+    datetime: string;
+    apiType?: '1' | '2';
+  }): Promise<{
+    payload: MargParsedPayload;
+    rowCounts: Record<string, number>;
+    encryptedSize: number;
+    fetchDurationMs: number;
+    decryptDurationMs: number;
+    parseDurationMs: number;
+  }> {
+    const apiType = config.apiType ?? '2';
+    const fetchStarted = Date.now();
+    const memBefore = process.memoryUsage().heapUsed;
+
+    const fetched = await this.fetchRawMargPage({
+      apiBaseUrl: config.apiBaseUrl,
+      companyCode: config.companyCode,
+      margKey: config.margKey,
+      companyId: config.companyId,
+      index: config.index,
+      datetime: config.datetime,
+      apiType,
+    });
+    const fetchDurationMs = Date.now() - fetchStarted;
+
+    const decryptStarted = Date.now();
+    const decrypted = this.decryptMargPage(fetched.rawResponse, config.decryptionKey);
+    const decryptDurationMs = Date.now() - decryptStarted;
+
+    const parseStarted = Date.now();
+    const parsed = this.parseMargPayload(decrypted.parsedPayload, fetched.rawEnvelope);
+    const parseDurationMs = Date.now() - parseStarted;
+
+    const memAfter = process.memoryUsage().heapUsed;
+    const totalRows = Object.values(parsed.rowCounts).reduce((sum, n) => sum + n, 0);
+
+    // decryptedSize is reported by storage.save during persistence (see
+    // MargRawPageStorage.save) — we no longer compute it here because that
+    // required a full-page JSON.stringify which OOMs on huge pages.
+    this.logger.log(
+      `Marg page fetched apiType=${apiType} index=${config.index} ` +
+      `encryptedSize=${fetched.encryptedSize}B ` +
+      `rowsTotal=${totalRows} fetchMs=${fetchDurationMs} decryptMs=${decryptDurationMs} ` +
+      `parseMs=${parseDurationMs} heapDelta=${(memAfter - memBefore) / (1024 * 1024) | 0}MB ` +
+      `dataStatus=${parsed.payload.DataStatus} nextIndex=${parsed.payload.Index}`,
+    );
+
+    return {
+      payload: parsed.payload,
+      rowCounts: parsed.rowCounts,
+      encryptedSize: fetched.encryptedSize,
+      fetchDurationMs,
+      decryptDurationMs,
+      parseDurationMs,
+    };
+  }
+
+  /**
+   * Stage 1 of fetchData: hit the Marg POST endpoint and return the raw
+   * response body unchanged. Captures the wire size so call sites can log
+   * it for capacity-planning (a 50MB page is the threshold we instrument
+   * around). No business decoding is done here so a network failure cannot
+   * be confused with a payload-shape failure.
+   */
+  private async fetchRawMargPage(config: {
+    apiBaseUrl: string;
+    companyCode: string;
+    margKey: string;
+    companyId: number;
+    index: number;
+    datetime: string;
+    apiType: '1' | '2';
+  }): Promise<{ rawResponse: unknown; rawEnvelope: Record<string, unknown> | null; encryptedSize: number }> {
     const margOrigin = this.resolveMargOrigin(config.apiBaseUrl);
     const url = `${margOrigin}/api/eOnlineData/MargCorporateEDE`;
-    const apiType = config.apiType ?? '2';
 
     const body = {
       CompanyCode: config.companyCode,
@@ -748,10 +908,10 @@ export class MargEdeService {
       MargKey: config.margKey,
       Index: String(config.index),
       CompanyID: String(config.companyId),
-      APIType: apiType,
+      APIType: config.apiType,
     };
 
-    this.logger.log(`Fetching Marg EDE data: apiType=${apiType}, index=${config.index}, datetime=${config.datetime || '(all)'}`);
+    this.logger.log(`Fetching Marg EDE data: apiType=${config.apiType}, index=${config.index}, datetime=${config.datetime || '(all)'}`);
 
     const rawResponse = await this.fetchJsonWithTimeout(
       url,
@@ -769,15 +929,60 @@ export class MargEdeService {
       throw new BadRequestException(`Marg API failure: ${String(rawEnvelope?.Message ?? 'Unknown error')}`);
     }
 
-    // Marg returns different response shapes by tenant/APIType:
-    // 1) JSON envelope with Data field
-    // 2) raw encrypted string (response body itself)
+    // Best-effort wire-size measurement. Marg returns either a raw encrypted
+    // string or a JSON envelope; for the JSON envelope we measure the
+    // encrypted Data field (the bulky bit) when present, else the serialized
+    // envelope. Approximate is fine — this is for observability, not a billed
+    // metric.
+    // Wire-size measurement: only cheap-to-measure shapes are sized. For a
+    // raw encrypted string body we use Buffer.byteLength directly; for the
+    // common JSON envelope we size only the encrypted Data field. We do
+    // NOT JSON.stringify the entire envelope object as a fallback — for
+    // the million-record client the envelope already holds a multi-hundred-
+    // MB decoded payload and stringifying it just to measure its byte
+    // length is exactly what triggered the OOM in JsonStringifier::Serialize_.
+    let encryptedSize = 0;
+    if (typeof rawResponse === 'string') {
+      encryptedSize = Buffer.byteLength(rawResponse, 'utf8');
+    } else if (rawEnvelope && typeof rawEnvelope.Data === 'string') {
+      encryptedSize = Buffer.byteLength(rawEnvelope.Data, 'utf8');
+    }
+    // else: envelope-with-object-Data or unknown shape → leave at 0.
+    // encryptedSize is observability, not load-bearing; an unknown value
+    // is fine.
+
+    return { rawResponse, rawEnvelope, encryptedSize };
+  }
+
+  /**
+   * Stage 2 of fetchData: take the raw response/envelope and produce the
+   * decoded JSON object. Preserves exact tenant-variant handling:
+   *   - raw encrypted string body          → parseMargStringPayload
+   *   - JSON envelope with encrypted Data  → parseMargStringPayload(envelope.Data)
+   *   - JSON envelope with object Data     → envelope.Data
+   *   - JSON envelope alone                → envelope itself (fallback)
+   *
+   * Memory note: this method intentionally does NOT JSON.stringify the
+   * parsed payload to compute a hash. For the million-record client a
+   * single page can be 200–500MB of JS objects, and JSON.stringify on
+   * the whole thing triggers V8 OOM inside JsonStringifier::Serialize_.
+   * Hash + decrypted-size are produced by MargRawPageStorage.save in a
+   * streamed pass — it has to walk the bytes anyway to gzip them, so
+   * computing the hash there is free and never materializes the full
+   * serialized form in memory.
+   */
+  private decryptMargPage(
+    rawResponse: unknown,
+    decryptionKey: string,
+  ): { parsedPayload: Record<string, unknown> } {
+    const rawEnvelope = this.toRecord(rawResponse);
+
     let parsedPayload: Record<string, unknown>;
     if (typeof rawResponse === 'string') {
-      parsedPayload = this.parseMargStringPayload(rawResponse, config.decryptionKey);
+      parsedPayload = this.parseMargStringPayload(rawResponse, decryptionKey);
     } else if (rawEnvelope) {
       if (typeof rawEnvelope.Data === 'string' && rawEnvelope.Data.trim().length > 0) {
-        parsedPayload = this.parseMargStringPayload(rawEnvelope.Data, config.decryptionKey);
+        parsedPayload = this.parseMargStringPayload(rawEnvelope.Data, decryptionKey);
       } else if (rawEnvelope.Data && typeof rawEnvelope.Data === 'object') {
         parsedPayload = rawEnvelope.Data as Record<string, unknown>;
       } else {
@@ -787,6 +992,23 @@ export class MargEdeService {
       throw new BadRequestException('Marg API returned unexpected response shape');
     }
 
+    return { parsedPayload };
+  }
+
+  /**
+   * Stage 3 of fetchData: normalize the decoded JSON into the canonical
+   * MargParsedPayload shape, computing per-section row counts as we go so
+   * call sites can log them and persist them on the raw-page row without
+   * re-walking the arrays.
+   *
+   * Fallback to envelope-level fields for Index/DataStatus/DateTime
+   * preserves the existing behavior where some Marg variants put cursor
+   * fields on the outer envelope rather than inside Details.
+   */
+  private parseMargPayload(
+    parsedPayload: Record<string, unknown>,
+    rawEnvelope: Record<string, unknown> | null,
+  ): { payload: MargParsedPayload; rowCounts: Record<string, number> } {
     const detailsContainer = this.toRecord(parsedPayload.Details);
     const dataSection = detailsContainer ?? parsedPayload;
 
@@ -795,41 +1017,92 @@ export class MargEdeService {
     ).trim().toUpperCase();
     if (payloadStatus === 'FAILURE') {
       const failureMessage = String(
-        this.readFirstDefined([dataSection, parsedPayload, rawEnvelope], ['Message', 'message']) ?? 'Unknown error',
+        this.readFirstDefined(
+          rawEnvelope ? [dataSection, parsedPayload, rawEnvelope] : [dataSection, parsedPayload],
+          ['Message', 'message'],
+        ) ?? 'Unknown error',
       );
       throw new BadRequestException(`Marg API failure: ${failureMessage}`);
     }
 
-    const parsedIndex = Number(
-      this.readFirstDefined([dataSection, parsedPayload, rawEnvelope], ['Index']) ?? 0,
-    );
-    const rawDataStatus = this.readFirstDefined(
-      [dataSection, parsedPayload, rawEnvelope],
-      ['DataStatus', 'Datastatus'],
-    );
+    const cursorSources = rawEnvelope
+      ? [dataSection, parsedPayload, rawEnvelope]
+      : [dataSection, parsedPayload];
+    const sectionSources = [dataSection, parsedPayload];
+
+    const parsedIndex = Number(this.readFirstDefined(cursorSources, ['Index']) ?? 0);
+    const rawDataStatus = this.readFirstDefined(cursorSources, ['DataStatus', 'Datastatus']);
     // Marg returns DataStatus as numeric 10 or string "Completed" depending on tenant/version
     const parsedDataStatus = this.normalizeDataStatus(rawDataStatus);
     const parsedDateTime = String(
-      this.readFirstDefined([dataSection, parsedPayload, rawEnvelope], ['DateTime', 'Datetime']) ?? '',
+      this.readFirstDefined(cursorSources, ['DateTime', 'Datetime']) ?? '',
     ).trim();
 
-    return {
-      Details: this.toArray(this.readFirstDefined([dataSection, parsedPayload], ['Details', 'Dis'])),
-      Masters: this.toEntityArray(this.readFirstDefined([dataSection, parsedPayload], ['Masters'])),
-      MDis: this.toArray(this.readFirstDefined([dataSection, parsedPayload], ['MDis'])),
-      Party: this.toArray(this.readFirstDefined([dataSection, parsedPayload], ['Party'])),
-      Product: this.toArray(this.readFirstDefined([dataSection, parsedPayload], ['Product'])),
-      SaleType: this.toArray(this.readFirstDefined([dataSection, parsedPayload], ['SaleType'])),
-      Stock: this.toArray(this.readFirstDefined([dataSection, parsedPayload], ['Stock'])),
-      ACGroup: this.toArray(this.readFirstDefined([dataSection, parsedPayload], ['ACGroup'])),
-      Account: this.toArray(this.readFirstDefined([dataSection, parsedPayload], ['Account'])),
-      AcBal: this.toArray(this.readFirstDefined([dataSection, parsedPayload], ['AcBal'])),
-      PBal: this.toArray(this.readFirstDefined([dataSection, parsedPayload], ['PBal'])),
-      Outstanding: this.toArray(this.readFirstDefined([dataSection, parsedPayload], ['Outstanding'])),
+    const payload: MargParsedPayload = {
+      Details: this.toArray(this.readFirstDefined(sectionSources, ['Details', 'Dis'])),
+      Masters: this.toEntityArray(this.readFirstDefined(sectionSources, ['Masters'])),
+      MDis: this.toArray(this.readFirstDefined(sectionSources, ['MDis'])),
+      Party: this.toArray(this.readFirstDefined(sectionSources, ['Party'])),
+      Product: this.toArray(this.readFirstDefined(sectionSources, ['Product'])),
+      SaleType: this.toArray(this.readFirstDefined(sectionSources, ['SaleType'])),
+      Stock: this.toArray(this.readFirstDefined(sectionSources, ['Stock'])),
+      ACGroup: this.toArray(this.readFirstDefined(sectionSources, ['ACGroup'])),
+      Account: this.toArray(this.readFirstDefined(sectionSources, ['Account'])),
+      AcBal: this.toArray(this.readFirstDefined(sectionSources, ['AcBal'])),
+      PBal: this.toArray(this.readFirstDefined(sectionSources, ['PBal'])),
+      Outstanding: this.toArray(this.readFirstDefined(sectionSources, ['Outstanding'])),
       Index: Number.isFinite(parsedIndex) ? parsedIndex : 0,
       DataStatus: Number.isFinite(parsedDataStatus) ? parsedDataStatus : 0,
       DateTime: parsedDateTime,
     };
+
+    const rowCounts: Record<string, number> = {
+      Details: payload.Details.length,
+      Masters: payload.Masters.length,
+      MDis: payload.MDis.length,
+      Party: payload.Party.length,
+      Product: payload.Product.length,
+      SaleType: payload.SaleType.length,
+      Stock: payload.Stock.length,
+      ACGroup: payload.ACGroup.length,
+      Account: payload.Account.length,
+      AcBal: payload.AcBal.length,
+      PBal: payload.PBal.length,
+      Outstanding: payload.Outstanding.length,
+    };
+
+    return { payload, rowCounts };
+  }
+
+  /**
+   * Stage 4 of fetchData: iterate a parsed payload's sections, run a handler
+   * per non-empty section, and release the array reference once the handler
+   * returns so V8 can reclaim the memory before the next section is
+   * processed. Sections execute strictly in the supplied order; any handler
+   * that throws aborts the loop and bubbles the error to the caller (do not
+   * swallow — partial section processing must be visible to the resume
+   * machinery so the page is marked STAGING_FAILED rather than STAGED).
+   *
+   * The handler signature is async and receives the section rows as well
+   * as the section key so a single shared handler can switch on type.
+   */
+  protected async processPayloadSections<K extends keyof MargParsedPayload>(
+    payload: MargParsedPayload,
+    sections: K[],
+    handler: (section: K, rows: MargParsedPayload[K]) => Promise<void>,
+  ): Promise<void> {
+    for (const section of sections) {
+      const rows = payload[section];
+      if (Array.isArray(rows) && rows.length === 0) {
+        continue;
+      }
+      await handler(section, rows);
+      // Release the reference so the array can be GC'd before the next
+      // section is processed. Cast through unknown because TS does not
+      // know we are intentionally clearing arrays; the sections we mutate
+      // here are all `any[]` in MargParsedPayload anyway.
+      (payload as unknown as Record<string, unknown>)[section as string] = Array.isArray(rows) ? [] : rows;
+    }
   }
 
   // ===================== FULL SYNC ORCHESTRATOR =====================
@@ -943,12 +1216,21 @@ export class MargEdeService {
       syncDatetime: (shouldRunInventory ? lastDatetime : accountingDatetime) || null,
     });
 
-    // Create sync log
+    // Create sync log. Persist the window/scope/mode metadata so resume can
+    // reuse the original parameters — without this, a bounded backfill that
+    // crashes mid-staging could be resumed as if it were an unbounded
+    // incremental, re-staging out-of-window rows.
     const syncLog = await this.margPrisma.margSyncLog.create({
       data: {
         tenantId,
         configId,
         status: MARG_SYNC_STATUS.RUNNING,
+        currentStage: MARG_SYNC_STAGE.QUEUED,
+        lastHeartbeatAt: new Date(),
+        fromDate: fromDate ?? null,
+        endDate: endDate ?? null,
+        syncScope: scope,
+        syncMode: mode,
         ...getActiveCursor(),
       },
     });
@@ -998,6 +1280,11 @@ export class MargEdeService {
           const previousIndex = currentIndex;
           const previousDatetime = lastDatetime;
 
+          await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.FETCHING, {
+            apiType: '2',
+            requestIndex: currentIndex,
+          });
+
           const payload = await this.fetchData({
             apiBaseUrl: config.apiBaseUrl,
             companyCode: config.companyCode,
@@ -1009,68 +1296,106 @@ export class MargEdeService {
             apiType: '2',
           });
 
-          const payloadMasters = Array.isArray(payload.Masters) ? payload.Masters : [];
-          const payloadProducts = Array.isArray(payload.Product) ? payload.Product : [];
-          const payloadParties = Array.isArray(payload.Party) ? payload.Party : [];
-          const payloadDetails = Array.isArray(payload.Details) ? payload.Details : [];
-          const payloadStock = Array.isArray(payload.Stock) ? payload.Stock : [];
-          const payloadVouchers = Array.isArray(payload.MDis) ? payload.MDis : [];
-          const payloadSaleTypes = Array.isArray(payload.SaleType) ? payload.SaleType : [];
+          // Persist the parsed page to the durable raw-page store BEFORE any
+          // staging happens. If staging fails for this page, the next sync
+          // can resume by re-loading from disk instead of refetching from
+          // Marg. The helper is null-safe — it returns null when raw-page
+          // storage is not wired (tests, older deployments) or when the
+          // write itself fails (errors[] receives a non-fatal entry); in
+          // either case the sync continues unmodified.
+          const rawPageRowId = await this.persistMargRawPage({
+            syncLogId: syncLog.id,
+            tenantId,
+            configId,
+            apiType: '2',
+            companyId: config.companyId,
+            requestIndex: previousIndex,
+            payload,
+            errors,
+          });
 
-          if (payloadMasters.length > 0) {
-            diagnostics.branchPayloadRowCount += payloadMasters.length;
-            const payloadBranches = this.takeUnseenMargBranchRows(payloadMasters, syncedBranchCompanyIds);
-            if (payloadBranches.length > 0) {
-              const count = await this.syncBranches(tenantId, payloadBranches);
-              branchesCount += count;
-              diagnostics.branchPayloadFallbackCount += payloadBranches.length;
-            }
-          }
+          await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.STAGING_STARTED, {
+            apiType: '2',
+            requestIndex: previousIndex,
+          });
 
-          if (payloadProducts.length > 0) {
-            const count = await this.syncProducts(tenantId, payloadProducts);
-            productsCount += count;
-          }
+          try {
+            const payloadMasters = Array.isArray(payload.Masters) ? payload.Masters : [];
+            const payloadProducts = Array.isArray(payload.Product) ? payload.Product : [];
+            const payloadParties = Array.isArray(payload.Party) ? payload.Party : [];
+            const payloadDetails = Array.isArray(payload.Details) ? payload.Details : [];
+            const payloadStock = Array.isArray(payload.Stock) ? payload.Stock : [];
+            const payloadVouchers = Array.isArray(payload.MDis) ? payload.MDis : [];
+            const payloadSaleTypes = Array.isArray(payload.SaleType) ? payload.SaleType : [];
 
-          if (payloadParties.length > 0) {
-            const canonicalParties = this.canonicalizeMargParties(payloadParties);
-            diagnostics.duplicatePartyKeyCount += canonicalParties.duplicateKeyCount;
-            diagnostics.duplicatePartyRowCount += canonicalParties.duplicateRowCount;
-            const count = await this.syncParties(tenantId, canonicalParties.rows);
-            partiesCount += count;
-          }
-
-          if (payloadDetails.length > 0) {
-            for (const detail of payloadDetails) {
-              const freeQty = Number(detail?.Free ?? 0);
-              const paidQty = Number(detail?.Qty ?? 0);
-              if (Number.isFinite(freeQty) && freeQty > 0) {
-                diagnostics.freeQuantityRowCount += 1;
-                diagnostics.freeQuantityUnits += freeQty;
-                if (!Number.isFinite(paidQty) || paidQty === 0) {
-                  diagnostics.freeOnlyRowCount += 1;
-                }
+            if (payloadMasters.length > 0) {
+              diagnostics.branchPayloadRowCount += payloadMasters.length;
+              const payloadBranches = this.takeUnseenMargBranchRows(payloadMasters, syncedBranchCompanyIds);
+              if (payloadBranches.length > 0) {
+                const count = await this.syncBranches(tenantId, payloadBranches);
+                branchesCount += count;
+                diagnostics.branchPayloadFallbackCount += payloadBranches.length;
               }
             }
-            const count = await this.syncTransactions(tenantId, payloadDetails, dateWindow);
-            transactionsCount += count;
+
+            if (payloadProducts.length > 0) {
+              const count = await this.syncProducts(tenantId, payloadProducts, syncLog.id);
+              productsCount += count;
+            }
+
+            if (payloadParties.length > 0) {
+              const canonicalParties = this.canonicalizeMargParties(payloadParties);
+              diagnostics.duplicatePartyKeyCount += canonicalParties.duplicateKeyCount;
+              diagnostics.duplicatePartyRowCount += canonicalParties.duplicateRowCount;
+              const count = await this.syncParties(tenantId, canonicalParties.rows, syncLog.id);
+              partiesCount += count;
+            }
+
+            if (payloadDetails.length > 0) {
+              for (const detail of payloadDetails) {
+                const freeQty = Number(detail?.Free ?? 0);
+                const paidQty = Number(detail?.Qty ?? 0);
+                if (Number.isFinite(freeQty) && freeQty > 0) {
+                  diagnostics.freeQuantityRowCount += 1;
+                  diagnostics.freeQuantityUnits += freeQty;
+                  if (!Number.isFinite(paidQty) || paidQty === 0) {
+                    diagnostics.freeOnlyRowCount += 1;
+                  }
+                }
+              }
+              const count = await this.syncTransactions(tenantId, payloadDetails, dateWindow, syncLog.id);
+              transactionsCount += count;
+            }
+
+            if (shouldProcessStockSnapshot && payloadStock.length > 0) {
+              receivedStockSnapshot = true;
+              const count = await this.syncStockData(tenantId, payloadStock, syncLog.id);
+              stockCount += count;
+            }
+
+            if (payloadVouchers.length > 0) {
+              const count = await this.syncVouchers(tenantId, payloadVouchers, dateWindow, syncLog.id);
+              vouchersCount += count;
+            }
+
+            if (payloadSaleTypes.length > 0) {
+              const count = await this.syncSaleTypes(tenantId, payloadSaleTypes);
+              saleTypesCount += count;
+            }
+          } catch (stagingErr) {
+            await this.markRawPageStagingFailed(rawPageRowId, stagingErr);
+            throw stagingErr;
           }
 
-          if (shouldProcessStockSnapshot && payloadStock.length > 0) {
-            receivedStockSnapshot = true;
-            const count = await this.syncStockData(tenantId, payloadStock, syncLog.id);
-            stockCount += count;
-          }
-
-          if (payloadVouchers.length > 0) {
-            const count = await this.syncVouchers(tenantId, payloadVouchers, dateWindow);
-            vouchersCount += count;
-          }
-
-          if (payloadSaleTypes.length > 0) {
-            const count = await this.syncSaleTypes(tenantId, payloadSaleTypes);
-            saleTypesCount += count;
-          }
+          // All sections for this page persisted successfully. Mark the raw
+          // page STAGED so a future resume scan ignores it, then advance the
+          // cursor — only AFTER staging is durable.
+          await this.markRawPageStaged(rawPageRowId);
+          await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.STAGING_COMPLETED, {
+            apiType: '2',
+            requestIndex: previousIndex,
+            responseIndex: payload.Index,
+          });
 
           const nextDatetime = String(payload.DateTime || '').trim();
           const hasIndexCursor = Number.isInteger(payload.Index) && payload.Index >= 0;
@@ -1114,6 +1439,11 @@ export class MargEdeService {
         const previousIndex = accountingIndex;
         const previousDatetime = accountingDatetime;
 
+        await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.FETCHING, {
+          apiType: '1',
+          requestIndex: accountingIndex,
+        });
+
         const payload = await this.fetchData({
           apiBaseUrl: config.apiBaseUrl,
           companyCode: config.companyCode,
@@ -1125,45 +1455,73 @@ export class MargEdeService {
           apiType: '1',
         });
 
-        const payloadAccountingVouchers = Array.isArray(payload.MDis) ? payload.MDis : [];
-        const payloadAccountGroups = Array.isArray(payload.ACGroup) ? payload.ACGroup : [];
-        const payloadAccountRows = Array.isArray(payload.Account) ? payload.Account : [];
-        const payloadAccountBalances = Array.isArray(payload.AcBal) ? payload.AcBal : [];
-        const payloadPartyBalances = Array.isArray(payload.PBal) ? payload.PBal : [];
-        const payloadOutstandings = Array.isArray(payload.Outstanding) ? payload.Outstanding : [];
+        const rawPageRowId = await this.persistMargRawPage({
+          syncLogId: syncLog.id,
+          tenantId,
+          configId,
+          apiType: '1',
+          companyId: config.companyId,
+          requestIndex: previousIndex,
+          payload,
+          errors,
+        });
 
-        if (!shouldRunInventory && payloadAccountingVouchers.length > 0) {
-          const count = await this.syncVouchers(tenantId, payloadAccountingVouchers, dateWindow);
-          vouchersCount += count;
+        await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.STAGING_STARTED, {
+          apiType: '1',
+          requestIndex: previousIndex,
+        });
+
+        try {
+          const payloadAccountingVouchers = Array.isArray(payload.MDis) ? payload.MDis : [];
+          const payloadAccountGroups = Array.isArray(payload.ACGroup) ? payload.ACGroup : [];
+          const payloadAccountRows = Array.isArray(payload.Account) ? payload.Account : [];
+          const payloadAccountBalances = Array.isArray(payload.AcBal) ? payload.AcBal : [];
+          const payloadPartyBalances = Array.isArray(payload.PBal) ? payload.PBal : [];
+          const payloadOutstandings = Array.isArray(payload.Outstanding) ? payload.Outstanding : [];
+
+          if (!shouldRunInventory && payloadAccountingVouchers.length > 0) {
+            const count = await this.syncVouchers(tenantId, payloadAccountingVouchers, dateWindow, syncLog.id);
+            vouchersCount += count;
+          }
+
+          if (payloadAccountGroups.length > 0) {
+            const count = await this.syncAccountGroups(tenantId, payloadAccountGroups);
+            accountGroupsCount += count;
+          }
+
+          if (payloadAccountRows.length > 0) {
+            const count = await this.syncAccountPostings(tenantId, payloadAccountRows, dateWindow, syncLog.id);
+            accountPostingsCount += count;
+          }
+
+          if (payloadAccountBalances.length > 0) {
+            const count = await this.syncAccountGroupBalances(tenantId, payloadAccountBalances);
+            accountGroupBalancesCount += count;
+          }
+
+          if (payloadPartyBalances.length > 0) {
+            const canonicalBalances = this.canonicalizeMargPartyBalances(payloadPartyBalances);
+            diagnostics.duplicatePartyBalanceKeyCount += canonicalBalances.duplicateKeyCount;
+            diagnostics.duplicatePartyBalanceRowCount += canonicalBalances.duplicateRowCount;
+            const count = await this.syncPartyBalances(tenantId, canonicalBalances.rows);
+            partyBalancesCount += count;
+          }
+
+          if (payloadOutstandings.length > 0) {
+            const count = await this.syncOutstandings(tenantId, payloadOutstandings, dateWindow, syncLog.id);
+            outstandingsCount += count;
+          }
+        } catch (stagingErr) {
+          await this.markRawPageStagingFailed(rawPageRowId, stagingErr);
+          throw stagingErr;
         }
 
-        if (payloadAccountGroups.length > 0) {
-          const count = await this.syncAccountGroups(tenantId, payloadAccountGroups);
-          accountGroupsCount += count;
-        }
-
-        if (payloadAccountRows.length > 0) {
-          const count = await this.syncAccountPostings(tenantId, payloadAccountRows, dateWindow);
-          accountPostingsCount += count;
-        }
-
-        if (payloadAccountBalances.length > 0) {
-          const count = await this.syncAccountGroupBalances(tenantId, payloadAccountBalances);
-          accountGroupBalancesCount += count;
-        }
-
-        if (payloadPartyBalances.length > 0) {
-          const canonicalBalances = this.canonicalizeMargPartyBalances(payloadPartyBalances);
-          diagnostics.duplicatePartyBalanceKeyCount += canonicalBalances.duplicateKeyCount;
-          diagnostics.duplicatePartyBalanceRowCount += canonicalBalances.duplicateRowCount;
-          const count = await this.syncPartyBalances(tenantId, canonicalBalances.rows);
-          partyBalancesCount += count;
-        }
-
-        if (payloadOutstandings.length > 0) {
-          const count = await this.syncOutstandings(tenantId, payloadOutstandings, dateWindow);
-          outstandingsCount += count;
-        }
+        await this.markRawPageStaged(rawPageRowId);
+        await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.STAGING_COMPLETED, {
+          apiType: '1',
+          requestIndex: previousIndex,
+          responseIndex: payload.Index,
+        });
 
         const nextDatetime = String(payload.DateTime || '').trim();
         const hasIndexCursor = Number.isInteger(payload.Index) && payload.Index >= 0;
@@ -1227,6 +1585,7 @@ export class MargEdeService {
       }
 
       // Step 3: Transform staged data → core tables
+      await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.MASTER_TRANSFORM_STARTED);
       const shouldResetInventoryProjection = shouldRunInventory && (mode === MARG_SYNC_MODE.REPROJECT || Boolean(dateWindow));
       const shouldApplyStockProjection = shouldProcessStockSnapshot && (!shouldFetchFromMarg || receivedStockSnapshot);
       let inventoryProjectionReset: MargInventoryProjectionResetResult | null = null;
@@ -1246,6 +1605,8 @@ export class MargEdeService {
           errors.push({ step: 'supplier_projection', error: String(err) });
           this.logger.warn('Supplier projection failed (non-fatal)', err);
         }
+        await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.MASTER_TRANSFORM_COMPLETED);
+        await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.INVENTORY_PROJECTION_STARTED);
         await this.touchSyncHeartbeat(configId, shouldRunInventory);
         if (shouldResetInventoryProjection) {
           inventoryProjectionReset = await this.resetMargInventoryProjectionWindow(tenantId, dateWindow);
@@ -1269,6 +1630,9 @@ export class MargEdeService {
           shouldResetInventoryProjection,
           inventoryProjectionReset?.affectedLedgerScopes,
         );
+        await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.INVENTORY_PROJECTION_COMPLETED);
+      } else {
+        await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.MASTER_TRANSFORM_COMPLETED);
       }
 
       let accountingProjection: MargAccountingProjectionSummary | null = null;
@@ -1282,6 +1646,7 @@ export class MargEdeService {
         }
       }
 
+      await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.ACCOUNTING_PROJECTION_STARTED);
       try {
         await this.touchSyncHeartbeat(configId, shouldRunInventory);
         accountingProjection = await this.transformAccountPostingsToJournalEntries(
@@ -1307,8 +1672,10 @@ export class MargEdeService {
         errors.push({ step: 'accounting_projection', error: String(err) });
         this.logger.warn('Accounting projection failed (non-fatal)', err);
       }
+      await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.ACCOUNTING_PROJECTION_COMPLETED);
 
       if (accountingProjection) {
+        await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.RECONCILIATION_STARTED);
         try {
           await this.touchSyncHeartbeat(configId, shouldRunInventory);
           const reconciliationSummary = await this.runPostSyncReconciliations(
@@ -1330,6 +1697,7 @@ export class MargEdeService {
           errors.push({ step: 'post_sync_reconciliation', error: String(err) });
           this.logger.warn('Post-sync reconciliation failed (non-fatal)', err);
         }
+        await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.RECONCILIATION_COMPLETED);
       }
 
       if (
@@ -1375,6 +1743,9 @@ export class MargEdeService {
         data: {
           status: MARG_SYNC_STATUS.COMPLETED,
           completedAt: new Date(),
+          currentStage: MARG_SYNC_STAGE.COMPLETED,
+          lastHeartbeatAt: new Date(),
+          failureType: null,
           productsSynced: productsCount,
           partiesSynced: partiesCount,
           transactionsSynced: transactionsCount,
@@ -1425,7 +1796,20 @@ export class MargEdeService {
       ).catch(() => {/* best-effort */});
     } catch (err) {
       this.logger.error('Marg sync failed', err);
-      errors.push({ step: 'fatal', error: String(err) });
+
+      // Classify the terminal error so resume eligibility is recorded on the
+      // sync log. The structured error preserves stage/apiType/requestIndex
+      // context that the legacy `{step:'fatal', error:String(err)}` form lost.
+      const { classification, structuredError } = this.classifyAndRecordSyncFailure(
+        err,
+        syncLog.id,
+        null,
+        null,
+        null,
+        null,
+        null,
+      );
+      errors.push(structuredError);
 
       await this.margPrisma.margSyncConfig.update({
         where: { id: configId },
@@ -1444,6 +1828,11 @@ export class MargEdeService {
         data: {
           status: MARG_SYNC_STATUS.FAILED,
           completedAt: new Date(),
+          currentStage: classification.type === MARG_FAILURE_TYPE.FATAL
+            ? MARG_SYNC_STAGE.FAILED_FATAL
+            : MARG_SYNC_STAGE.FAILED_RETRYABLE,
+          failureType: classification.type,
+          lastHeartbeatAt: new Date(),
           productsSynced: productsCount,
           partiesSynced: partiesCount,
           transactionsSynced: transactionsCount,
@@ -1469,7 +1858,15 @@ export class MargEdeService {
         'MargSyncLog',
         syncLog.id,
         null,
-        { status: 'FAILED', error: String(err), products: productsCount, parties: partiesCount, transactions: transactionsCount },
+        {
+          status: 'FAILED',
+          failureType: classification.type,
+          errorCode: classification.errorCode,
+          error: classification.message,
+          products: productsCount,
+          parties: partiesCount,
+          transactions: transactionsCount,
+        },
         [],
         { configId, triggeredBy, action: shouldFetchFromMarg ? 'marg_sync_failed' : 'marg_reprojection_failed', scope, mode },
       ).catch(() => {/* best-effort */});
@@ -3117,48 +3514,501 @@ export class MargEdeService {
     );
   }
 
+  // ===================== RESUME FROM CHECKPOINT =====================
+
+  /**
+   * Re-stage saved raw pages from a previously-failed sync without
+   * refetching from Marg.
+   *
+   * Targets a sync log whose status is FAILED with failureType=RETRYABLE,
+   * loads each MargRawSyncPage row, reads the parsed payload back from
+   * MargRawPageStorage, and runs the same staging callbacks the original
+   * runSync would have run. After every page is STAGED, the sync log is
+   * updated to STAGING_COMPLETED and marked COMPLETED with a note that
+   * transforms/projections were not run.
+   *
+   * Operator workflow:
+   *   1. /resume — this call. Re-stages raw pages.
+   *   2. /reproject — runs transforms/projections from the now-complete
+   *      staged data. Existing endpoint, no changes needed.
+   *
+   * Why split: keeping resume narrowly-scoped to staging keeps the failure
+   * surface tiny (a re-stage of the same page is idempotent because every
+   * staging method is upsert-only). Folding transforms in here would
+   * duplicate ~230 lines of runSync's post-fetch pipeline and create a
+   * second copy that could drift.
+   */
+  async resumeSync(
+    configId: string,
+    tenantId: string,
+    syncLogId: string,
+    triggeredBy?: string,
+  ): Promise<{
+    syncLogId: string;
+    pagesResumed: number;
+    pagesAlreadyStaged: number;
+    pagesFailed: number;
+  }> {
+    if (!this.rawPageStorage) {
+      throw new BadRequestException(
+        'Resume is unavailable: MARG_RAW_PAGE_STORAGE_DIR is not configured. ' +
+        'Resume requires the durable raw-page storage backend to be wired.',
+      );
+    }
+    if (typeof this.margPrisma.margRawSyncPage?.findMany !== 'function') {
+      throw new BadRequestException(
+        'Resume is unavailable: marg_raw_sync_pages table is missing. ' +
+        'Apply the 20260516120000_add_marg_resumable_sync_pipeline migration first.',
+      );
+    }
+
+    const config = await this.margPrisma.margSyncConfig.findFirst({
+      where: { id: configId, tenantId },
+    });
+    if (!config) throw new NotFoundException('Marg config not found');
+    if (!config.isActive) throw new BadRequestException('Marg sync config is disabled');
+
+    const targetLog = await this.margPrisma.margSyncLog.findFirst({
+      where: { id: syncLogId, tenantId, configId },
+    });
+    if (!targetLog) {
+      throw new NotFoundException(`Marg sync log ${syncLogId} not found for this config`);
+    }
+
+    // We accept resume on FAILED runs and on stale RUNNING runs (heartbeat
+    // older than the configured stale threshold). FATAL failures must not
+    // be resumed silently — they require operator/dev attention first.
+    // COMPLETED runs are never resumable.
+    if (targetLog.status === MARG_SYNC_STATUS.COMPLETED) {
+      throw new BadRequestException(
+        `Sync log ${syncLogId} is already COMPLETED. Resume is only valid for FAILED_RETRYABLE or stale RUNNING logs.`,
+      );
+    }
+    const isFailedRetryable = targetLog.status === MARG_SYNC_STATUS.FAILED
+      && targetLog.failureType !== MARG_FAILURE_TYPE.FATAL;
+    const isStaleRunning = targetLog.status === MARG_SYNC_STATUS.RUNNING
+      && targetLog.lastHeartbeatAt
+      && (Date.now() - new Date(targetLog.lastHeartbeatAt).getTime()) > this.staleSyncAfterMs;
+    if (!isFailedRetryable && !isStaleRunning) {
+      throw new BadRequestException(
+        `Sync log ${syncLogId} is not resumable (status=${targetLog.status}, failureType=${targetLog.failureType ?? 'null'}). ` +
+        `Resume is allowed only when the prior run failed with a RETRYABLE classification, ` +
+        `or when a RUNNING log has not produced a heartbeat in the last ${Math.round(this.staleSyncAfterMs / 60000)} minutes.`,
+      );
+    }
+
+    // Refuse legacy logs created before the resumable-pipeline migration.
+    // Such logs have currentStage=NULL and no MargRawSyncPage rows; we
+    // cannot reconstruct what stage they reached or replay their staging.
+    // Force the operator to start a fresh sync (or use /reproject if the
+    // prior run did get to staged data).
+    if (targetLog.currentStage === null) {
+      throw new BadRequestException(
+        `Sync log ${syncLogId} predates the resumable-pipeline migration (currentStage is NULL). ` +
+        `Cannot resume — start a fresh sync or run /reproject if the prior run successfully staged data.`,
+      );
+    }
+
+    // Refuse a windowed run whose window metadata is missing (e.g. the row
+    // was hand-edited or the original run failed before the metadata was
+    // committed). Resuming without the window would silently re-stage
+    // out-of-window rows.
+    const hadWindowOriginally = Boolean(targetLog.fromDate || targetLog.endDate);
+    const windowMetadataAvailable = Boolean(targetLog.fromDate || targetLog.endDate || targetLog.syncMode);
+    if (!windowMetadataAvailable && targetLog.syncMode === null) {
+      // Nothing recorded about mode/window; we cannot guarantee safe replay.
+      throw new BadRequestException(
+        `Sync log ${syncLogId} has no recorded mode/window metadata. ` +
+        `Cannot guarantee safe resume — start a fresh sync with explicit fromDate/endDate.`,
+      );
+    }
+    void hadWindowOriginally;
+
+    // Acquire the same lock runSync uses so we cannot overlap a fresh sync.
+    const lock = await this.margPrisma.margSyncConfig.updateMany({
+      where: {
+        id: configId,
+        tenantId,
+        lastSyncStatus: { not: MARG_SYNC_STATUS.RUNNING },
+        lastAccountingSyncStatus: { not: MARG_SYNC_STATUS.RUNNING },
+      },
+      data: {
+        lastSyncStatus: MARG_SYNC_STATUS.RUNNING,
+        lastAccountingSyncStatus: MARG_SYNC_STATUS.RUNNING,
+      },
+    });
+    if (lock.count === 0) {
+      throw new BadRequestException('Sync is already running for this configuration');
+    }
+
+    let pagesResumed = 0;
+    let pagesAlreadyStaged = 0;
+    let pagesFailed = 0;
+    const resumeErrors: Record<string, unknown>[] = [];
+
+    try {
+      await this.margPrisma.margSyncLog.update({
+        where: { id: syncLogId },
+        data: {
+          status: MARG_SYNC_STATUS.RUNNING,
+          currentStage: MARG_SYNC_STAGE.STAGING_STARTED,
+          failureType: null,
+          retryCount: { increment: 1 },
+          lastHeartbeatAt: new Date(),
+        },
+      });
+
+      // Reconstruct the original date window from the persisted metadata so
+      // staging methods that filter by date apply the same bound the
+      // original run used. For unbounded incremental runs, fromDate and
+      // endDate are both null, and buildDateWindow returns null — same as
+      // the original run.
+      const dateWindow = this.buildDateWindow(
+        targetLog.fromDate ?? undefined,
+        targetLog.endDate ?? undefined,
+      );
+
+      const pages = await this.margPrisma.margRawSyncPage.findMany({
+        where: { syncLogId, tenantId },
+        orderBy: [{ apiType: 'asc' }, { requestIndex: 'asc' }],
+      });
+
+      // Guard: a resumable log with zero raw pages means the original run
+      // failed before persisting anything. There is nothing to replay; the
+      // operator should start a fresh sync. Reporting "0 resumed" as
+      // success would leave the operator believing recovery worked when it
+      // did not.
+      if (pages.length === 0) {
+        throw new BadRequestException(
+          `Sync log ${syncLogId} has no saved raw pages to resume from. ` +
+          `The original run failed before persisting any pages. ` +
+          `Start a fresh sync to retry from the beginning.`,
+        );
+      }
+
+      for (const page of pages) {
+        if (page.status === MARG_RAW_PAGE_STATUS.STAGED) {
+          pagesAlreadyStaged += 1;
+          continue;
+        }
+        if (page.status === MARG_RAW_PAGE_STATUS.DISCARDED) {
+          continue;
+        }
+
+        if (!page.storagePath) {
+          pagesFailed += 1;
+          resumeErrors.push({
+            step: 'resume_stage_missing_path',
+            apiType: page.apiType,
+            requestIndex: page.requestIndex,
+          });
+          continue;
+        }
+
+        let payload: MargParsedPayload;
+        try {
+          const loaded = await this.rawPageStorage.load({
+            storagePath: page.storagePath,
+            payloadHash: page.payloadHash,
+          });
+          payload = this.coerceLoadedPayload(loaded);
+        } catch (err) {
+          pagesFailed += 1;
+          await this.markRawPageStagingFailed(page.id, err);
+          resumeErrors.push({
+            step: 'resume_load_payload',
+            apiType: page.apiType,
+            requestIndex: page.requestIndex,
+            error: (err as Error).message,
+          });
+          continue;
+        }
+
+        await this.updateSyncStage(syncLogId, MARG_SYNC_STAGE.STAGING_STARTED, {
+          apiType: page.apiType,
+          requestIndex: page.requestIndex,
+        });
+
+        try {
+          await this.replayStagingForPage(tenantId, syncLogId, page.apiType, payload, dateWindow);
+          await this.markRawPageStaged(page.id);
+          pagesResumed += 1;
+        } catch (err) {
+          pagesFailed += 1;
+          await this.markRawPageStagingFailed(page.id, err);
+          resumeErrors.push({
+            step: 'resume_stage',
+            apiType: page.apiType,
+            requestIndex: page.requestIndex,
+            error: (err as Error).message,
+          });
+          // Continue with remaining pages — one bad page should not block
+          // the others. The operator can run resume again to retry the
+          // failed pages once they fix the root cause.
+        }
+
+        await this.touchSyncHeartbeat(configId, true);
+      }
+
+      // We only mark the sync log STAGING_COMPLETED. Transforms/projections
+      // are intentionally not run here — operator runs /reproject next.
+      const finalStage = pagesFailed === 0
+        ? MARG_SYNC_STAGE.STAGING_COMPLETED
+        : MARG_SYNC_STAGE.FAILED_RETRYABLE;
+      const finalStatus = pagesFailed === 0
+        ? MARG_SYNC_STATUS.COMPLETED
+        : MARG_SYNC_STATUS.FAILED;
+
+      await this.margPrisma.margSyncLog.update({
+        where: { id: syncLogId },
+        data: {
+          status: finalStatus,
+          currentStage: finalStage,
+          failureType: pagesFailed === 0 ? null : MARG_FAILURE_TYPE.RETRYABLE,
+          completedAt: new Date(),
+          lastHeartbeatAt: new Date(),
+          errors: resumeErrors.length > 0 ? (resumeErrors as any) : (targetLog.errors as any),
+        },
+      });
+
+      await this.margPrisma.margSyncConfig.update({
+        where: { id: configId },
+        data: {
+          lastSyncStatus: pagesFailed === 0 ? MARG_SYNC_STATUS.COMPLETED : MARG_SYNC_STATUS.FAILED,
+          lastAccountingSyncStatus: pagesFailed === 0 ? MARG_SYNC_STATUS.COMPLETED : MARG_SYNC_STATUS.FAILED,
+        },
+      });
+
+      await this.auditService.log(
+        tenantId,
+        triggeredBy ?? null,
+        AuditAction.IMPORT,
+        'MargSyncLog',
+        syncLogId,
+        null,
+        { action: 'marg_sync_resumed', pagesResumed, pagesAlreadyStaged, pagesFailed },
+        [],
+        { configId, triggeredBy },
+      ).catch(() => {/* best-effort */});
+
+      return { syncLogId, pagesResumed, pagesAlreadyStaged, pagesFailed };
+    } catch (err) {
+      // Outer failure — release the lock and surface a classified error.
+      const { classification, structuredError } = this.classifyAndRecordSyncFailure(
+        err,
+        syncLogId,
+        MARG_SYNC_STAGE.FAILED_RETRYABLE,
+        null,
+        null,
+        null,
+        null,
+      );
+      await this.margPrisma.margSyncConfig.update({
+        where: { id: configId },
+        data: {
+          lastSyncStatus: MARG_SYNC_STATUS.FAILED,
+          lastAccountingSyncStatus: MARG_SYNC_STATUS.FAILED,
+        },
+      }).catch(() => {/* best-effort */});
+      await this.margPrisma.margSyncLog.update({
+        where: { id: syncLogId },
+        data: {
+          status: MARG_SYNC_STATUS.FAILED,
+          currentStage: classification.type === MARG_FAILURE_TYPE.FATAL
+            ? MARG_SYNC_STAGE.FAILED_FATAL
+            : MARG_SYNC_STAGE.FAILED_RETRYABLE,
+          failureType: classification.type,
+          lastHeartbeatAt: new Date(),
+          errors: [structuredError, ...resumeErrors] as any,
+        },
+      }).catch(() => {/* best-effort */});
+      throw err;
+    }
+  }
+
+  /**
+   * Coerce a payload loaded from storage back into a MargParsedPayload.
+   * Storage round-trips through JSON, so arrays come back as arrays — we
+   * only need to ensure each section field is at least an empty array
+   * (defensive against accidental null/undefined that would crash the
+   * staging loop).
+   */
+  private coerceLoadedPayload(loaded: unknown): MargParsedPayload {
+    const p = (this.toRecord(loaded) ?? {}) as Record<string, unknown>;
+    const arr = (v: unknown): any[] => (Array.isArray(v) ? v : []);
+    return {
+      Details: arr(p.Details),
+      Masters: arr(p.Masters),
+      MDis: arr(p.MDis),
+      Party: arr(p.Party),
+      Product: arr(p.Product),
+      SaleType: arr(p.SaleType),
+      Stock: arr(p.Stock),
+      ACGroup: arr(p.ACGroup),
+      Account: arr(p.Account),
+      AcBal: arr(p.AcBal),
+      PBal: arr(p.PBal),
+      Outstanding: arr(p.Outstanding),
+      Index: Number.isFinite(Number(p.Index)) ? Number(p.Index) : 0,
+      DataStatus: Number.isFinite(Number(p.DataStatus)) ? Number(p.DataStatus) : 0,
+      DateTime: typeof p.DateTime === 'string' ? p.DateTime : '',
+    };
+  }
+
+  /**
+   * Replay the staging methods that the original runSync would have run
+   * for a given API page. Mirrors the per-section blocks inside the runSync
+   * fetch loops; kept in sync by always calling the same syncX methods.
+   *
+   * dateWindow defaults to null on resume — see resumeSync notes for why.
+   */
+  private async replayStagingForPage(
+    tenantId: string,
+    syncLogId: string,
+    apiType: string,
+    payload: MargParsedPayload,
+    dateWindow: DateWindow | null,
+  ): Promise<void> {
+    if (apiType === '2') {
+      const seenBranches = new Set<string>();
+      const masters = payload.Masters;
+      if (masters.length > 0) {
+        const branches = this.takeUnseenMargBranchRows(masters, seenBranches);
+        if (branches.length > 0) await this.syncBranches(tenantId, branches);
+      }
+      if (payload.Product.length > 0) await this.syncProducts(tenantId, payload.Product, syncLogId);
+      if (payload.Party.length > 0) {
+        const canonical = this.canonicalizeMargParties(payload.Party);
+        await this.syncParties(tenantId, canonical.rows, syncLogId);
+      }
+      if (payload.Details.length > 0) await this.syncTransactions(tenantId, payload.Details, dateWindow, syncLogId);
+      if (payload.Stock.length > 0) await this.syncStockData(tenantId, payload.Stock, syncLogId);
+      if (payload.MDis.length > 0) await this.syncVouchers(tenantId, payload.MDis, dateWindow, syncLogId);
+      if (payload.SaleType.length > 0) await this.syncSaleTypes(tenantId, payload.SaleType);
+    } else {
+      // apiType === '1'
+      if (payload.MDis.length > 0) await this.syncVouchers(tenantId, payload.MDis, dateWindow, syncLogId);
+      if (payload.ACGroup.length > 0) await this.syncAccountGroups(tenantId, payload.ACGroup);
+      if (payload.Account.length > 0) await this.syncAccountPostings(tenantId, payload.Account, dateWindow, syncLogId);
+      if (payload.AcBal.length > 0) await this.syncAccountGroupBalances(tenantId, payload.AcBal);
+      if (payload.PBal.length > 0) {
+        const canonical = this.canonicalizeMargPartyBalances(payload.PBal);
+        await this.syncPartyBalances(tenantId, canonical.rows);
+      }
+      if (payload.Outstanding.length > 0) await this.syncOutstandings(tenantId, payload.Outstanding, dateWindow, syncLogId);
+    }
+  }
+
   // ===================== STAGING: UPSERT RAW DATA =====================
 
   private async syncBranches(tenantId: string, branches: any[]): Promise<number> {
-    let count = 0;
+    interface PreparedBranch {
+      tenantId: string;
+      margId: number;
+      companyId: number;
+      code: string | null;
+      name: string;
+      storeId: string | null;
+      licence: string | null;
+      branch: string | null;
+      rawData: unknown;
+    }
+
+    const prepared: PreparedBranch[] = [];
+    const seen = new Map<number, number>();
+
     for (const b of branches) {
       const companyId = this.toInt32(b.CompanyID, 0);
       if (companyId <= 0) continue;
 
       const margId = this.toInt32(b.ID, 0);
-
-      await this.margPrisma.margBranch.upsert({
-        where: {
-          tenantId_companyId: { tenantId, companyId },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          code: String(b.Code || '').trim() || null,
-          name: String(b.Name || '').trim(),
-          storeId: String(b.StoreID || '').trim() || null,
-          licence: String(b.Licence || '').trim() || null,
-          branch: String(b.Branch || '').trim() || null,
-          rawData: b,
-        },
-        update: {
-          margId,
-          code: String(b.Code || '').trim() || null,
-          name: String(b.Name || '').trim(),
-          storeId: String(b.StoreID || '').trim() || null,
-          licence: String(b.Licence || '').trim() || null,
-          branch: String(b.Branch || '').trim() || null,
-          rawData: b,
-        },
-      });
-      count++;
+      const row: PreparedBranch = {
+        tenantId,
+        margId,
+        companyId,
+        code: String(b.Code || '').trim() || null,
+        name: String(b.Name || '').trim(),
+        storeId: String(b.StoreID || '').trim() || null,
+        licence: String(b.Licence || '').trim() || null,
+        branch: String(b.Branch || '').trim() || null,
+        rawData: b,
+      };
+      const existingIdx = seen.get(companyId);
+      if (existingIdx !== undefined) {
+        prepared[existingIdx] = row;
+      } else {
+        seen.set(companyId, prepared.length);
+        prepared.push(row);
+      }
     }
-    return count;
+
+    if (prepared.length === 0) return 0;
+
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 9, 'syncBranches');
+    let written = 0;
+
+    for (let i = 0; i < prepared.length; i += batchSize) {
+      const chunk = prepared.slice(i, i + batchSize);
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${r.tenantId}::uuid,
+          ${r.margId}::integer,
+          ${r.companyId}::integer,
+          ${r.code},
+          ${r.name},
+          ${r.storeId},
+          ${r.licence},
+          ${r.branch},
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_branches (
+          tenant_id, marg_id, company_id, code, name, store_id, licence, branch,
+          raw_data, created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id) DO UPDATE SET
+          marg_id    = EXCLUDED.marg_id,
+          code       = EXCLUDED.code,
+          name       = EXCLUDED.name,
+          store_id   = EXCLUDED.store_id,
+          licence    = EXCLUDED.licence,
+          branch     = EXCLUDED.branch,
+          raw_data   = EXCLUDED.raw_data,
+          updated_at = NOW()
+      `);
+      written += chunk.length;
+    }
+    return written;
   }
 
-  private async syncProducts(tenantId: string, products: any[]): Promise<number> {
-    let count = 0;
+  private async syncProducts(tenantId: string, products: any[], progressSyncLogId?: string | null): Promise<number> {
+    interface PreparedProduct {
+      tenantId: string;
+      margId: number;
+      companyId: number;
+      pid: string;
+      code: string;
+      name: string;
+      unit: string | null;
+      pack: number | null;
+      gCode: string | null;
+      gCode3: string | null;
+      gCode5: string | null;
+      gCode6: string | null;
+      gst: number | null;
+      margCode: string | null;
+      addField: string | null;
+      rawData: unknown;
+    }
+
+    const prepared: PreparedProduct[] = [];
+    const seen = new Map<string, number>();
+
     for (const p of products) {
       const productRow = this.toRecord(p);
       if (!productRow) continue;
@@ -3182,51 +4032,143 @@ export class MargEdeService {
       const margCode = this.readMargString(productRow, ['MargCode', 'MARGCODE', 'margCode', 'marg_code'], 50);
       const addField = this.readMargString(productRow, ['AddField', 'ADDFIELD', 'addField', 'add_field']);
 
-      await this.margPrisma.margProduct.upsert({
-        where: {
-          tenantId_companyId_pid: { tenantId, companyId, pid },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          pid,
-          code,
-          name,
-          unit,
-          pack: pack != null ? Number(pack) : null,
-          gCode,
-          gCode3,
-          gCode5,
-          gCode6,
-          gst: gst != null ? Number(gst) : null,
-          margCode,
-          addField,
-          rawData: p,
-        },
-        update: {
-          margId,
-          code,
-          name,
-          unit,
-          pack: pack != null ? Number(pack) : null,
-          gCode,
-          gCode3,
-          gCode5,
-          gCode6,
-          gst: gst != null ? Number(gst) : null,
-          margCode,
-          addField,
-          rawData: p,
-        },
-      });
-      count++;
+      const dedupKey = `${companyId}:${pid}`;
+      const row: PreparedProduct = {
+        tenantId,
+        margId,
+        companyId,
+        pid,
+        code,
+        name,
+        unit,
+        pack: pack != null ? Number(pack) : null,
+        gCode,
+        gCode3,
+        gCode5,
+        gCode6,
+        gst: gst != null ? Number(gst) : null,
+        margCode,
+        addField,
+        rawData: p,
+      };
+      const existingIdx = seen.get(dedupKey);
+      if (existingIdx !== undefined) {
+        prepared[existingIdx] = row;
+      } else {
+        seen.set(dedupKey, prepared.length);
+        prepared.push(row);
+      }
     }
-    return count;
+
+    if (prepared.length === 0) return 0;
+
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 16, 'syncProducts');
+    let written = 0;
+    const startedAt = Date.now();
+
+    for (let i = 0; i < prepared.length; i += batchSize) {
+      const chunk = prepared.slice(i, i + batchSize);
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${r.tenantId}::uuid,
+          ${r.margId}::integer,
+          ${r.companyId}::integer,
+          ${r.pid},
+          ${r.code},
+          ${r.name},
+          ${r.unit},
+          ${r.pack},
+          ${r.gCode},
+          ${r.gCode3},
+          ${r.gCode5},
+          ${r.gCode6},
+          ${r.gst},
+          ${r.margCode},
+          ${r.addField},
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_products (
+          tenant_id, marg_id, company_id, pid, code, name,
+          unit, pack, g_code, g_code3, g_code5, g_code6,
+          gst, marg_code, add_field, raw_data,
+          created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id, pid) DO UPDATE SET
+          marg_id    = EXCLUDED.marg_id,
+          code       = EXCLUDED.code,
+          name       = EXCLUDED.name,
+          unit       = EXCLUDED.unit,
+          pack       = EXCLUDED.pack,
+          g_code     = EXCLUDED.g_code,
+          g_code3    = EXCLUDED.g_code3,
+          g_code5    = EXCLUDED.g_code5,
+          g_code6    = EXCLUDED.g_code6,
+          gst        = EXCLUDED.gst,
+          marg_code  = EXCLUDED.marg_code,
+          add_field  = EXCLUDED.add_field,
+          raw_data   = EXCLUDED.raw_data,
+          updated_at = NOW()
+      `);
+
+      written += chunk.length;
+      await this.updateBatchProgress(progressSyncLogId, 'products', Math.floor(i / batchSize) + 1, chunk.length);
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    if (prepared.length >= 1000 || elapsedMs > 5000) {
+      this.logger.log(
+        `Marg syncProducts bulk-upserted ${written} rows in ${elapsedMs}ms ` +
+        `(${Math.ceil(prepared.length / batchSize)} batches of up to ${batchSize})`,
+      );
+    }
+
+    return written;
   }
 
-  private async syncParties(tenantId: string, parties: any[]): Promise<number> {
-    let count = 0;
+  private async syncParties(tenantId: string, parties: any[], progressSyncLogId?: string | null): Promise<number> {
+    interface PreparedParty {
+      tenantId: string;
+      margId: number;
+      companyId: number;
+      cid: string;
+      parName: string;
+      parAddr: string | null;
+      parAdd1: string | null;
+      parAdd2: string | null;
+      gstNo: string | null;
+      phone1: string | null;
+      phone2: string | null;
+      phone3: string | null;
+      phone4: string | null;
+      route: string | null;
+      area: string | null;
+      mr: string | null;
+      sCode: string | null;
+      rate: string | null;
+      credit: number | null;
+      crDays: number | null;
+      crBills: number | null;
+      crStatus: string | null;
+      margCode: string | null;
+      addField: string | null;
+      dlNo: string | null;
+      pin: string | null;
+      lat: string | null;
+      lng: string | null;
+      isDeleted: boolean;
+      rawData: unknown;
+    }
+
+    const prepared: PreparedParty[] = [];
+    const seen = new Map<string, number>();
+
     for (const p of parties) {
       const companyId = this.toInt32(p.CompanyID, 0);
       if (companyId <= 0) continue;
@@ -3235,78 +4177,152 @@ export class MargEdeService {
       const cid = String(p.CID || '').trim();
       if (!cid) continue;
 
-      await this.margPrisma.margParty.upsert({
-        where: {
-          tenantId_companyId_cid: { tenantId, companyId, cid },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          cid,
-          parName: String(p.ParNam || '').trim(),
-          parAddr: String(p.PARADD || '').trim() || null,
-          parAdd1: String(p.ParAdd1 || '').trim() || null,
-          parAdd2: String(p.ParAdd2 || '').trim() || null,
-          gstNo: String(p.GSTNo || '').trim() || null,
-          phone1: String(p.Phone1 || '').trim() || null,
-          phone2: String(p.Phone2 || '').trim() || null,
-          phone3: String(p.Phone3 || '').trim() || null,
-          phone4: String(p.Phone4 || '').trim() || null,
-          route: String(p.Rout || '').trim() || null,
-          area: String(p.Area || '').trim() || null,
-          mr: String(p.MR || '').trim() || null,
-          sCode: String(p.SCode || '').trim() || null,
-          rate: String(p.Rate || '').trim() || null,
-          credit: p.Credit != null ? Number(p.Credit) : null,
-          crDays: p.CRDays != null ? Number(p.CRDays) : null,
-          crBills: p.CRBills != null ? Number(p.CRBills) : null,
-          crStatus: String(p.CRStatus || '').trim() || null,
-          margCode: String(p.MargCode || '').trim() || null,
-          addField: String(p.AddField || '').trim() || null,
-          dlNo: String(p.DlNo || '').trim() || null,
-          pin: String(p.Pin || '').trim() || null,
-          lat: String(p.Lat || '').trim() || null,
-          lng: String(p.Lng || '').trim() || null,
-          isDeleted: String(p.Is_Deleted) === '1',
-          rawData: p,
-        },
-        update: {
-          margId,
-          parName: String(p.ParNam || '').trim(),
-          parAddr: String(p.PARADD || '').trim() || null,
-          parAdd1: String(p.ParAdd1 || '').trim() || null,
-          parAdd2: String(p.ParAdd2 || '').trim() || null,
-          gstNo: String(p.GSTNo || '').trim() || null,
-          phone1: String(p.Phone1 || '').trim() || null,
-          phone2: String(p.Phone2 || '').trim() || null,
-          phone3: String(p.Phone3 || '').trim() || null,
-          phone4: String(p.Phone4 || '').trim() || null,
-          route: String(p.Rout || '').trim() || null,
-          area: String(p.Area || '').trim() || null,
-          mr: String(p.MR || '').trim() || null,
-          sCode: String(p.SCode || '').trim() || null,
-          rate: String(p.Rate || '').trim() || null,
-          credit: p.Credit != null ? Number(p.Credit) : null,
-          crDays: p.CRDays != null ? Number(p.CRDays) : null,
-          crBills: p.CRBills != null ? Number(p.CRBills) : null,
-          crStatus: String(p.CRStatus || '').trim() || null,
-          margCode: String(p.MargCode || '').trim() || null,
-          addField: String(p.AddField || '').trim() || null,
-          dlNo: String(p.DlNo || '').trim() || null,
-          pin: String(p.Pin || '').trim() || null,
-          lat: String(p.Lat || '').trim() || null,
-          lng: String(p.Lng || '').trim() || null,
-          isDeleted: String(p.Is_Deleted) === '1',
-          rawData: p,
-        },
-      });
-      count++;
+      const dedupKey = `${companyId}:${cid}`;
+      const row: PreparedParty = {
+        tenantId,
+        margId,
+        companyId,
+        cid,
+        parName: String(p.ParNam || '').trim(),
+        parAddr: String(p.PARADD || '').trim() || null,
+        parAdd1: String(p.ParAdd1 || '').trim() || null,
+        parAdd2: String(p.ParAdd2 || '').trim() || null,
+        gstNo: String(p.GSTNo || '').trim() || null,
+        phone1: String(p.Phone1 || '').trim() || null,
+        phone2: String(p.Phone2 || '').trim() || null,
+        phone3: String(p.Phone3 || '').trim() || null,
+        phone4: String(p.Phone4 || '').trim() || null,
+        route: String(p.Rout || '').trim() || null,
+        area: String(p.Area || '').trim() || null,
+        mr: String(p.MR || '').trim() || null,
+        sCode: String(p.SCode || '').trim() || null,
+        rate: String(p.Rate || '').trim() || null,
+        credit: p.Credit != null ? Number(p.Credit) : null,
+        crDays: p.CRDays != null ? Number(p.CRDays) : null,
+        crBills: p.CRBills != null ? Number(p.CRBills) : null,
+        crStatus: String(p.CRStatus || '').trim() || null,
+        margCode: String(p.MargCode || '').trim() || null,
+        addField: String(p.AddField || '').trim() || null,
+        dlNo: String(p.DlNo || '').trim() || null,
+        pin: String(p.Pin || '').trim() || null,
+        lat: String(p.Lat || '').trim() || null,
+        lng: String(p.Lng || '').trim() || null,
+        isDeleted: String(p.Is_Deleted) === '1',
+        rawData: p,
+      };
+      const existingIdx = seen.get(dedupKey);
+      if (existingIdx !== undefined) {
+        prepared[existingIdx] = row;
+      } else {
+        seen.set(dedupKey, prepared.length);
+        prepared.push(row);
+      }
     }
-    return count;
+
+    if (prepared.length === 0) return 0;
+
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 30, 'syncParties');
+    let written = 0;
+    const startedAt = Date.now();
+
+    for (let i = 0; i < prepared.length; i += batchSize) {
+      const chunk = prepared.slice(i, i + batchSize);
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${r.tenantId}::uuid,
+          ${r.margId}::integer,
+          ${r.companyId}::integer,
+          ${r.cid},
+          ${r.parName},
+          ${r.parAddr},
+          ${r.parAdd1},
+          ${r.parAdd2},
+          ${r.gstNo},
+          ${r.phone1},
+          ${r.phone2},
+          ${r.phone3},
+          ${r.phone4},
+          ${r.route},
+          ${r.area},
+          ${r.mr},
+          ${r.sCode},
+          ${r.rate},
+          ${r.credit},
+          ${r.crDays},
+          ${r.crBills},
+          ${r.crStatus},
+          ${r.margCode},
+          ${r.addField},
+          ${r.dlNo},
+          ${r.pin},
+          ${r.lat},
+          ${r.lng},
+          ${r.isDeleted},
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_parties (
+          tenant_id, marg_id, company_id, cid,
+          par_name, par_addr, par_add1, par_add2, gst_no,
+          phone1, phone2, phone3, phone4,
+          route, area, mr, s_code, rate,
+          credit, cr_days, cr_bills, cr_status,
+          marg_code, add_field, dl_no, pin, lat, lng,
+          is_deleted, raw_data, created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id, cid) DO UPDATE SET
+          marg_id    = EXCLUDED.marg_id,
+          par_name   = EXCLUDED.par_name,
+          par_addr   = EXCLUDED.par_addr,
+          par_add1   = EXCLUDED.par_add1,
+          par_add2   = EXCLUDED.par_add2,
+          gst_no     = EXCLUDED.gst_no,
+          phone1     = EXCLUDED.phone1,
+          phone2     = EXCLUDED.phone2,
+          phone3     = EXCLUDED.phone3,
+          phone4     = EXCLUDED.phone4,
+          route      = EXCLUDED.route,
+          area       = EXCLUDED.area,
+          mr         = EXCLUDED.mr,
+          s_code     = EXCLUDED.s_code,
+          rate       = EXCLUDED.rate,
+          credit     = EXCLUDED.credit,
+          cr_days    = EXCLUDED.cr_days,
+          cr_bills   = EXCLUDED.cr_bills,
+          cr_status  = EXCLUDED.cr_status,
+          marg_code  = EXCLUDED.marg_code,
+          add_field  = EXCLUDED.add_field,
+          dl_no      = EXCLUDED.dl_no,
+          pin        = EXCLUDED.pin,
+          lat        = EXCLUDED.lat,
+          lng        = EXCLUDED.lng,
+          is_deleted = EXCLUDED.is_deleted,
+          raw_data   = EXCLUDED.raw_data,
+          updated_at = NOW()
+      `);
+
+      written += chunk.length;
+      await this.updateBatchProgress(progressSyncLogId, 'parties', Math.floor(i / batchSize) + 1, chunk.length);
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    if (prepared.length >= 1000 || elapsedMs > 5000) {
+      this.logger.log(
+        `Marg syncParties bulk-upserted ${written} rows in ${elapsedMs}ms ` +
+        `(${Math.ceil(prepared.length / batchSize)} batches of up to ${batchSize})`,
+      );
+    }
+
+    return written;
   }
 
-  private async syncTransactions(tenantId: string, details: any[], dateWindow: DateWindow | null): Promise<number> {
+  private async syncTransactions(tenantId: string, details: any[], dateWindow: DateWindow | null, progressSyncLogId?: string | null): Promise<number> {
     // Previously this method awaited a Prisma `upsert` per row. A single Marg
     // page can contain 100k+ Detail rows; sequential upserts at ~10-30ms each
     // turned a single sync into a multi-hour job. Now we prepare the rows in
@@ -3390,7 +4406,10 @@ export class MargEdeService {
 
     if (prepared.length === 0) return 0;
 
-    const BATCH_SIZE = 500;
+    // 23 bind variables per row × BATCH_SIZE must stay under Postgres'
+    // 32_767 prepared-statement parameter cap. The helper clamps for us so
+    // raising MARG_STAGING_BATCH_SIZE in env never trips the cap.
+    const BATCH_SIZE = this.computeSafeBatchSize(this.stagingBatchSize, 23, 'syncTransactions');
     let written = 0;
     const startedAt = Date.now();
 
@@ -3462,6 +4481,7 @@ export class MargEdeService {
       `);
 
       written += chunk.length;
+      await this.updateBatchProgress(progressSyncLogId, 'transactions', Math.floor(i / BATCH_SIZE) + 1, chunk.length);
     }
 
     const elapsedMs = Date.now() - startedAt;
@@ -3476,7 +4496,43 @@ export class MargEdeService {
   }
 
   private async syncStockData(tenantId: string, stockItems: any[], syncLogId: string): Promise<number> {
-    let count = 0;
+    // Bulk upsert via INSERT ... ON CONFLICT DO UPDATE. Was per-row Prisma
+    // upsert which for million-batch clients costs ~30 minutes per page;
+    // the batched form does the same work in seconds. Matches the proven
+    // syncTransactions pattern.
+    interface PreparedStock {
+      tenantId: string;
+      margId: number;
+      companyId: number;
+      pid: string;
+      gCode: string | null;
+      batch: string;
+      batDate: Date | null;
+      batDet: string | null;
+      expiry: Date | null;
+      supInvo: string | null;
+      supDate: Date | null;
+      supCode: string | null;
+      opening: number | null;
+      stock: number | null;
+      brkStock: number | null;
+      lpRate: number | null;
+      pRate: number | null;
+      mrp: number | null;
+      rateA: number | null;
+      rateB: number | null;
+      rateC: number | null;
+      addField: string | null;
+      lastSeenSyncLogId: string;
+      rawData: unknown;
+    }
+
+    const prepared: PreparedStock[] = [];
+    // De-dup by unique key: ON CONFLICT DO UPDATE refuses to update the same
+    // row twice in one statement (Postgres "command cannot affect row a
+    // second time"). Last write wins.
+    const seen = new Map<string, number>();
+
     for (const s of stockItems) {
       const companyId = this.toInt32(s.CompanyID, 0);
       if (companyId <= 0) continue;
@@ -3486,68 +4542,162 @@ export class MargEdeService {
       const batch = String(s.Batch || '').trim() || '_default';
       if (!pid) continue;
 
-      await this.margPrisma.margStock.upsert({
-        where: {
-          tenantId_companyId_pid_batch: { tenantId, companyId, pid, batch },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          pid,
-          gCode: String(s.GCode || '').trim() || null,
-          batch,
-          batDate: s.BatDate ? this.parseMargDate(s.BatDate) : null,
-          batDet: String(s.BatDet || '').trim() || null,
-          expiry: s.Expiry ? this.parseMargDate(s.Expiry) : null,
-          supInvo: String(s.SupInvo || '').trim() || null,
-          supDate: s.SupDate ? this.parseMargDate(s.SupDate) : null,
-          supCode: String(s.SupCode || '').trim() || null,
-          opening: s.Opening != null ? Number(s.Opening) : null,
-          stock: s.Stock != null ? Number(s.Stock) : null,
-          brkStock: s.BrkStock != null ? Number(s.BrkStock) : null,
-          lpRate: s.LPRate != null ? Number(s.LPRate) : null,
-          pRate: s.PRate != null ? Number(s.PRate) : null,
-          mrp: s.MRP != null ? Number(s.MRP) : null,
-          rateA: s.RateA != null ? Number(s.RateA) : null,
-          rateB: s.RateB != null ? Number(s.RateB) : null,
-          rateC: s.RateC != null ? Number(s.RateC) : null,
-          addField: String(s.AddField || '').trim() || null,
-          sourceDeleted: false,
-          lastSeenSyncLogId: syncLogId,
-          rawData: s,
-        },
-        update: {
-          margId,
-          gCode: String(s.GCode || '').trim() || null,
-          batDate: s.BatDate ? this.parseMargDate(s.BatDate) : null,
-          batDet: String(s.BatDet || '').trim() || null,
-          expiry: s.Expiry ? this.parseMargDate(s.Expiry) : null,
-          supInvo: String(s.SupInvo || '').trim() || null,
-          supDate: s.SupDate ? this.parseMargDate(s.SupDate) : null,
-          supCode: String(s.SupCode || '').trim() || null,
-          opening: s.Opening != null ? Number(s.Opening) : null,
-          stock: s.Stock != null ? Number(s.Stock) : null,
-          brkStock: s.BrkStock != null ? Number(s.BrkStock) : null,
-          lpRate: s.LPRate != null ? Number(s.LPRate) : null,
-          pRate: s.PRate != null ? Number(s.PRate) : null,
-          mrp: s.MRP != null ? Number(s.MRP) : null,
-          rateA: s.RateA != null ? Number(s.RateA) : null,
-          rateB: s.RateB != null ? Number(s.RateB) : null,
-          rateC: s.RateC != null ? Number(s.RateC) : null,
-          addField: String(s.AddField || '').trim() || null,
-          sourceDeleted: false,
-          lastSeenSyncLogId: syncLogId,
-          rawData: s,
-        },
-      });
-      count++;
+      const dedupKey = `${companyId}:${pid}:${batch}`;
+      const row: PreparedStock = {
+        tenantId,
+        margId,
+        companyId,
+        pid,
+        gCode: String(s.GCode || '').trim() || null,
+        batch,
+        batDate: s.BatDate ? this.parseMargDate(s.BatDate) : null,
+        batDet: String(s.BatDet || '').trim() || null,
+        expiry: s.Expiry ? this.parseMargDate(s.Expiry) : null,
+        supInvo: String(s.SupInvo || '').trim() || null,
+        supDate: s.SupDate ? this.parseMargDate(s.SupDate) : null,
+        supCode: String(s.SupCode || '').trim() || null,
+        opening: s.Opening != null ? Number(s.Opening) : null,
+        stock: s.Stock != null ? Number(s.Stock) : null,
+        brkStock: s.BrkStock != null ? Number(s.BrkStock) : null,
+        lpRate: s.LPRate != null ? Number(s.LPRate) : null,
+        pRate: s.PRate != null ? Number(s.PRate) : null,
+        mrp: s.MRP != null ? Number(s.MRP) : null,
+        rateA: s.RateA != null ? Number(s.RateA) : null,
+        rateB: s.RateB != null ? Number(s.RateB) : null,
+        rateC: s.RateC != null ? Number(s.RateC) : null,
+        addField: String(s.AddField || '').trim() || null,
+        lastSeenSyncLogId: syncLogId,
+        rawData: s,
+      };
+      const existingIdx = seen.get(dedupKey);
+      if (existingIdx !== undefined) {
+        prepared[existingIdx] = row;
+      } else {
+        seen.set(dedupKey, prepared.length);
+        prepared.push(row);
+      }
     }
-    return count;
+
+    if (prepared.length === 0) return 0;
+
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 24, 'syncStockData');
+    let written = 0;
+    const startedAt = Date.now();
+
+    for (let i = 0; i < prepared.length; i += batchSize) {
+      const chunk = prepared.slice(i, i + batchSize);
+
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${r.tenantId}::uuid,
+          ${r.margId}::integer,
+          ${r.companyId}::integer,
+          ${r.pid},
+          ${r.gCode},
+          ${r.batch},
+          ${r.batDate},
+          ${r.batDet},
+          ${r.expiry},
+          ${r.supInvo},
+          ${r.supDate},
+          ${r.supCode},
+          ${r.opening},
+          ${r.stock},
+          ${r.brkStock},
+          ${r.lpRate},
+          ${r.pRate},
+          ${r.mrp},
+          ${r.rateA},
+          ${r.rateB},
+          ${r.rateC},
+          ${r.addField},
+          FALSE,
+          ${r.lastSeenSyncLogId}::uuid,
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_stocks (
+          tenant_id, marg_id, company_id, pid, g_code, batch,
+          bat_date, bat_det, expiry, sup_invo, sup_date, sup_code,
+          opening, stock, brk_stock, lp_rate, p_rate, mrp,
+          rate_a, rate_b, rate_c, add_field,
+          source_deleted, last_seen_sync_log_id,
+          raw_data, created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id, pid, batch) DO UPDATE SET
+          marg_id              = EXCLUDED.marg_id,
+          g_code               = EXCLUDED.g_code,
+          bat_date             = EXCLUDED.bat_date,
+          bat_det              = EXCLUDED.bat_det,
+          expiry               = EXCLUDED.expiry,
+          sup_invo             = EXCLUDED.sup_invo,
+          sup_date             = EXCLUDED.sup_date,
+          sup_code             = EXCLUDED.sup_code,
+          opening              = EXCLUDED.opening,
+          stock                = EXCLUDED.stock,
+          brk_stock            = EXCLUDED.brk_stock,
+          lp_rate              = EXCLUDED.lp_rate,
+          p_rate               = EXCLUDED.p_rate,
+          mrp                  = EXCLUDED.mrp,
+          rate_a               = EXCLUDED.rate_a,
+          rate_b               = EXCLUDED.rate_b,
+          rate_c               = EXCLUDED.rate_c,
+          add_field            = EXCLUDED.add_field,
+          source_deleted       = FALSE,
+          last_seen_sync_log_id = EXCLUDED.last_seen_sync_log_id,
+          raw_data             = EXCLUDED.raw_data,
+          updated_at           = NOW()
+      `);
+
+      written += chunk.length;
+      // syncStockData already takes syncLogId; reuse it as the progress
+      // identity so the bulk loop heartbeats during long stock pages.
+      await this.updateBatchProgress(syncLogId, 'stock', Math.floor(i / batchSize) + 1, chunk.length);
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    if (prepared.length >= 1000 || elapsedMs > 5000) {
+      this.logger.log(
+        `Marg syncStockData bulk-upserted ${written} rows in ${elapsedMs}ms ` +
+        `(${Math.ceil(prepared.length / batchSize)} batches of up to ${batchSize})`,
+      );
+    }
+
+    return written;
   }
 
-  private async syncVouchers(tenantId: string, mdis: any[], dateWindow: DateWindow | null): Promise<number> {
-    let count = 0;
+  private async syncVouchers(tenantId: string, mdis: any[], dateWindow: DateWindow | null, progressSyncLogId?: string | null): Promise<number> {
+    interface PreparedVoucher {
+      tenantId: string;
+      margId: bigint;
+      companyId: number;
+      voucher: string;
+      type: string;
+      vcn: string | null;
+      date: Date;
+      cid: string | null;
+      finalAmt: number | null;
+      cash: number | null;
+      others: number | null;
+      salesman: string | null;
+      mr: string | null;
+      route: string | null;
+      area: string | null;
+      orn: string | null;
+      addField: string | null;
+      oDate: Date | null;
+      rawData: unknown;
+    }
+
+    const prepared: PreparedVoucher[] = [];
+    const seen = new Map<string, number>();
+
     for (const m of mdis) {
       const companyId = this.toInt32(m.CompanyID, 0);
       if (companyId <= 0) continue;
@@ -3562,56 +4712,128 @@ export class MargEdeService {
 
       const type = String(m.Type || '').trim();
 
-      await this.margPrisma.margVoucher.upsert({
-        where: {
-          tenantId_companyId_voucher_type: { tenantId, companyId, voucher, type },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          voucher,
-          type,
-          vcn: String(m.VCN || m.Vcn || '').trim() || null,
-          date: parsedDate,
-          cid: String(m.CID || '').trim() || null,
-          finalAmt: m.Final != null ? Number(m.Final) : null,
-          cash: m.Cash != null ? Number(m.Cash) : null,
-          others: m.Others != null ? Number(m.Others) : null,
-          salesman: String(m.Salun || '').trim() || null,
-          mr: String(m.MR || '').trim() || null,
-          route: String(m.Rout || '').trim() || null,
-          area: String(m.Area || '').trim() || null,
-          orn: String(m.ORN || '').trim() || null,
-          addField: String(m.AddField || '').trim() || null,
-          oDate: m.ODate ? this.parseMargDate(m.ODate) : null,
-          rawData: m,
-        },
-        update: {
-          margId,
-          vcn: String(m.VCN || m.Vcn || '').trim() || null,
-          date: parsedDate,
-          cid: String(m.CID || '').trim() || null,
-          finalAmt: m.Final != null ? Number(m.Final) : null,
-          cash: m.Cash != null ? Number(m.Cash) : null,
-          others: m.Others != null ? Number(m.Others) : null,
-          salesman: String(m.Salun || '').trim() || null,
-          mr: String(m.MR || '').trim() || null,
-          route: String(m.Rout || '').trim() || null,
-          area: String(m.Area || '').trim() || null,
-          orn: String(m.ORN || '').trim() || null,
-          addField: String(m.AddField || '').trim() || null,
-          oDate: m.ODate ? this.parseMargDate(m.ODate) : null,
-          rawData: m,
-        },
-      });
-      count++;
+      const dedupKey = `${companyId}:${voucher}:${type}`;
+      const row: PreparedVoucher = {
+        tenantId,
+        margId,
+        companyId,
+        voucher,
+        type,
+        vcn: String(m.VCN || m.Vcn || '').trim() || null,
+        date: parsedDate,
+        cid: String(m.CID || '').trim() || null,
+        finalAmt: m.Final != null ? Number(m.Final) : null,
+        cash: m.Cash != null ? Number(m.Cash) : null,
+        others: m.Others != null ? Number(m.Others) : null,
+        salesman: String(m.Salun || '').trim() || null,
+        mr: String(m.MR || '').trim() || null,
+        route: String(m.Rout || '').trim() || null,
+        area: String(m.Area || '').trim() || null,
+        orn: String(m.ORN || '').trim() || null,
+        addField: String(m.AddField || '').trim() || null,
+        oDate: m.ODate ? this.parseMargDate(m.ODate) : null,
+        rawData: m,
+      };
+      const existingIdx = seen.get(dedupKey);
+      if (existingIdx !== undefined) {
+        prepared[existingIdx] = row;
+      } else {
+        seen.set(dedupKey, prepared.length);
+        prepared.push(row);
+      }
     }
-    return count;
+
+    if (prepared.length === 0) return 0;
+
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 19, 'syncVouchers');
+    let written = 0;
+    const startedAt = Date.now();
+
+    for (let i = 0; i < prepared.length; i += batchSize) {
+      const chunk = prepared.slice(i, i + batchSize);
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${r.tenantId}::uuid,
+          ${r.margId}::bigint,
+          ${r.companyId}::integer,
+          ${r.voucher},
+          ${r.type},
+          ${r.vcn},
+          ${r.date}::date,
+          ${r.cid},
+          ${r.finalAmt},
+          ${r.cash},
+          ${r.others},
+          ${r.salesman},
+          ${r.mr},
+          ${r.route},
+          ${r.area},
+          ${r.orn},
+          ${r.addField},
+          ${r.oDate},
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_vouchers (
+          tenant_id, marg_id, company_id, voucher, type, vcn, date,
+          cid, final_amt, cash, others, salesman, mr, route, area, orn,
+          add_field, o_date, raw_data, created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id, voucher, type) DO UPDATE SET
+          marg_id    = EXCLUDED.marg_id,
+          vcn        = EXCLUDED.vcn,
+          date       = EXCLUDED.date,
+          cid        = EXCLUDED.cid,
+          final_amt  = EXCLUDED.final_amt,
+          cash       = EXCLUDED.cash,
+          others     = EXCLUDED.others,
+          salesman   = EXCLUDED.salesman,
+          mr         = EXCLUDED.mr,
+          route      = EXCLUDED.route,
+          area       = EXCLUDED.area,
+          orn        = EXCLUDED.orn,
+          add_field  = EXCLUDED.add_field,
+          o_date     = EXCLUDED.o_date,
+          raw_data   = EXCLUDED.raw_data,
+          updated_at = NOW()
+      `);
+
+      written += chunk.length;
+      await this.updateBatchProgress(progressSyncLogId, 'vouchers', Math.floor(i / batchSize) + 1, chunk.length);
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    if (prepared.length >= 1000 || elapsedMs > 5000) {
+      this.logger.log(
+        `Marg syncVouchers bulk-upserted ${written} rows in ${elapsedMs}ms ` +
+        `(${Math.ceil(prepared.length / batchSize)} batches of up to ${batchSize})`,
+      );
+    }
+
+    return written;
   }
 
   private async syncAccountGroups(tenantId: string, accountGroups: any[]): Promise<number> {
-    let count = 0;
+    interface PreparedAccountGroup {
+      tenantId: string;
+      margId: bigint;
+      companyId: number;
+      aid: string;
+      name: string;
+      under: string | null;
+      addField: string | null;
+      rawData: unknown;
+    }
+
+    const prepared: PreparedAccountGroup[] = [];
+    const seen = new Map<string, number>();
+
     for (const group of accountGroups) {
       const companyId = this.toInt32(group.CompanyID, 0);
       if (companyId <= 0) continue;
@@ -3622,40 +4844,92 @@ export class MargEdeService {
       const aid = this.normalizeMargCode(group.AID);
       if (!aid) continue;
 
-      await this.margPrisma.margAccountGroup.upsert({
-        where: {
-          tenantId_companyId_aid: { tenantId, companyId, aid },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          aid,
-          name: String(group.Name || '').trim(),
-          under: this.normalizeMargCode(group.Under) || null,
-          addField: String(group.AddField || '').trim() || null,
-          rawData: group,
-        },
-        update: {
-          margId,
-          name: String(group.Name || '').trim(),
-          under: this.normalizeMargCode(group.Under) || null,
-          addField: String(group.AddField || '').trim() || null,
-          rawData: group,
-        },
-      });
-      count++;
+      const dedupKey = `${companyId}:${aid}`;
+      const row: PreparedAccountGroup = {
+        tenantId,
+        margId,
+        companyId,
+        aid,
+        name: String(group.Name || '').trim(),
+        under: this.normalizeMargCode(group.Under) || null,
+        addField: String(group.AddField || '').trim() || null,
+        rawData: group,
+      };
+      const existingIdx = seen.get(dedupKey);
+      if (existingIdx !== undefined) {
+        prepared[existingIdx] = row;
+      } else {
+        seen.set(dedupKey, prepared.length);
+        prepared.push(row);
+      }
     }
 
-    return count;
+    if (prepared.length === 0) return 0;
+
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 8, 'syncAccountGroups');
+    let written = 0;
+
+    for (let i = 0; i < prepared.length; i += batchSize) {
+      const chunk = prepared.slice(i, i + batchSize);
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${r.tenantId}::uuid,
+          ${r.margId}::bigint,
+          ${r.companyId}::integer,
+          ${r.aid},
+          ${r.name},
+          ${r.under},
+          ${r.addField},
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_account_groups (
+          tenant_id, marg_id, company_id, aid, name, "under",
+          add_field, raw_data, created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id, aid) DO UPDATE SET
+          marg_id    = EXCLUDED.marg_id,
+          name       = EXCLUDED.name,
+          "under"    = EXCLUDED."under",
+          add_field  = EXCLUDED.add_field,
+          raw_data   = EXCLUDED.raw_data,
+          updated_at = NOW()
+      `);
+      written += chunk.length;
+    }
+    return written;
   }
 
   private async syncAccountPostings(
     tenantId: string,
     postings: any[],
     dateWindow: DateWindow | null,
+    progressSyncLogId?: string | null,
   ): Promise<number> {
-    let count = 0;
+    interface PreparedPosting {
+      tenantId: string;
+      margId: bigint;
+      companyId: number;
+      voucher: string | null;
+      date: Date;
+      code: string | null;
+      amount: number;
+      book: string;
+      code1: string | null;
+      gCode: string | null;
+      remark: string | null;
+      addField: string | null;
+      rawData: unknown;
+    }
+
+    const prepared: PreparedPosting[] = [];
+    const seen = new Map<string, number>();
+
     for (const posting of postings) {
       const companyId = this.toInt32(posting.CompanyID, 0);
       if (companyId <= 0) continue;
@@ -3672,46 +4946,110 @@ export class MargEdeService {
       const code1 = this.normalizeMargCode(posting.Code1) || null;
       const gCode = this.normalizeMargCode(posting.GCode) || null;
 
-      await this.margPrisma.margAccountPosting.upsert({
-        where: {
-          tenantId_companyId_margId: { tenantId, companyId, margId },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          voucher: String(posting.Voucher || '').trim() || null,
-          date: parsedDate,
-          code,
-          amount: posting.Amount != null ? Number(posting.Amount) : 0,
-          book,
-          code1,
-          gCode,
-          remark: String(posting.Remark || '').trim() || null,
-          addField: String(posting.AddField || '').trim() || null,
-          rawData: posting,
-        },
-        update: {
-          voucher: String(posting.Voucher || '').trim() || null,
-          date: parsedDate,
-          code,
-          amount: posting.Amount != null ? Number(posting.Amount) : 0,
-          book,
-          code1,
-          gCode,
-          remark: String(posting.Remark || '').trim() || null,
-          addField: String(posting.AddField || '').trim() || null,
-          rawData: posting,
-        },
-      });
-      count++;
+      const dedupKey = `${companyId}:${margId.toString()}`;
+      const row: PreparedPosting = {
+        tenantId,
+        margId,
+        companyId,
+        voucher: String(posting.Voucher || '').trim() || null,
+        date: parsedDate,
+        code,
+        amount: posting.Amount != null ? Number(posting.Amount) : 0,
+        book,
+        code1,
+        gCode,
+        remark: String(posting.Remark || '').trim() || null,
+        addField: String(posting.AddField || '').trim() || null,
+        rawData: posting,
+      };
+      const existingIdx = seen.get(dedupKey);
+      if (existingIdx !== undefined) {
+        prepared[existingIdx] = row;
+      } else {
+        seen.set(dedupKey, prepared.length);
+        prepared.push(row);
+      }
     }
 
-    return count;
+    if (prepared.length === 0) return 0;
+
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 13, 'syncAccountPostings');
+    let written = 0;
+    const startedAt = Date.now();
+
+    for (let i = 0; i < prepared.length; i += batchSize) {
+      const chunk = prepared.slice(i, i + batchSize);
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${r.tenantId}::uuid,
+          ${r.margId}::bigint,
+          ${r.companyId}::integer,
+          ${r.voucher},
+          ${r.date}::date,
+          ${r.code},
+          ${r.amount},
+          ${r.book},
+          ${r.code1},
+          ${r.gCode},
+          ${r.remark},
+          ${r.addField},
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_account_postings (
+          tenant_id, marg_id, company_id, voucher, date,
+          code, amount, book, code1, g_code,
+          remark, add_field, raw_data, created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id, marg_id) DO UPDATE SET
+          voucher    = EXCLUDED.voucher,
+          date       = EXCLUDED.date,
+          code       = EXCLUDED.code,
+          amount     = EXCLUDED.amount,
+          book       = EXCLUDED.book,
+          code1      = EXCLUDED.code1,
+          g_code     = EXCLUDED.g_code,
+          remark     = EXCLUDED.remark,
+          add_field  = EXCLUDED.add_field,
+          raw_data   = EXCLUDED.raw_data,
+          updated_at = NOW()
+      `);
+
+      written += chunk.length;
+      await this.updateBatchProgress(progressSyncLogId, 'account_postings', Math.floor(i / batchSize) + 1, chunk.length);
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    if (prepared.length >= 1000 || elapsedMs > 5000) {
+      this.logger.log(
+        `Marg syncAccountPostings bulk-upserted ${written} rows in ${elapsedMs}ms ` +
+        `(${Math.ceil(prepared.length / batchSize)} batches of up to ${batchSize})`,
+      );
+    }
+
+    return written;
   }
 
   private async syncAccountGroupBalances(tenantId: string, balances: any[]): Promise<number> {
-    let count = 0;
+    interface PreparedAccountGroupBalance {
+      tenantId: string;
+      margId: bigint;
+      companyId: number;
+      aid: string;
+      opening: number | null;
+      balance: number | null;
+      rawData: unknown;
+    }
+
+    const prepared: PreparedAccountGroupBalance[] = [];
+    const seen = new Map<string, number>();
+
     for (const balance of balances) {
       const companyId = this.toInt32(balance.CompanyID, 0);
       if (companyId <= 0) continue;
@@ -3722,34 +5060,78 @@ export class MargEdeService {
       const aid = this.normalizeMargCode(balance.AID);
       if (!aid) continue;
 
-      await this.margPrisma.margAccountGroupBalance.upsert({
-        where: {
-          tenantId_companyId_aid: { tenantId, companyId, aid },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          aid,
-          opening: balance.Opening != null ? Number(balance.Opening) : null,
-          balance: balance.Balance != null ? Number(balance.Balance) : null,
-          rawData: balance,
-        },
-        update: {
-          margId,
-          opening: balance.Opening != null ? Number(balance.Opening) : null,
-          balance: balance.Balance != null ? Number(balance.Balance) : null,
-          rawData: balance,
-        },
-      });
-      count++;
+      const dedupKey = `${companyId}:${aid}`;
+      const row: PreparedAccountGroupBalance = {
+        tenantId,
+        margId,
+        companyId,
+        aid,
+        opening: balance.Opening != null ? Number(balance.Opening) : null,
+        balance: balance.Balance != null ? Number(balance.Balance) : null,
+        rawData: balance,
+      };
+      const existingIdx = seen.get(dedupKey);
+      if (existingIdx !== undefined) {
+        prepared[existingIdx] = row;
+      } else {
+        seen.set(dedupKey, prepared.length);
+        prepared.push(row);
+      }
     }
 
-    return count;
+    if (prepared.length === 0) return 0;
+
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 7, 'syncAccountGroupBalances');
+    let written = 0;
+
+    for (let i = 0; i < prepared.length; i += batchSize) {
+      const chunk = prepared.slice(i, i + batchSize);
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${r.tenantId}::uuid,
+          ${r.margId}::bigint,
+          ${r.companyId}::integer,
+          ${r.aid},
+          ${r.opening},
+          ${r.balance},
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_account_group_balances (
+          tenant_id, marg_id, company_id, aid, opening, balance,
+          raw_data, created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id, aid) DO UPDATE SET
+          marg_id    = EXCLUDED.marg_id,
+          opening    = EXCLUDED.opening,
+          balance    = EXCLUDED.balance,
+          raw_data   = EXCLUDED.raw_data,
+          updated_at = NOW()
+      `);
+      written += chunk.length;
+    }
+    return written;
   }
 
   private async syncPartyBalances(tenantId: string, balances: any[]): Promise<number> {
-    let count = 0;
+    interface PreparedPartyBalance {
+      tenantId: string;
+      margId: bigint;
+      companyId: number;
+      cid: string;
+      opening: number | null;
+      balance: number | null;
+      rawData: unknown;
+    }
+
+    const prepared: PreparedPartyBalance[] = [];
+    const seen = new Map<string, number>();
+
     for (const balance of balances) {
       const companyId = this.toInt32(balance.CompanyID, 0);
       if (companyId <= 0) continue;
@@ -3760,38 +5142,91 @@ export class MargEdeService {
       const cid = this.normalizeMargCode(balance.CID);
       if (!cid) continue;
 
-      await this.margPrisma.margPartyBalance.upsert({
-        where: {
-          tenantId_companyId_cid: { tenantId, companyId, cid },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          cid,
-          opening: balance.Opening != null ? Number(balance.Opening) : null,
-          balance: balance.Balance != null ? Number(balance.Balance) : null,
-          rawData: balance,
-        },
-        update: {
-          margId,
-          opening: balance.Opening != null ? Number(balance.Opening) : null,
-          balance: balance.Balance != null ? Number(balance.Balance) : null,
-          rawData: balance,
-        },
-      });
-      count++;
+      const dedupKey = `${companyId}:${cid}`;
+      const row: PreparedPartyBalance = {
+        tenantId,
+        margId,
+        companyId,
+        cid,
+        opening: balance.Opening != null ? Number(balance.Opening) : null,
+        balance: balance.Balance != null ? Number(balance.Balance) : null,
+        rawData: balance,
+      };
+      const existingIdx = seen.get(dedupKey);
+      if (existingIdx !== undefined) {
+        prepared[existingIdx] = row;
+      } else {
+        seen.set(dedupKey, prepared.length);
+        prepared.push(row);
+      }
     }
 
-    return count;
+    if (prepared.length === 0) return 0;
+
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 7, 'syncPartyBalances');
+    let written = 0;
+
+    for (let i = 0; i < prepared.length; i += batchSize) {
+      const chunk = prepared.slice(i, i + batchSize);
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${r.tenantId}::uuid,
+          ${r.margId}::bigint,
+          ${r.companyId}::integer,
+          ${r.cid},
+          ${r.opening},
+          ${r.balance},
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_party_balances (
+          tenant_id, marg_id, company_id, cid, opening, balance,
+          raw_data, created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id, cid) DO UPDATE SET
+          marg_id    = EXCLUDED.marg_id,
+          opening    = EXCLUDED.opening,
+          balance    = EXCLUDED.balance,
+          raw_data   = EXCLUDED.raw_data,
+          updated_at = NOW()
+      `);
+      written += chunk.length;
+    }
+    return written;
   }
 
   private async syncOutstandings(
     tenantId: string,
     outstandings: any[],
     dateWindow: DateWindow | null,
+    progressSyncLogId?: string | null,
   ): Promise<number> {
-    let count = 0;
+    interface PreparedOutstanding {
+      tenantId: string;
+      margId: bigint;
+      companyId: number;
+      ord: string;
+      date: Date;
+      vcn: string | null;
+      days: number;
+      finalAmt: number | null;
+      balance: number | null;
+      pdLess: number | null;
+      groupCode: string | null;
+      voucher: string | null;
+      sVoucher: string | null;
+      addField: string | null;
+      rawData: unknown;
+    }
+
+    const prepared: PreparedOutstanding[] = [];
+    const seen = new Map<string, number>();
+
     for (const outstanding of outstandings) {
       const companyId = this.toInt32(outstanding.CompanyID, 0);
       if (companyId <= 0) continue;
@@ -3806,50 +5241,119 @@ export class MargEdeService {
       if (!parsedDate) continue;
       if (!this.isWithinDateWindow(parsedDate, dateWindow)) continue;
 
-      await this.margPrisma.margOutstanding.upsert({
-        where: {
-          tenantId_companyId_margId: { tenantId, companyId, margId },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          ord,
-          date: parsedDate,
-          vcn: String(outstanding.VCN || outstanding.Vcn || '').trim() || null,
-          days: this.toInt32(outstanding.Days, 0),
-          finalAmt: outstanding.Final != null ? Number(outstanding.Final) : null,
-          balance: outstanding.Balance != null ? Number(outstanding.Balance) : null,
-          pdLess: outstanding.PdLess != null ? Number(outstanding.PdLess) : null,
-          groupCode: this.normalizeMargCode(outstanding.Group) || null,
-          voucher: String(outstanding.Voucher || '').trim() || null,
-          sVoucher: String(outstanding.SVoucher || '').trim() || null,
-          addField: String(outstanding.AddField || '').trim() || null,
-          rawData: outstanding,
-        },
-        update: {
-          ord,
-          date: parsedDate,
-          vcn: String(outstanding.VCN || outstanding.Vcn || '').trim() || null,
-          days: this.toInt32(outstanding.Days, 0),
-          finalAmt: outstanding.Final != null ? Number(outstanding.Final) : null,
-          balance: outstanding.Balance != null ? Number(outstanding.Balance) : null,
-          pdLess: outstanding.PdLess != null ? Number(outstanding.PdLess) : null,
-          groupCode: this.normalizeMargCode(outstanding.Group) || null,
-          voucher: String(outstanding.Voucher || '').trim() || null,
-          sVoucher: String(outstanding.SVoucher || '').trim() || null,
-          addField: String(outstanding.AddField || '').trim() || null,
-          rawData: outstanding,
-        },
-      });
-      count++;
+      const dedupKey = `${companyId}:${margId.toString()}`;
+      const row: PreparedOutstanding = {
+        tenantId,
+        margId,
+        companyId,
+        ord,
+        date: parsedDate,
+        vcn: String(outstanding.VCN || outstanding.Vcn || '').trim() || null,
+        days: this.toInt32(outstanding.Days, 0),
+        finalAmt: outstanding.Final != null ? Number(outstanding.Final) : null,
+        balance: outstanding.Balance != null ? Number(outstanding.Balance) : null,
+        pdLess: outstanding.PdLess != null ? Number(outstanding.PdLess) : null,
+        groupCode: this.normalizeMargCode(outstanding.Group) || null,
+        voucher: String(outstanding.Voucher || '').trim() || null,
+        sVoucher: String(outstanding.SVoucher || '').trim() || null,
+        addField: String(outstanding.AddField || '').trim() || null,
+        rawData: outstanding,
+      };
+      const existingIdx = seen.get(dedupKey);
+      if (existingIdx !== undefined) {
+        prepared[existingIdx] = row;
+      } else {
+        seen.set(dedupKey, prepared.length);
+        prepared.push(row);
+      }
     }
 
-    return count;
+    if (prepared.length === 0) return 0;
+
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 15, 'syncOutstandings');
+    let written = 0;
+    const startedAt = Date.now();
+
+    for (let i = 0; i < prepared.length; i += batchSize) {
+      const chunk = prepared.slice(i, i + batchSize);
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${r.tenantId}::uuid,
+          ${r.margId}::bigint,
+          ${r.companyId}::integer,
+          ${r.ord},
+          ${r.date}::date,
+          ${r.vcn},
+          ${r.days}::integer,
+          ${r.finalAmt},
+          ${r.balance},
+          ${r.pdLess},
+          ${r.groupCode},
+          ${r.voucher},
+          ${r.sVoucher},
+          ${r.addField},
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_outstandings (
+          tenant_id, marg_id, company_id, ord, date, vcn, days,
+          final_amt, balance, pd_less, group_code,
+          voucher, s_voucher, add_field, raw_data, created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id, marg_id) DO UPDATE SET
+          ord        = EXCLUDED.ord,
+          date       = EXCLUDED.date,
+          vcn        = EXCLUDED.vcn,
+          days       = EXCLUDED.days,
+          final_amt  = EXCLUDED.final_amt,
+          balance    = EXCLUDED.balance,
+          pd_less    = EXCLUDED.pd_less,
+          group_code = EXCLUDED.group_code,
+          voucher    = EXCLUDED.voucher,
+          s_voucher  = EXCLUDED.s_voucher,
+          add_field  = EXCLUDED.add_field,
+          raw_data   = EXCLUDED.raw_data,
+          updated_at = NOW()
+      `);
+
+      written += chunk.length;
+      await this.updateBatchProgress(progressSyncLogId, 'outstandings', Math.floor(i / batchSize) + 1, chunk.length);
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    if (prepared.length >= 1000 || elapsedMs > 5000) {
+      this.logger.log(
+        `Marg syncOutstandings bulk-upserted ${written} rows in ${elapsedMs}ms ` +
+        `(${Math.ceil(prepared.length / batchSize)} batches of up to ${batchSize})`,
+      );
+    }
+
+    return written;
   }
 
   private async syncSaleTypes(tenantId: string, saleTypes: any[]): Promise<number> {
-    let count = 0;
+    interface PreparedSaleType {
+      tenantId: string;
+      margId: number;
+      companyId: number;
+      sgCode: string;
+      sCode: string;
+      name: string;
+      main: string | null;
+      margCode: string | null;
+      addField: string | null;
+      rawData: unknown;
+    }
+
+    const prepared: PreparedSaleType[] = [];
+    const seen = new Map<string, number>();
+
     for (const st of saleTypes) {
       const companyId = this.toInt32(st.CompanyID, 0);
       if (companyId <= 0) continue;
@@ -3859,34 +5363,70 @@ export class MargEdeService {
       const sCode = String(st.SCode || '').trim();
       if (!sgCode || !sCode) continue;
 
-      await this.margPrisma.margSaleType.upsert({
-        where: {
-          tenantId_companyId_sgCode_sCode: { tenantId, companyId, sgCode, sCode },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          sgCode,
-          sCode,
-          name: String(st.Name || '').trim(),
-          main: String(st.Main || '').trim() || null,
-          margCode: String(st.MargCode || '').trim() || null,
-          addField: String(st.AddField || '').trim() || null,
-          rawData: st,
-        },
-        update: {
-          margId,
-          name: String(st.Name || '').trim(),
-          main: String(st.Main || '').trim() || null,
-          margCode: String(st.MargCode || '').trim() || null,
-          addField: String(st.AddField || '').trim() || null,
-          rawData: st,
-        },
-      });
-      count++;
+      const dedupKey = `${companyId}:${sgCode}:${sCode}`;
+      const row: PreparedSaleType = {
+        tenantId,
+        margId,
+        companyId,
+        sgCode,
+        sCode,
+        name: String(st.Name || '').trim(),
+        main: String(st.Main || '').trim() || null,
+        margCode: String(st.MargCode || '').trim() || null,
+        addField: String(st.AddField || '').trim() || null,
+        rawData: st,
+      };
+      const existingIdx = seen.get(dedupKey);
+      if (existingIdx !== undefined) {
+        prepared[existingIdx] = row;
+      } else {
+        seen.set(dedupKey, prepared.length);
+        prepared.push(row);
+      }
     }
-    return count;
+
+    if (prepared.length === 0) return 0;
+
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 10, 'syncSaleTypes');
+    let written = 0;
+
+    for (let i = 0; i < prepared.length; i += batchSize) {
+      const chunk = prepared.slice(i, i + batchSize);
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${r.tenantId}::uuid,
+          ${r.margId}::integer,
+          ${r.companyId}::integer,
+          ${r.sgCode},
+          ${r.sCode},
+          ${r.name},
+          ${r.main},
+          ${r.margCode},
+          ${r.addField},
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_sale_types (
+          tenant_id, marg_id, company_id, sg_code, s_code, name, main,
+          marg_code, add_field, raw_data, created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id, sg_code, s_code) DO UPDATE SET
+          marg_id    = EXCLUDED.marg_id,
+          name       = EXCLUDED.name,
+          main       = EXCLUDED.main,
+          marg_code  = EXCLUDED.marg_code,
+          add_field  = EXCLUDED.add_field,
+          raw_data   = EXCLUDED.raw_data,
+          updated_at = NOW()
+      `);
+      written += chunk.length;
+    }
+    return written;
   }
 
   // ===================== TRANSFORM → CORE TABLES =====================
@@ -8402,6 +9942,464 @@ export class MargEdeService {
         },
     });
   }
+
+  // ===================== RESUMABLE PIPELINE: STAGE / RAW PAGE / ERROR HELPERS =====================
+
+  /**
+   * Update the stage-machine columns on the sync log. Updates last_heartbeat_at
+   * on every call so the scheduler's stale-running detector sees fresh
+   * activity even when no row counts move (e.g. inside a long projection).
+   *
+   * Best-effort: a missing margSyncLog table or a write failure must not
+   * abort the sync — observability is not load-bearing.
+   */
+  private async updateSyncStage(
+    syncLogId: string,
+    stage: MargSyncStage,
+    extras: {
+      apiType?: string;
+      requestIndex?: number | null;
+      responseIndex?: number | null;
+      entityType?: string | null;
+      batchNumber?: number | null;
+      rowsProcessed?: number;
+      totalRowsDiscovered?: number | null;
+    } = {},
+  ): Promise<void> {
+    if (typeof this.margPrisma.margSyncLog?.update !== 'function') return;
+    try {
+      const data: Record<string, unknown> = {
+        currentStage: stage,
+        lastHeartbeatAt: new Date(),
+      };
+      if (extras.apiType !== undefined) data.currentApiType = extras.apiType;
+      if (extras.requestIndex !== undefined) data.currentRequestIndex = extras.requestIndex;
+      if (extras.responseIndex !== undefined) data.currentResponseIndex = extras.responseIndex;
+      if (extras.entityType !== undefined) data.currentEntityType = extras.entityType;
+      if (extras.batchNumber !== undefined) data.currentBatchNumber = extras.batchNumber;
+      if (extras.rowsProcessed !== undefined) data.rowsProcessed = BigInt(extras.rowsProcessed);
+      if (extras.totalRowsDiscovered !== undefined) {
+        data.totalRowsDiscovered = extras.totalRowsDiscovered === null ? null : BigInt(extras.totalRowsDiscovered);
+      }
+      await this.margPrisma.margSyncLog.update({ where: { id: syncLogId }, data });
+    } catch (err) {
+      this.logger.warn(`updateSyncStage failed for syncLog=${syncLogId} stage=${stage}: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Clamp the requested staging batch size to a value that stays under
+   * PostgreSQL's prepared-statement bind-variable limit.
+   *
+   * Postgres packs the parameter count into a 16-bit integer in the wire
+   * protocol, so each `$executeRaw` INSERT can carry at most 32_767 bind
+   * variables across all its VALUES tuples. Each row uses one bind per
+   * placeholder; a 16-column row at batch=5000 sends 80_000 binds and the
+   * server rejects the statement with:
+   *   "too many bind variables in prepared statement, expected maximum of
+   *   32767, received N"
+   *
+   * Headroom: leave ~770 binds free so a future-added column does not
+   * silently push us over. Floor at 1 — a misconfigured env (e.g.
+   * MARG_STAGING_BATCH_SIZE=0) must not divide by zero or skip rows.
+   *
+   * If the env-requested batch was clamped down, emit one warn-level log
+   * so the operator knows their setting is not being honored. We log once
+   * per call rather than throwing because the bulk write still functions
+   * correctly with a smaller batch — it's a configuration nudge, not a
+   * crash condition.
+   */
+  private computeSafeBatchSize(requested: number, columnsPerRow: number, methodName: string): number {
+    const POSTGRES_BIND_LIMIT = 32_767;
+    const SAFETY = 767;
+    const cols = Math.max(1, columnsPerRow);
+    const maxByBinds = Math.floor((POSTGRES_BIND_LIMIT - SAFETY) / cols);
+    const effective = Math.max(1, Math.min(Math.max(1, requested), maxByBinds));
+    if (effective < requested) {
+      this.logger.warn(
+        `${methodName}: requested batch=${requested} would emit ${requested * cols} bind variables ` +
+        `(>${POSTGRES_BIND_LIMIT} Postgres cap). Clamped to ${effective} (${cols} cols/row). ` +
+        `Lower MARG_STAGING_BATCH_SIZE to silence this warning.`,
+      );
+    }
+    return effective;
+  }
+
+  /**
+   * Per-batch progress heartbeat for the bulk staging methods. Sets the
+   * current entity and batch number and increments rows_processed by the
+   * batch size. Does NOT change current_stage — that is owned by the
+   * page-level orchestrator in runSync / resumeSync.
+   *
+   * Best-effort: a failed write must not abort the staging batch. If we
+   * cannot update the heartbeat, the worst case is the scheduler's stale
+   * recovery wakes up earlier than necessary, which is recoverable.
+   */
+  private async updateBatchProgress(
+    syncLogId: string | null | undefined,
+    entityType: string,
+    batchNumber: number,
+    rowsProcessedDelta: number,
+  ): Promise<void> {
+    if (!syncLogId) return;
+    if (typeof this.margPrisma.margSyncLog?.update !== 'function') return;
+    if (!Number.isFinite(rowsProcessedDelta) || rowsProcessedDelta < 0) return;
+    try {
+      await this.margPrisma.margSyncLog.update({
+        where: { id: syncLogId },
+        data: {
+          currentEntityType: entityType,
+          currentBatchNumber: batchNumber,
+          rowsProcessed: { increment: BigInt(Math.floor(rowsProcessedDelta)) },
+          lastHeartbeatAt: new Date(),
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `updateBatchProgress failed for syncLog=${syncLogId} entity=${entityType} batch=${batchNumber}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Operator-triggered retention sweep on the raw-page storage backend.
+   * Thin pass-through so the controller does not have to inject the storage
+   * service directly. No-op (returns zeros) when storage is not wired —
+   * preserves the test-fixture pattern.
+   */
+  async cleanupRawPageStorage(maxAgeMs: number): Promise<{ syncDirsRemoved: number; bytesFreed: number; errors: string[] }> {
+    if (!this.rawPageStorage) {
+      return { syncDirsRemoved: 0, bytesFreed: 0, errors: [] };
+    }
+    return this.rawPageStorage.cleanupOldSyncDirectories(maxAgeMs);
+  }
+
+  /**
+   * Operator-callable stale-sync recovery. Marks a RUNNING sync log as
+   * FAILED_RETRYABLE if its lastHeartbeatAt is older than staleSyncAfterMs.
+   *
+   * Releases the config lock so a fresh sync (or a resume) can be started.
+   * Does NOT auto-trigger resume — the operator decides whether to retry,
+   * start fresh, or investigate.
+   *
+   * Returns the recovery outcome so the calling endpoint can report what
+   * actually happened (recovered / not-stale / not-running).
+   */
+  async recoverStaleSyncLog(
+    configId: string,
+    tenantId: string,
+    syncLogId: string,
+  ): Promise<{
+    syncLogId: string;
+    outcome: 'recovered' | 'not_stale' | 'not_running' | 'not_found';
+    previousStatus: string | null;
+    heartbeatAgeMs: number | null;
+  }> {
+    const log = await this.margPrisma.margSyncLog.findFirst({
+      where: { id: syncLogId, tenantId, configId },
+    });
+    if (!log) {
+      return { syncLogId, outcome: 'not_found', previousStatus: null, heartbeatAgeMs: null };
+    }
+    if (log.status !== MARG_SYNC_STATUS.RUNNING) {
+      return {
+        syncLogId,
+        outcome: 'not_running',
+        previousStatus: log.status,
+        heartbeatAgeMs: null,
+      };
+    }
+    const heartbeatAt = log.lastHeartbeatAt ? new Date(log.lastHeartbeatAt) : null;
+    const heartbeatAgeMs = heartbeatAt ? Date.now() - heartbeatAt.getTime() : null;
+    // No heartbeat at all → also treat as stale, since the run cannot have
+    // been making progress for the full duration since startedAt.
+    const startedAt = log.startedAt ? new Date(log.startedAt).getTime() : Date.now();
+    const ageReference = heartbeatAgeMs !== null ? heartbeatAgeMs : Date.now() - startedAt;
+    if (ageReference < this.staleSyncAfterMs) {
+      return {
+        syncLogId,
+        outcome: 'not_stale',
+        previousStatus: log.status,
+        heartbeatAgeMs,
+      };
+    }
+
+    await this.margPrisma.margSyncLog.update({
+      where: { id: syncLogId },
+      data: {
+        status: MARG_SYNC_STATUS.FAILED,
+        currentStage: MARG_SYNC_STAGE.FAILED_RETRYABLE,
+        failureType: MARG_FAILURE_TYPE.RETRYABLE,
+        completedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        errors: [
+          ...((Array.isArray(log.errors) ? log.errors : []) as unknown[]),
+          {
+            step: 'stale_recovery',
+            message: `Heartbeat age ${ageReference}ms exceeded stale threshold ${this.staleSyncAfterMs}ms`,
+            recoveredAt: new Date().toISOString(),
+          },
+        ] as any,
+      },
+    });
+
+    // Release the config lock so a follow-up resume/sync can be triggered.
+    await this.margPrisma.margSyncConfig.updateMany({
+      where: { id: configId, tenantId },
+      data: {
+        lastSyncStatus: MARG_SYNC_STATUS.FAILED,
+        lastAccountingSyncStatus: MARG_SYNC_STATUS.FAILED,
+      },
+    });
+
+    return {
+      syncLogId,
+      outcome: 'recovered',
+      previousStatus: MARG_SYNC_STATUS.RUNNING,
+      heartbeatAgeMs,
+    };
+  }
+
+  /**
+   * Persist a Marg API page's payload to the raw-page storage backend and
+   * record the metadata row in marg_raw_sync_pages with status=PENDING_STAGE.
+   *
+   * If the optional MargRawPageStorage dependency is not wired (tests / older
+   * deployments), persistence is skipped silently and the function returns
+   * null. Callers must treat null as "no resume safety net for this page" —
+   * the sync continues, but a staging failure forces a full refetch on the
+   * next run.
+   *
+   * If storage write fails (disk full, permissions), we log a warning, push
+   * a non-fatal error onto the sync's errors array (caller responsibility:
+   * pass a mutable errors[] reference), and return null. Refusing to stage
+   * just because we cannot persist a recovery snapshot would be worse than
+   * staging without one.
+   */
+  private async persistMargRawPage(args: {
+    syncLogId: string;
+    tenantId: string;
+    configId: string;
+    apiType: '1' | '2';
+    companyId: number;
+    requestIndex: number;
+    payload: MargParsedPayload;
+    encryptedSize?: number;
+    errors?: Array<Record<string, unknown>>;
+  }): Promise<string | null> {
+    if (!this.rawPageStorage) return null;
+    if (typeof this.margPrisma.margRawSyncPage?.upsert !== 'function') return null;
+
+    const rowCounts: Record<string, number> = {
+      Details: args.payload.Details.length,
+      Masters: args.payload.Masters.length,
+      MDis: args.payload.MDis.length,
+      Party: args.payload.Party.length,
+      Product: args.payload.Product.length,
+      SaleType: args.payload.SaleType.length,
+      Stock: args.payload.Stock.length,
+      ACGroup: args.payload.ACGroup.length,
+      Account: args.payload.Account.length,
+      AcBal: args.payload.AcBal.length,
+      PBal: args.payload.PBal.length,
+      Outstanding: args.payload.Outstanding.length,
+    };
+
+    let descriptor: { storagePath: string; payloadHash: string; decryptedSize: number };
+    try {
+      descriptor = await this.rawPageStorage.save({
+        tenantId: args.tenantId,
+        configId: args.configId,
+        syncLogId: args.syncLogId,
+        apiType: args.apiType,
+        companyId: args.companyId,
+        requestIndex: args.requestIndex,
+        parsedPayload: args.payload,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Marg raw-page storage write failed for syncLog=${args.syncLogId} apiType=${args.apiType} index=${args.requestIndex}: ${(err as Error).message}. ` +
+        `Continuing sync without resume snapshot for this page.`,
+      );
+      args.errors?.push({
+        step: 'raw_page_persist',
+        apiType: args.apiType,
+        requestIndex: args.requestIndex,
+        error: (err as Error).message,
+      });
+      return null;
+    }
+
+    try {
+      const row = await this.margPrisma.margRawSyncPage.upsert({
+        where: {
+          syncLogId_apiType_requestIndex: {
+            syncLogId: args.syncLogId,
+            apiType: args.apiType,
+            requestIndex: args.requestIndex,
+          },
+        },
+        create: {
+          tenantId: args.tenantId,
+          configId: args.configId,
+          syncLogId: args.syncLogId,
+          apiType: args.apiType,
+          companyId: args.companyId,
+          requestIndex: args.requestIndex,
+          responseIndex: args.payload.Index,
+          requestDateTime: null,
+          responseDateTime: args.payload.DateTime || null,
+          dataStatus: args.payload.DataStatus,
+          encryptedSize: args.encryptedSize ?? null,
+          decryptedSize: descriptor.decryptedSize,
+          rowCounts,
+          storagePath: descriptor.storagePath,
+          payloadHash: descriptor.payloadHash,
+          status: MARG_RAW_PAGE_STATUS.PENDING_STAGE,
+          error: null as any,
+        },
+        update: {
+          responseIndex: args.payload.Index,
+          responseDateTime: args.payload.DateTime || null,
+          dataStatus: args.payload.DataStatus,
+          encryptedSize: args.encryptedSize ?? null,
+          decryptedSize: descriptor.decryptedSize,
+          rowCounts,
+          storagePath: descriptor.storagePath,
+          payloadHash: descriptor.payloadHash,
+          status: MARG_RAW_PAGE_STATUS.PENDING_STAGE,
+          error: null as any,
+          stagedAt: null,
+        },
+        select: { id: true },
+      });
+
+      await this.updateSyncStage(args.syncLogId, MARG_SYNC_STAGE.RAW_PAGE_SAVED, {
+        apiType: args.apiType,
+        requestIndex: args.requestIndex,
+        responseIndex: args.payload.Index,
+      });
+
+      return row.id as string;
+    } catch (err) {
+      // Storage succeeded but DB row write failed. Best-effort delete to avoid
+      // orphaned files, then log and continue.
+      this.logger.warn(
+        `Marg raw-page row insert failed for syncLog=${args.syncLogId} apiType=${args.apiType} index=${args.requestIndex}: ${(err as Error).message}. ` +
+        `Cleaning up orphaned storage file.`,
+      );
+      await this.rawPageStorage.delete({ storagePath: descriptor.storagePath }).catch(() => {/* best-effort */});
+      args.errors?.push({
+        step: 'raw_page_row',
+        apiType: args.apiType,
+        requestIndex: args.requestIndex,
+        error: (err as Error).message,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Mark a previously-persisted raw page as STAGED. Called only after every
+   * staging method for that page has returned successfully. Failure to update
+   * is non-fatal (the row remains PENDING_STAGE; the resume scan would
+   * re-stage it next time, which is idempotent given upsert-only staging).
+   */
+  private async markRawPageStaged(rawPageRowId: string | null): Promise<void> {
+    if (!rawPageRowId) return;
+    if (typeof this.margPrisma.margRawSyncPage?.update !== 'function') return;
+    try {
+      await this.margPrisma.margRawSyncPage.update({
+        where: { id: rawPageRowId },
+        data: {
+          status: MARG_RAW_PAGE_STATUS.STAGED,
+          stagedAt: new Date(),
+          error: null as any,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`markRawPageStaged failed for ${rawPageRowId}: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Mark a raw page as STAGING_FAILED with the classified error attached.
+   * The classification feeds the resume endpoint's decision about whether
+   * to offer retry — STAGING_FAILED rows whose error is FATAL are surfaced
+   * to operators; RETRYABLE ones are picked up automatically on resume.
+   */
+  private async markRawPageStagingFailed(rawPageRowId: string | null, err: unknown): Promise<void> {
+    if (!rawPageRowId) return;
+    if (typeof this.margPrisma.margRawSyncPage?.update !== 'function') return;
+    try {
+      const classification = classifyMargSyncError(err);
+      await this.margPrisma.margRawSyncPage.update({
+        where: { id: rawPageRowId },
+        data: {
+          status: MARG_RAW_PAGE_STATUS.STAGING_FAILED,
+          // Trim stack to a sane size so a single page error does not bloat
+          // the row to MB. 4 KB of stack is enough to find the broken frame.
+          error: {
+            type: classification.type,
+            errorCode: classification.errorCode,
+            message: classification.message,
+            stack: classification.stack ? classification.stack.slice(0, 4000) : undefined,
+            failedAt: new Date().toISOString(),
+          } as any,
+        },
+      });
+    } catch (innerErr) {
+      this.logger.warn(`markRawPageStagingFailed failed for ${rawPageRowId}: ${(innerErr as Error).message}`);
+    }
+  }
+
+  /**
+   * Finalize a sync log on failure with the proper failure classification
+   * and structured error payload. Called from runSync's outer catch.
+   *
+   * The existing log already carries an `errors: []` JSON column; we append
+   * the classified terminal error there in addition to setting the new
+   * failureType column so old log readers still see the error and new ones
+   * can branch on retryable vs fatal.
+   */
+  private classifyAndRecordSyncFailure(
+    err: unknown,
+    syncLogId: string,
+    stage: MargSyncStage | null,
+    apiType: string | null,
+    requestIndex: number | null,
+    entityType: string | null,
+    batchNumber: number | null,
+  ): {
+    classification: ReturnType<typeof classifyMargSyncError>;
+    structuredError: Record<string, unknown>;
+  } {
+    const classification = classifyMargSyncError(err);
+    const structuredError: Record<string, unknown> = {
+      step: 'fatal',
+      classification: classification.type,
+      errorCode: classification.errorCode,
+      message: classification.message,
+      stage,
+      apiType,
+      requestIndex,
+      entityType,
+      batchNumber,
+      occurredAt: new Date().toISOString(),
+    };
+    if (classification.stack) {
+      structuredError.stack = classification.stack.slice(0, 4000);
+    }
+    // Heartbeat one final time with the failed stage so observers see where
+    // we stopped without having to wait for the next scheduled poll.
+    void this.updateSyncStage(syncLogId, classification.type === 'FATAL'
+      ? MARG_SYNC_STAGE.FAILED_FATAL
+      : MARG_SYNC_STAGE.FAILED_RETRYABLE,
+      { apiType: apiType ?? undefined, requestIndex, entityType, batchNumber },
+    ).catch(() => {/* best-effort */});
+    return { classification, structuredError };
+  }
+
 
   private async markMissingStockAsDeleted(tenantId: string, syncLogId: string): Promise<void> {
     await this.margPrisma.margStock.updateMany({

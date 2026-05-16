@@ -85,10 +85,19 @@ describe('MargEdeService helpers', () => {
   });
 
   it('stages Marg product master classification fields from case variants', async () => {
+    // syncProducts now uses bulk INSERT ... ON CONFLICT DO UPDATE via
+    // $executeRaw for million-record clients. The test verifies the
+    // normalized values are passed into the prepared SQL parameters
+    // rather than asserting on a per-row Prisma upsert.
+    const executeRawCalls: Array<{ sql: string; params: unknown[] }> = [];
     const prisma = {
-      margProduct: {
-        upsert: jest.fn().mockResolvedValue(undefined),
-      },
+      $executeRaw: jest.fn().mockImplementation((sqlObj: any) => {
+        executeRawCalls.push({
+          sql: Array.isArray(sqlObj?.strings) ? sqlObj.strings.join(' ') : String(sqlObj),
+          params: Array.isArray(sqlObj?.values) ? sqlObj.values : [],
+        });
+        return Promise.resolve(1);
+      }),
     } as any;
     service = new MargEdeService(prisma, {} as any, {} as any);
 
@@ -106,22 +115,18 @@ describe('MargEdeService helpers', () => {
       GST: 5,
     }]);
 
-    expect(prisma.margProduct.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        pid: '1002180',
-        code: 'STR1331',
-        gCode: 'COMPANY',
-        gCode3: 'SALT',
-        gCode5: 'GROUP',
-        gCode6: '3004',
-      }),
-      update: expect.objectContaining({
-        gCode: 'COMPANY',
-        gCode3: 'SALT',
-        gCode5: 'GROUP',
-        gCode6: '3004',
-      }),
-    }));
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    const allParams = executeRawCalls.flatMap((c) => c.params);
+    expect(allParams).toEqual(expect.arrayContaining([
+      '1002180', // pid
+      'STR1331', // code
+      'THYRORISE', // name
+      'PCS', // unit
+      'COMPANY', // gCode
+      'SALT',    // gCode3
+      'GROUP',   // gCode5
+      '3004',    // gCode6
+    ]));
   });
 
   it('refreshes linked core products with Marg master fields on every product transform', async () => {

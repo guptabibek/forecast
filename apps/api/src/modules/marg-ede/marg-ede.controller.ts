@@ -294,9 +294,147 @@ export class MargEdeController {
 
   @Get('configs/:id/logs')
   @Roles('ADMIN', 'PLANNER')
-  @ApiOperation({ summary: 'Get sync history for a Marg config' })
+  @ApiOperation({
+    summary: 'Get sync history for a Marg config (50 most recent runs)',
+    description:
+      'Returns sync logs in MargSyncLogStatusDto shape: legacy fields preserved verbatim, plus current_stage, current_api_type, current_request_index, current_response_index, current_entity_type, current_batch_number, rows_processed (string-encoded), total_rows_discovered, last_heartbeat_at, retry_count, failure_type, resumed_from_sync_log_id, from_date, end_date, sync_mode, sync_scope, heartbeat_age_ms, and is_stale.',
+  })
   async getSyncLogs(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: any) {
     return this.margEdeService.getSyncLogs(id, user);
+  }
+
+  @Get('configs/:id/syncs/:syncLogId/status')
+  @Roles('ADMIN', 'PLANNER')
+  @ApiOperation({
+    summary: 'Get the full progress snapshot for a single Marg sync log',
+    description:
+      'Returns the MargSyncLogStatusDto for one sync log so the UI can show meaningful per-stage / per-batch progress during a long sync. Refuses to surface a log that does not belong to the requested (tenant, config).',
+  })
+  async getSyncLogStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('syncLogId', ParseUUIDPipe) syncLogId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.margEdeService.getSyncLogStatus(id, syncLogId, user);
+  }
+
+  @Post('configs/:id/syncs/:syncLogId/recover-stale')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Mark a stale RUNNING Marg sync log as FAILED_RETRYABLE so resume / fresh sync can proceed',
+    description:
+      'Use when a sync log has been RUNNING for longer than MARG_SYNC_STALE_AFTER_MS (default 30 min) with no recent heartbeat — typically because the worker crashed before its outer catch handler could mark the log FAILED. This endpoint NEVER auto-resumes; it only releases the config lock and classifies the log so an operator can decide whether to /resume, start fresh, or investigate. A healthy heartbeat returns outcome=not_stale and leaves the log untouched.',
+  })
+  async recoverStaleSyncLog(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('syncLogId', ParseUUIDPipe) syncLogId: string,
+    @CurrentUser() user: any,
+  ) {
+    const result = await this.margEdeService.recoverStaleSyncLog(id, user.tenantId, syncLogId);
+    await this.auditService.log(
+      user.tenantId,
+      user.id,
+      AuditAction.UPDATE,
+      'MargSyncLog',
+      syncLogId,
+      null,
+      null,
+      [],
+      { action: 'marg_sync_stale_recovery', configId: id, ...result },
+    ).catch(() => {/* best-effort */});
+    return result;
+  }
+
+  @Post('raw-pages/cleanup')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Delete raw-page payload files older than the supplied age',
+    description:
+      'Operator-triggered retention sweep over MARG_RAW_PAGE_STORAGE_DIR. Walks <tenant>/<config>/<syncLog>/ directories and deletes any whose mtime is older than maxAgeDays. Does NOT touch the marg_raw_sync_pages DB rows — operators wanting to purge those should also DELETE FROM marg_raw_sync_pages WHERE storage_path IS NULL after the sweep. Default age is 30 days; minimum is 1 day to guard against accidental immediate purges.',
+  })
+  @ApiQuery({ name: 'maxAgeDays', required: false, type: Number, description: 'Minimum 1, default 30.' })
+  async cleanupRawPages(
+    @CurrentUser() user: any,
+    @Query('maxAgeDays') maxAgeDays?: string,
+  ) {
+    const days = Math.max(1, Number(maxAgeDays) || 30);
+    const result = await this.margEdeService.cleanupRawPageStorage(days * 24 * 60 * 60 * 1000);
+    await this.auditService.log(
+      user.tenantId,
+      user.id,
+      AuditAction.DELETE,
+      'MargRawSyncPage',
+      null,
+      null,
+      null,
+      [],
+      { action: 'marg_raw_page_cleanup', maxAgeDays: days, ...result },
+    ).catch(() => {/* best-effort */});
+    return { maxAgeDays: days, ...result };
+  }
+
+  @Post('configs/:id/syncs/:syncLogId/resume')
+  @Roles('ADMIN', 'PLANNER')
+  @ApiOperation({
+    summary: 'Resume a failed Marg sync from saved raw pages without refetching from Marg',
+    description:
+      'Re-stages every MargRawSyncPage row attached to the supplied syncLogId by reading the parsed payload back from the durable raw-page storage backend. Allowed only when the prior run failed with a RETRYABLE classification (or is a stale RUNNING with no recent heartbeat). After this completes, run /reproject to also re-run transforms/projections from the now-complete staged data.',
+  })
+  async resumeSync(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('syncLogId', ParseUUIDPipe) syncLogId: string,
+    @CurrentUser() user: any,
+  ) {
+    if (this.margSyncQueue) {
+      const job = await this.margSyncQueue.add(
+        'marg-resume',
+        {
+          configId: id,
+          tenantId: user.tenantId,
+          triggeredBy: user.id,
+          mode: MARG_SYNC_MODE.RESUME,
+          resumeSyncLogId: syncLogId,
+        },
+        { attempts: 1 },
+      );
+      await this.auditService.log(
+        user.tenantId,
+        user.id,
+        AuditAction.IMPORT,
+        'MargSyncLog',
+        syncLogId,
+        null,
+        null,
+        [],
+        { action: 'marg_sync_resume_queued', jobId: job.id, configId: id },
+      ).catch(() => {/* best-effort */});
+      return {
+        jobId: job.id,
+        syncLogId,
+        status: 'queued',
+        message: 'Marg EDE resume job queued for processing',
+      };
+    }
+
+    const result = await this.margEdeService.resumeSync(id, user.tenantId, syncLogId, user.id);
+    await this.auditService.log(
+      user.tenantId,
+      user.id,
+      AuditAction.IMPORT,
+      'MargSyncLog',
+      syncLogId,
+      null,
+      null,
+      [],
+      { action: 'marg_sync_resume_completed_inline', configId: id, ...result },
+    ).catch(() => {/* best-effort */});
+    return {
+      ...result,
+      status: result.pagesFailed === 0 ? 'completed' : 'partial',
+      message: result.pagesFailed === 0
+        ? `Resumed ${result.pagesResumed} page(s); ${result.pagesAlreadyStaged} already staged. Run /reproject next to apply transforms.`
+        : `Resumed ${result.pagesResumed} page(s) with ${result.pagesFailed} failures. Inspect sync log for details.`,
+    };
   }
 
   @Post('configs/:id/reset-cursor')

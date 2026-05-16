@@ -44,6 +44,7 @@ export class MargSyncProcessor extends WorkerHost {
       endDate,
       scope = MARG_SYNC_SCOPE.FULL,
       mode = MARG_SYNC_MODE.FETCH,
+      resumeSyncLogId,
     } = job.data;
 
     this.logger.log(
@@ -51,10 +52,23 @@ export class MargSyncProcessor extends WorkerHost {
       `, mode=${mode}` +
       `, scope=${scope}` +
       `${fromDate ? `, fromDate=${fromDate}` : ''}` +
-      `${endDate ? `, endDate=${endDate}` : ''}`,
+      `${endDate ? `, endDate=${endDate}` : ''}` +
+      `${resumeSyncLogId ? `, resumeSyncLogId=${resumeSyncLogId}` : ''}`,
     );
 
     try {
+      if (mode === MARG_SYNC_MODE.RESUME) {
+        if (!resumeSyncLogId) {
+          throw new Error('Marg sync resume mode requires resumeSyncLogId in job data');
+        }
+        const result = await this.margEdeService.resumeSync(configId, tenantId, resumeSyncLogId, triggeredBy);
+        this.logger.log(
+          `Marg EDE resume completed: syncLogId=${result.syncLogId}, ` +
+          `pagesResumed=${result.pagesResumed}, pagesFailed=${result.pagesFailed}`,
+        );
+        return { ...result, status: result.pagesFailed === 0 ? 'completed' : 'partial', mode };
+      }
+
       const syncLogId = mode === MARG_SYNC_MODE.REPROJECT
         ? await this.margEdeService.runReprojection(configId, tenantId, triggeredBy, fromDate, endDate, scope)
         : await this.margEdeService.runSync(configId, tenantId, triggeredBy, fromDate, endDate, scope);

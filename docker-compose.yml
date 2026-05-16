@@ -33,11 +33,34 @@ services:
       MARG_HTTP_TIMEOUT_MS: ${MARG_HTTP_TIMEOUT_MS:-30000}
       MARG_DATA_HTTP_TIMEOUT_MS: ${MARG_DATA_HTTP_TIMEOUT_MS:-120000}
       MARG_SYNC_MAX_PAGES: ${MARG_SYNC_MAX_PAGES:-500}
+      # Resumable Marg pipeline — all clamped/defaulted in code; values set
+      # here only when explicitly overridden in .env.docker. Compose's
+      # explicit environment block whitelists which vars reach the
+      # container, so every var the code reads via process.env must appear
+      # below or it will silently fall back to the hardcoded default.
+      MARG_STAGING_BATCH_SIZE: ${MARG_STAGING_BATCH_SIZE:-5000}
+      MARG_TRANSFORM_BATCH_SIZE: ${MARG_TRANSFORM_BATCH_SIZE:-2000}
+      MARG_PROJECTION_BATCH_SIZE: ${MARG_PROJECTION_BATCH_SIZE:-1000}
+      MARG_DB_TX_TIMEOUT_MS: ${MARG_DB_TX_TIMEOUT_MS:-300000}
+      MARG_ACCOUNTING_PROJECTION_TX_TIMEOUT_MS: ${MARG_ACCOUNTING_PROJECTION_TX_TIMEOUT_MS:-60000}
+      MARG_SYNC_STALE_AFTER_MS: ${MARG_SYNC_STALE_AFTER_MS:-1800000}
+      MARG_RAW_PAGE_STORAGE_DIR: ${MARG_RAW_PAGE_STORAGE_DIR:-/data/marg-raw-pages}
       THROTTLE_SHORT_LIMIT: ${THROTTLE_SHORT_LIMIT:-100}
       THROTTLE_MEDIUM_LIMIT: ${THROTTLE_MEDIUM_LIMIT:-500}
       THROTTLE_LONG_LIMIT: ${THROTTLE_LONG_LIMIT:-3000}
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
-      NODE_OPTIONS: "--max-old-space-size=1024"
+      # Heap ceiling honored from .env.docker. The previous hardcoded
+      # 1 GB ceiling was the actual cause of the JsonStringifier OOM —
+      # a 50 MB encrypted Marg page decodes to a 200–500 MB JS object
+      # which V8 cannot allocate inside 1 GB. Default to 8 GB; bump to
+      # 12288 if the largest months still OOM.
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=8192}
+    volumes:
+      # Durable raw-page storage for the resumable Marg sync pipeline.
+      # Bind-mount target must match MARG_RAW_PAGE_STORAGE_DIR. Without
+      # this volume the pages live only inside the container's writable
+      # layer and are wiped on every recreate — defeating /resume.
+      - marg_raw_pages:/data/marg-raw-pages
     ports:
       - "${API_EXTERNAL_PORT:-3001}:3000"
     extra_hosts:
@@ -68,3 +91,8 @@ services:
 
 volumes:
   redis_data:
+  # Docker-managed named volume for Marg raw-page payloads. Pages are
+  # gzip-compressed; expect ~2–15 MB per page. For a million-record
+  # backfill with 200+ pages allocate 5–10 GB headroom. The /raw-pages/cleanup
+  # admin endpoint reclaims old sync directories.
+  marg_raw_pages:

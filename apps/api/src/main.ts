@@ -8,6 +8,20 @@ import { json, urlencoded } from 'express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 
+// Install a global JSON serializer for BigInt so Express response.json() does
+// not throw "Do not know how to serialize a BigInt" when controllers return
+// Prisma rows that include BigInt columns (e.g. MargSyncLog.rowsProcessed,
+// MargTransaction.margId, MargAccountPosting.margId). Emit as a string —
+// numbers >2^53 lose precision when coerced to JS Number, and strings round-
+// trip safely through every common JSON consumer.
+if (typeof (BigInt.prototype as { toJSON?: () => string }).toJSON !== 'function') {
+  Object.defineProperty(BigInt.prototype, 'toJSON', {
+    value: function (this: bigint) { return this.toString(); },
+    writable: true,
+    configurable: true,
+  });
+}
+
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log', 'debug', 'verbose'],
