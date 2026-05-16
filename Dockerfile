@@ -39,6 +39,16 @@ COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
   && chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# Pre-create the raw-page storage directory with `node`-user ownership BEFORE
+# switching USER. When docker-compose mounts an empty named volume at this
+# path, the volume inherits this directory's ownership + permissions. Without
+# this step, the named volume comes up root-owned and the Node process (uid
+# 1000) cannot mkdir inside it → MargRawPageStorage emits EACCES on every
+# page save → resume becomes unavailable for that sync run.
+# Must stay in sync with MARG_RAW_PAGE_STORAGE_DIR in .env.docker / compose.
+RUN mkdir -p /data/marg-raw-pages \
+  && chown -R node:node /data \
+  && chmod 755 /data /data/marg-raw-pages
 
 USER node
 
