@@ -8,7 +8,10 @@
       "Bash(awk 'NR>=157 && NR<=220' \"d:/RabbitTech/forecast-saas/apps/api/prisma/migrations/20260512120000_add_ai_reporting_views/migration.sql\")",
       "Bash(awk 'NR>=221 && NR<=344' \"d:/RabbitTech/forecast-saas/apps/api/prisma/migrations/20260512120000_add_ai_reporting_views/migration.sql\")",
       "Bash(awk 'NR>=345 && NR<=396' \"d:/RabbitTech/forecast-saas/apps/api/prisma/migrations/20260512120000_add_ai_reporting_views/migration.sql\")",
-      "Bash(awk 'NR>=587 && NR<=655' \"d:/RabbitTech/forecast-saas/apps/api/prisma/migrations/20260512120000_add_ai_reporting_views/migration.sql\")"
+      "Bash(awk 'NR>=587 && NR<=655' \"d:/RabbitTech/forecast-saas/apps/api/prisma/migrations/20260512120000_add_ai_reporting_views/migration.sql\")",
+      "Bash(node -e \"console.log\\('node:', process.version\\); try { require.resolve\\('undici'\\); console.log\\('undici: bundled or installed'\\); } catch\\(e\\) { console.log\\('undici: NOT directly installed', e.message\\); }\")",
+      "Bash(node -e \"const u = require\\('node:undici'\\); console.log\\(Object.keys\\(u\\).filter\\(k=>k.match\\(/Agent|Dispatcher/i\\)\\)\\)\")",
+      "Bash(echo \"EXIT=$?\")"
     ]
   }
 }

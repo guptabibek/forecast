@@ -3307,13 +3307,48 @@ export class MargEdeService {
   }
 
   private async syncTransactions(tenantId: string, details: any[], dateWindow: DateWindow | null): Promise<number> {
-    let count = 0;
+    // Previously this method awaited a Prisma `upsert` per row. A single Marg
+    // page can contain 100k+ Detail rows; sequential upserts at ~10-30ms each
+    // turned a single sync into a multi-hour job. Now we prepare the rows in
+    // memory and execute a batched `INSERT ... ON CONFLICT DO UPDATE` against
+    // Postgres, which is typically 30-100x faster.
+    const prepared: Array<{
+      margId: bigint;
+      companyId: number;
+      sourceKey: string;
+      voucher: string;
+      type: string;
+      vcn: string | null;
+      date: Date;
+      cid: string | null;
+      pid: string | null;
+      gCode: string | null;
+      batch: string | null;
+      batDet: string | null;
+      qty: number | null;
+      free: number | null;
+      mrp: number | null;
+      rate: number | null;
+      discount: number | null;
+      amount: number | null;
+      gst: number | null;
+      gstAmount: number | null;
+      addField: string | null;
+      rawData: unknown;
+    }> = [];
+
+    // De-duplicate by unique key in case the same row appears twice in a page.
+    // Without this, a single statement would hit "ON CONFLICT DO UPDATE command
+    // cannot affect row a second time" from Postgres.
+    const seen = new Set<string>();
+
     for (const d of details) {
       const companyId = this.toInt32(d.CompanyID, 0);
       if (companyId <= 0) continue;
 
       const margId = this.toBigInt(d.ID);
       if (margId <= BigInt(0)) continue;
+
       const voucher = String(d.Voucher || '').trim();
       if (!voucher) continue;
 
@@ -3323,61 +3358,121 @@ export class MargEdeService {
       if (!this.isWithinDateWindow(parsedDate, dateWindow)) continue;
 
       const sourceKey = this.buildSourceKey(d);
+      const dedupKey = `${companyId} ${sourceKey}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
 
-      await this.margPrisma.margTransaction.upsert({
-        where: {
-          tenantId_companyId_sourceKey: { tenantId, companyId, sourceKey },
-        },
-        create: {
-          tenantId,
-          margId,
-          companyId,
-          sourceKey,
-          voucher,
-          type: String(d.Type || '').trim(),
-          vcn: String(d.VCN || d.Vcn || '').trim() || null,
-          date: parsedDate,
-          cid: String(d.CID || '').trim() || null,
-          pid: String(d.PID || '').trim() || null,
-          gCode: String(d.GCode || d.Gcode || '').trim() || null,
-          batch: String(d.Batch || '').trim() || null,
-          batDet: String(d.BatDet || '').trim() || null,
-          qty: d.Qty != null ? Number(d.Qty) : null,
-          free: d.Free != null ? Number(d.Free) : null,
-          mrp: d.MRP != null ? Number(d.MRP) : null,
-          rate: d.Rate != null ? Number(d.Rate) : null,
-          discount: d.Discount != null ? Number(d.Discount) : null,
-          amount: d.Amount != null ? Number(d.Amount) : null,
-          gst: d.GST != null ? Number(d.GST) : null,
-          gstAmount: d.GSTAmount != null ? Number(d.GSTAmount) : null,
-          addField: String(d.AddField || '').trim() || null,
-          rawData: d,
-        },
-        update: {
-          margId,
-          type: String(d.Type || '').trim(),
-          vcn: String(d.VCN || d.Vcn || '').trim() || null,
-          date: parsedDate,
-          cid: String(d.CID || '').trim() || null,
-          pid: String(d.PID || '').trim() || null,
-          gCode: String(d.GCode || d.Gcode || '').trim() || null,
-          batch: String(d.Batch || '').trim() || null,
-          batDet: String(d.BatDet || '').trim() || null,
-          qty: d.Qty != null ? Number(d.Qty) : null,
-          free: d.Free != null ? Number(d.Free) : null,
-          mrp: d.MRP != null ? Number(d.MRP) : null,
-          rate: d.Rate != null ? Number(d.Rate) : null,
-          discount: d.Discount != null ? Number(d.Discount) : null,
-          amount: d.Amount != null ? Number(d.Amount) : null,
-          gst: d.GST != null ? Number(d.GST) : null,
-          gstAmount: d.GSTAmount != null ? Number(d.GSTAmount) : null,
-          addField: String(d.AddField || '').trim() || null,
-          rawData: d,
-        },
+      prepared.push({
+        margId,
+        companyId,
+        sourceKey,
+        voucher,
+        type: String(d.Type || '').trim(),
+        vcn: String(d.VCN || d.Vcn || '').trim() || null,
+        date: parsedDate,
+        cid: String(d.CID || '').trim() || null,
+        pid: String(d.PID || '').trim() || null,
+        gCode: String(d.GCode || d.Gcode || '').trim() || null,
+        batch: String(d.Batch || '').trim() || null,
+        batDet: String(d.BatDet || '').trim() || null,
+        qty: d.Qty != null ? Number(d.Qty) : null,
+        free: d.Free != null ? Number(d.Free) : null,
+        mrp: d.MRP != null ? Number(d.MRP) : null,
+        rate: d.Rate != null ? Number(d.Rate) : null,
+        discount: d.Discount != null ? Number(d.Discount) : null,
+        amount: d.Amount != null ? Number(d.Amount) : null,
+        gst: d.GST != null ? Number(d.GST) : null,
+        gstAmount: d.GSTAmount != null ? Number(d.GSTAmount) : null,
+        addField: String(d.AddField || '').trim() || null,
+        rawData: d,
       });
-      count++;
     }
-    return count;
+
+    if (prepared.length === 0) return 0;
+
+    const BATCH_SIZE = 500;
+    let written = 0;
+    const startedAt = Date.now();
+
+    for (let i = 0; i < prepared.length; i += BATCH_SIZE) {
+      const chunk = prepared.slice(i, i + BATCH_SIZE);
+
+      const values = Prisma.join(
+        chunk.map((r) => Prisma.sql`(
+          ${tenantId}::uuid,
+          ${r.margId}::bigint,
+          ${r.companyId}::integer,
+          ${r.sourceKey},
+          ${r.voucher},
+          ${r.type},
+          ${r.vcn},
+          ${r.date}::date,
+          ${r.cid},
+          ${r.pid},
+          ${r.gCode},
+          ${r.batch},
+          ${r.batDet},
+          ${r.qty},
+          ${r.free},
+          ${r.mrp},
+          ${r.rate},
+          ${r.discount},
+          ${r.amount},
+          ${r.gst},
+          ${r.gstAmount},
+          ${r.addField},
+          ${JSON.stringify(r.rawData)}::jsonb,
+          NOW(),
+          NOW()
+        )`),
+        ',',
+      );
+
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO marg_transactions (
+          tenant_id, marg_id, company_id, source_key,
+          voucher, type, vcn, date,
+          cid, pid, g_code, batch, bat_det,
+          qty, free, mrp, rate, discount,
+          amount, gst, gst_amount, add_field,
+          raw_data, created_at, updated_at
+        )
+        VALUES ${values}
+        ON CONFLICT (tenant_id, company_id, source_key) DO UPDATE SET
+          marg_id    = EXCLUDED.marg_id,
+          type       = EXCLUDED.type,
+          vcn        = EXCLUDED.vcn,
+          date       = EXCLUDED.date,
+          cid        = EXCLUDED.cid,
+          pid        = EXCLUDED.pid,
+          g_code     = EXCLUDED.g_code,
+          batch      = EXCLUDED.batch,
+          bat_det    = EXCLUDED.bat_det,
+          qty        = EXCLUDED.qty,
+          free       = EXCLUDED.free,
+          mrp        = EXCLUDED.mrp,
+          rate       = EXCLUDED.rate,
+          discount   = EXCLUDED.discount,
+          amount     = EXCLUDED.amount,
+          gst        = EXCLUDED.gst,
+          gst_amount = EXCLUDED.gst_amount,
+          add_field  = EXCLUDED.add_field,
+          raw_data   = EXCLUDED.raw_data,
+          updated_at = NOW()
+      `);
+
+      written += chunk.length;
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    if (prepared.length >= 1000 || elapsedMs > 5000) {
+      this.logger.log(
+        `Marg syncTransactions bulk-upserted ${written} rows in ${elapsedMs}ms ` +
+        `(${Math.ceil(prepared.length / BATCH_SIZE)} batches of up to ${BATCH_SIZE})`,
+      );
+    }
+
+    return written;
   }
 
   private async syncStockData(tenantId: string, stockItems: any[], syncLogId: string): Promise<number> {
@@ -9654,10 +9749,108 @@ export class MargEdeService {
     }
   }
 
+  /**
+   * Extract a human-readable description of a fetch failure, including the
+   * underlying `error.cause` chain that Node's `undici`-backed `fetch` hides
+   * behind the generic "TypeError: fetch failed" wrapper.
+   */
+  private describeFetchError(error: unknown): { message: string; code: string | null; retryable: boolean } {
+    const seen = new Set<unknown>();
+    const parts: string[] = [];
+    let code: string | null = null;
+    let cur: unknown = error;
+    let depth = 0;
+
+    while (cur && !seen.has(cur) && depth < 8) {
+      seen.add(cur);
+      depth += 1;
+      if (cur instanceof Error) {
+        const name = cur.name || 'Error';
+        const msg = cur.message || '';
+        parts.push(`${name}: ${msg}`);
+        const c = (cur as NodeJS.ErrnoException).code;
+        if (c && !code) code = c;
+        cur = (cur as { cause?: unknown }).cause;
+      } else {
+        parts.push(String(cur));
+        break;
+      }
+    }
+
+    const message = parts.join(' <- ') || String(error);
+    // Codes that are worth retrying: server reset us mid-stream, transient
+    // network blips, socket hangups during long downloads.
+    const retryableCodes = new Set([
+      'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND',
+      'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH',
+      'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT',
+      'UND_ERR_BODY_TIMEOUT', 'UND_ERR_RESPONSE_STATUS_CODE',
+      'UND_ERR_REQ_RETRY',
+    ]);
+    const retryable =
+      (code !== null && retryableCodes.has(code)) ||
+      /fetch failed|socket hang up|other side closed|premature close/i.test(message);
+
+    return { message, code, retryable };
+  }
+
   private async fetchJsonWithTimeout(
     url: string,
     init: RequestInit,
     timeoutMs = this.requestTimeoutMs,
+  ): Promise<unknown> {
+    // The Marg API is an external service over the public internet streaming
+    // hundreds of MB per page. Transient `ECONNRESET` / `socket hang up`
+    // mid-stream is normal noise; without retry, one blip throws away an
+    // entire 30-minute fetch and the sync stays in RUNNING for hours.
+    const maxAttempts = this.parsePositiveInt(process.env.MARG_HTTP_MAX_ATTEMPTS, 3);
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.fetchJsonOnce(url, init, timeoutMs);
+      } catch (error) {
+        lastError = error;
+
+        // Application-level failures (BadRequestException) are not retryable —
+        // those come from the Marg server explicitly telling us something
+        // about the request (invalid JSON, FAILURE envelope, HTTP 4xx, etc.).
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
+
+        const { message, code, retryable } = this.describeFetchError(error);
+        if (!retryable || attempt >= maxAttempts) {
+          this.logger.warn(
+            `Marg API request to ${url} failed after attempt ${attempt}/${maxAttempts} ` +
+            `[code=${code ?? 'n/a'}]: ${message}`,
+          );
+          throw new BadRequestException(`Marg API request error: ${message} [code=${code ?? 'n/a'}]`);
+        }
+
+        // Exponential backoff with jitter: 1s, 3s, 7s, ... capped at 30s.
+        const backoff = Math.min(30000, 1000 * (2 ** (attempt - 1) + 1));
+        const jitter = Math.floor(Math.random() * 500);
+        const delay = backoff + jitter;
+        this.logger.warn(
+          `Marg API transient failure on attempt ${attempt}/${maxAttempts} ` +
+          `[code=${code ?? 'n/a'}]: ${message}. Retrying in ${delay}ms.`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+
+    // Shouldn't reach here — the loop either returns or throws — but TypeScript
+    // can't see that, so re-throw the last captured error.
+    throw lastError instanceof Error
+      ? lastError
+      : new BadRequestException(`Marg API request error: ${String(lastError)}`);
+  }
+
+  private async fetchJsonOnce(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
   ): Promise<unknown> {
     // We use `timeoutMs` as an *idle* timeout, not a total wall-clock deadline.
     // Marg responses for inventory/accounting pages can be hundreds of MB; the
@@ -9742,7 +9935,10 @@ export class MargEdeService {
         );
       }
 
-      throw new BadRequestException(`Marg API request error: ${String(error)}`);
+      // Re-throw the raw network/fetch error so the retry layer in
+      // `fetchJsonWithTimeout` can inspect `error.cause` and decide whether
+      // it's transient enough to retry.
+      throw error;
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
     }

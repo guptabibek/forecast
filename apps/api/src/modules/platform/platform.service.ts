@@ -624,11 +624,15 @@ export class PlatformService {
 
   private async listTenantScopedTables(): Promise<string[]> {
     const rows = await this.prisma.$queryRaw<Array<{ table_name: string }>>(Prisma.sql`
-      SELECT table_name
-      FROM information_schema.columns
-      WHERE table_schema = 'public'
-        AND column_name = 'tenant_id'
-      ORDER BY table_name ASC
+      SELECT c.table_name
+      FROM information_schema.columns c
+      JOIN information_schema.tables t
+        ON t.table_schema = c.table_schema
+       AND t.table_name = c.table_name
+      WHERE c.table_schema = 'public'
+        AND c.column_name = 'tenant_id'
+        AND t.table_type = 'BASE TABLE'
+      ORDER BY c.table_name ASC
     `);
 
     return rows.map((row) => row.table_name);
