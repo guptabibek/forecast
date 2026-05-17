@@ -45,6 +45,16 @@ services:
       MARG_ACCOUNTING_PROJECTION_TX_TIMEOUT_MS: ${MARG_ACCOUNTING_PROJECTION_TX_TIMEOUT_MS:-60000}
       MARG_SYNC_STALE_AFTER_MS: ${MARG_SYNC_STALE_AFTER_MS:-1800000}
       MARG_RAW_PAGE_STORAGE_DIR: ${MARG_RAW_PAGE_STORAGE_DIR:-/data/marg-raw-pages}
+      # Number of Marg sync jobs this worker pulls from the shared queue
+      # simultaneously. Default 2 lets two tenants sync in parallel.
+      # Memory budget: concurrency × per-sync peak (~1.5 GB) must fit
+      # under NODE_OPTIONS heap. With heap=8 GB, concurrency=2-3 is safe.
+      MARG_SYNC_WORKER_CONCURRENCY: ${MARG_SYNC_WORKER_CONCURRENCY:-2}
+      # Per-tenant slot cap inside this worker. Default 1: one tenant
+      # never grabs more than one of the available worker slots, so
+      # other tenants get their turn even when a tenant queues many
+      # jobs in a burst (e.g., monthly backfill triggers).
+      MARG_SYNC_PER_TENANT_CONCURRENCY: ${MARG_SYNC_PER_TENANT_CONCURRENCY:-1}
       THROTTLE_SHORT_LIMIT: ${THROTTLE_SHORT_LIMIT:-100}
       THROTTLE_MEDIUM_LIMIT: ${THROTTLE_MEDIUM_LIMIT:-500}
       THROTTLE_LONG_LIMIT: ${THROTTLE_LONG_LIMIT:-3000}

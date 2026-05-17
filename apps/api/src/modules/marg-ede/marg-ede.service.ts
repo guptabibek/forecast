@@ -10085,6 +10085,206 @@ export class MargEdeService {
    * Returns the recovery outcome so the calling endpoint can report what
    * actually happened (recovered / not-stale / not-running).
    */
+  /**
+   * List Marg sync configs whose `lastSyncStatus` / `lastAccountingSyncStatus`
+   * is RUNNING. Used by the admin Locked-Configs view so operators can spot
+   * stuck locks (worker died before the outer catch could mark FAILED).
+   *
+   * Result includes "lockAgeMs" so the UI can show "stale for 4h 12m" —
+   * configs older than the configured stale threshold are the candidates
+   * for /force-unlock.
+   *
+   * Tenant-scoped: superadmin callers see all tenants; regular admins see
+   * only their tenant. The controller passes user.tenantId; null means
+   * "no tenant filter" (intended for superadmin-only contexts).
+   */
+  async listLockedConfigs(tenantId: string | null): Promise<Array<{
+    configId: string;
+    tenantId: string;
+    companyCode: string;
+    companyId: number;
+    lastSyncStatus: string;
+    lastAccountingSyncStatus: string;
+    lockedSinceUpdatedAt: Date | null;
+    lockAgeMs: number | null;
+    isStale: boolean;
+    latestSyncLog: {
+      id: string;
+      status: string;
+      currentStage: string | null;
+      startedAt: Date | null;
+      lastHeartbeatAt: Date | null;
+      heartbeatAgeMs: number | null;
+    } | null;
+  }>> {
+    if (typeof this.margPrisma.margSyncConfig?.findMany !== 'function') return [];
+    const configs = await this.margPrisma.margSyncConfig.findMany({
+      where: {
+        ...(tenantId ? { tenantId } : {}),
+        OR: [
+          { lastSyncStatus: MARG_SYNC_STATUS.RUNNING },
+          { lastAccountingSyncStatus: MARG_SYNC_STATUS.RUNNING },
+        ],
+      },
+      orderBy: { updatedAt: 'asc' },
+    });
+    const now = Date.now();
+    const results: Array<{
+      configId: string;
+      tenantId: string;
+      companyCode: string;
+      companyId: number;
+      lastSyncStatus: string;
+      lastAccountingSyncStatus: string;
+      lockedSinceUpdatedAt: Date | null;
+      lockAgeMs: number | null;
+      isStale: boolean;
+      latestSyncLog: {
+        id: string;
+        status: string;
+        currentStage: string | null;
+        startedAt: Date | null;
+        lastHeartbeatAt: Date | null;
+        heartbeatAgeMs: number | null;
+      } | null;
+    }> = [];
+    for (const c of configs) {
+      const updatedAtTs = c.updatedAt ? new Date(c.updatedAt).getTime() : null;
+      const lockAgeMs = updatedAtTs ? now - updatedAtTs : null;
+      const isStale = lockAgeMs !== null && lockAgeMs > this.staleSyncAfterMs;
+      let latest: any = null;
+      if (typeof this.margPrisma.margSyncLog?.findFirst === 'function') {
+        latest = await this.margPrisma.margSyncLog.findFirst({
+          where: {
+            tenantId: c.tenantId,
+            configId: c.id,
+            status: MARG_SYNC_STATUS.RUNNING,
+          },
+          orderBy: { startedAt: 'desc' },
+        }).catch(() => null);
+      }
+      const heartbeatTs = latest?.lastHeartbeatAt ? new Date(latest.lastHeartbeatAt).getTime() : null;
+      results.push({
+        configId: c.id,
+        tenantId: c.tenantId,
+        companyCode: c.companyCode,
+        companyId: c.companyId,
+        lastSyncStatus: c.lastSyncStatus,
+        lastAccountingSyncStatus: c.lastAccountingSyncStatus,
+        lockedSinceUpdatedAt: c.updatedAt ?? null,
+        lockAgeMs,
+        isStale,
+        latestSyncLog: latest ? {
+          id: latest.id,
+          status: latest.status,
+          currentStage: latest.currentStage ?? null,
+          startedAt: latest.startedAt ?? null,
+          lastHeartbeatAt: latest.lastHeartbeatAt ?? null,
+          heartbeatAgeMs: heartbeatTs ? now - heartbeatTs : null,
+        } : null,
+      });
+    }
+    return results;
+  }
+
+  /**
+   * Operator-driven config-level lock release. Use after /recover-stale on
+   * the sync log if the config-level lock is still showing RUNNING — or as
+   * a single-shot emergency unlock when the operator KNOWS the previous
+   * worker is gone (e.g. they just restarted the container).
+   *
+   * Marks every still-RUNNING sync log for this config as FAILED_RETRYABLE
+   * so the resume endpoint will accept them, then flips both config
+   * status fields to FAILED so the next /sync call can acquire the lock.
+   *
+   * Safety: refuses to unlock if the latest sync log's heartbeat is younger
+   * than 60 seconds — that's an active sync, and an operator unlocking it
+   * mid-run would create a second-sync race condition. Pass `force=true`
+   * to override only when you are CERTAIN the process is dead (e.g. you
+   * just killed the container).
+   */
+  async forceUnlockConfig(
+    configId: string,
+    tenantId: string,
+    options: { force?: boolean } = {},
+  ): Promise<{
+    configId: string;
+    outcome: 'unlocked' | 'not_locked' | 'active_refused';
+    syncLogsMarkedFailed: number;
+    previousStatus: { lastSyncStatus: string; lastAccountingSyncStatus: string } | null;
+  }> {
+    const config = await this.margPrisma.margSyncConfig.findFirst({
+      where: { id: configId, tenantId },
+    });
+    if (!config) throw new NotFoundException('Marg config not found');
+
+    const isLocked = config.lastSyncStatus === MARG_SYNC_STATUS.RUNNING
+      || config.lastAccountingSyncStatus === MARG_SYNC_STATUS.RUNNING;
+    if (!isLocked) {
+      return {
+        configId,
+        outcome: 'not_locked',
+        syncLogsMarkedFailed: 0,
+        previousStatus: {
+          lastSyncStatus: config.lastSyncStatus,
+          lastAccountingSyncStatus: config.lastAccountingSyncStatus,
+        },
+      };
+    }
+
+    if (!options.force) {
+      const latest = await this.margPrisma.margSyncLog.findFirst({
+        where: { tenantId, configId, status: MARG_SYNC_STATUS.RUNNING },
+        orderBy: { startedAt: 'desc' },
+      }).catch(() => null);
+      if (latest?.lastHeartbeatAt) {
+        const age = Date.now() - new Date(latest.lastHeartbeatAt).getTime();
+        if (age < 60_000) {
+          return {
+            configId,
+            outcome: 'active_refused',
+            syncLogsMarkedFailed: 0,
+            previousStatus: {
+              lastSyncStatus: config.lastSyncStatus,
+              lastAccountingSyncStatus: config.lastAccountingSyncStatus,
+            },
+          };
+        }
+      }
+    }
+
+    const runningLogs = await this.margPrisma.margSyncLog.updateMany({
+      where: { tenantId, configId, status: MARG_SYNC_STATUS.RUNNING },
+      data: {
+        status: MARG_SYNC_STATUS.FAILED,
+        currentStage: MARG_SYNC_STAGE.FAILED_RETRYABLE,
+        failureType: MARG_FAILURE_TYPE.RETRYABLE,
+        completedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+      },
+    });
+
+    const previousStatus = {
+      lastSyncStatus: config.lastSyncStatus,
+      lastAccountingSyncStatus: config.lastAccountingSyncStatus,
+    };
+
+    await this.margPrisma.margSyncConfig.update({
+      where: { id: configId },
+      data: {
+        lastSyncStatus: MARG_SYNC_STATUS.FAILED,
+        lastAccountingSyncStatus: MARG_SYNC_STATUS.FAILED,
+      },
+    });
+
+    return {
+      configId,
+      outcome: 'unlocked',
+      syncLogsMarkedFailed: runningLogs.count,
+      previousStatus,
+    };
+  }
+
   async recoverStaleSyncLog(
     configId: string,
     tenantId: string,

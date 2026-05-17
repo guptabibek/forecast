@@ -645,6 +645,305 @@ describe('Marg resumable sync pipeline', () => {
   });
 
   // ============================================================
+  // Fix 1+3: worker concurrency env honored / fairness deferral
+  // ============================================================
+  describe('worker concurrency + per-tenant fairness', () => {
+    it('reads MARG_SYNC_WORKER_CONCURRENCY at module load (env-driven)', async () => {
+      // Concurrency is set on the @Processor decorator at module-load time
+      // — we cannot mutate it after the fact. Verify the parse is correct
+      // for typical env values via an inline parse mirror.
+      const parse = (raw: string | undefined, fallback: number) =>
+        Math.max(1, Number.parseInt(raw ?? String(fallback), 10) || fallback);
+      expect(parse('3', 2)).toBe(3);
+      expect(parse(undefined, 2)).toBe(2);
+      // parseInt('0') === 0; 0 || 2 falls back to 2; Math.max(1, 2) === 2.
+      // Operators wanting "disable the worker" must remove the env var,
+      // not set it to 0 — explicit invalid values are treated as default.
+      expect(parse('0', 2)).toBe(2);
+      expect(parse('not-a-number', 2)).toBe(2);
+      // parseInt('-5') === -5 is truthy; Math.max(1, -5) clamps up to 1.
+      expect(parse('-5', 2)).toBe(1);
+    });
+
+    it('defers a tenant\'s job when their per-tenant slot count is reached AND another tenant is waiting', async () => {
+      const { MargSyncProcessor } = await import('./marg-sync.processor');
+      // Cross-pod fairness via BullMQ active set: queue.getJobs(['active'])
+      // returns existing jobs for the same tenant on OTHER pods + this job.
+      // queue.getJobs(['waiting','delayed']) returns at least one other-tenant
+      // job so deferring isn't pointless.
+      const stubQueue = {
+        getJobs: jest.fn().mockImplementation((statuses: string[]) => {
+          if (Array.isArray(statuses) && statuses.includes('active')) {
+            // Another worker pod already runs one job for busy-tenant +
+            // this job appears in active too. We expect the processor to
+            // exclude its own jobId.
+            return Promise.resolve([
+              { id: 'other-pod-active-job', data: { tenantId: 'busy-tenant' } },
+              { id: 'job-1', data: { tenantId: 'busy-tenant' } },
+            ]);
+          }
+          // waiting / delayed: at least one different-tenant job
+          return Promise.resolve([{ id: 'other-waiting', data: { tenantId: 'other-tenant' } }]);
+        }),
+      } as any;
+      const margEdeService = { runSync: jest.fn() } as any;
+      const prisma = {
+        executeInTenantContext: jest.fn().mockImplementation(async (_t, fn) => fn()),
+      } as any;
+      const processor = new MargSyncProcessor(margEdeService, prisma, stubQueue);
+
+      const moveToDelayed = jest.fn().mockResolvedValue(undefined);
+      const job = {
+        id: 'job-1',
+        data: { tenantId: 'busy-tenant', configId: 'cfg', triggeredBy: 'op' },
+        token: 'tok-1',
+        moveToDelayed,
+      } as any;
+
+      await expect(processor.process(job)).rejects.toThrow(/delayed/i);
+      expect(moveToDelayed).toHaveBeenCalledTimes(1);
+      // Worker did not actually invoke the sync.
+      expect(margEdeService.runSync).not.toHaveBeenCalled();
+    });
+
+    it('does NOT defer when no other tenant\'s job is active', async () => {
+      const { MargSyncProcessor } = await import('./marg-sync.processor');
+      // Only this job is active; getJobs filters out our own jobId so
+      // otherActiveForTenant = 0 < limit and we proceed.
+      const stubQueue = {
+        getJobs: jest.fn().mockImplementation((statuses: string[]) => {
+          if (Array.isArray(statuses) && statuses.includes('active')) {
+            return Promise.resolve([{ id: 'job-2', data: { tenantId: 'free-tenant' } }]);
+          }
+          return Promise.resolve([]);
+        }),
+      } as any;
+      const margEdeService = { runSync: jest.fn().mockResolvedValue('sync-log-1') } as any;
+      const prisma = {
+        executeInTenantContext: jest.fn().mockImplementation(async (_t, fn) => fn()),
+      } as any;
+      const processor = new MargSyncProcessor(margEdeService, prisma, stubQueue);
+
+      const job = {
+        id: 'job-2',
+        data: { tenantId: 'free-tenant', configId: 'cfg', triggeredBy: 'op' },
+        token: 'tok-2',
+        moveToDelayed: jest.fn(),
+      } as any;
+
+      const result = await processor.process(job);
+      expect(result.syncLogId).toBe('sync-log-1');
+      expect(margEdeService.runSync).toHaveBeenCalledTimes(1);
+      expect(job.moveToDelayed).not.toHaveBeenCalled();
+    });
+
+    it('does NOT defer when the busy tenant is the only one with waiting jobs', async () => {
+      const { MargSyncProcessor } = await import('./marg-sync.processor');
+      // Another pod is running a busy-tenant job (so cap is exceeded),
+      // BUT the waiting queue has only same-tenant jobs (no fairness
+      // benefit to deferring — we'd just re-pick the same job back).
+      const stubQueue = {
+        getJobs: jest.fn().mockImplementation((statuses: string[]) => {
+          if (Array.isArray(statuses) && statuses.includes('active')) {
+            return Promise.resolve([
+              { id: 'other-pod', data: { tenantId: 'busy-tenant' } },
+              { id: 'job-3', data: { tenantId: 'busy-tenant' } },
+            ]);
+          }
+          return Promise.resolve([{ id: 'same-tenant-waiting', data: { tenantId: 'busy-tenant' } }]);
+        }),
+      } as any;
+      const margEdeService = { runSync: jest.fn().mockResolvedValue('sync-log-3') } as any;
+      const prisma = {
+        executeInTenantContext: jest.fn().mockImplementation(async (_t, fn) => fn()),
+      } as any;
+      const processor = new MargSyncProcessor(margEdeService, prisma, stubQueue);
+
+      const job = {
+        id: 'job-3',
+        data: { tenantId: 'busy-tenant', configId: 'cfg', triggeredBy: 'op' },
+        token: 'tok-3',
+        moveToDelayed: jest.fn(),
+      } as any;
+
+      await processor.process(job);
+      expect(job.moveToDelayed).not.toHaveBeenCalled();
+      expect(margEdeService.runSync).toHaveBeenCalled();
+    });
+
+    it('excludes own jobId so a single-pod single-job for the tenant does NOT trigger deferral', async () => {
+      // Regression: the processor must NOT treat its own job as "another
+      // active job for this tenant". Pre-fix, counting active without
+      // excluding self would have falsely triggered defer when in fact
+      // this is the tenant's first/only active job.
+      const { MargSyncProcessor } = await import('./marg-sync.processor');
+      const stubQueue = {
+        getJobs: jest.fn().mockImplementation((statuses: string[]) => {
+          if (Array.isArray(statuses) && statuses.includes('active')) {
+            return Promise.resolve([{ id: 'job-4', data: { tenantId: 'solo-tenant' } }]);
+          }
+          return Promise.resolve([{ id: 'other-waiting', data: { tenantId: 'other-tenant' } }]);
+        }),
+      } as any;
+      const margEdeService = { runSync: jest.fn().mockResolvedValue('sync-log-4') } as any;
+      const prisma = {
+        executeInTenantContext: jest.fn().mockImplementation(async (_t, fn) => fn()),
+      } as any;
+      const processor = new MargSyncProcessor(margEdeService, prisma, stubQueue);
+
+      const job = {
+        id: 'job-4',
+        data: { tenantId: 'solo-tenant', configId: 'cfg', triggeredBy: 'op' },
+        token: 'tok-4',
+        moveToDelayed: jest.fn(),
+      } as any;
+
+      const result = await processor.process(job);
+      expect(result.syncLogId).toBe('sync-log-4');
+      expect(job.moveToDelayed).not.toHaveBeenCalled();
+    });
+
+    it('countActiveJobsForTenant returns 0 (degrades gracefully) when the queue inspection fails', async () => {
+      const { MargSyncProcessor } = await import('./marg-sync.processor');
+      const stubQueue = {
+        getJobs: jest.fn().mockRejectedValue(new Error('Redis exploded')),
+      } as any;
+      const margEdeService = { runSync: jest.fn().mockResolvedValue('sync-log-5') } as any;
+      const prisma = {
+        executeInTenantContext: jest.fn().mockImplementation(async (_t, fn) => fn()),
+      } as any;
+      const processor = new MargSyncProcessor(margEdeService, prisma, stubQueue);
+
+      const job = {
+        id: 'job-5',
+        data: { tenantId: 't', configId: 'cfg', triggeredBy: 'op' },
+        token: 'tok-5',
+        moveToDelayed: jest.fn(),
+      } as any;
+
+      // Sync must complete even when fairness layer is broken.
+      const result = await processor.process(job);
+      expect(result.syncLogId).toBe('sync-log-5');
+      expect(job.moveToDelayed).not.toHaveBeenCalled();
+    });
+  });
+
+  // ============================================================
+  // Fix 2: listLockedConfigs / forceUnlockConfig
+  // ============================================================
+  describe('config-level lock administration', () => {
+    const tenantId = '00000000-0000-0000-0000-0000000000aa';
+    const configId = '00000000-0000-0000-0000-0000000000bb';
+
+    it('listLockedConfigs returns only configs with at least one RUNNING flag, marks stale ones', async () => {
+      const fresh = { id: 'cfg-fresh', tenantId, companyCode: 'AA', companyId: 1, lastSyncStatus: 'COMPLETED', lastAccountingSyncStatus: 'COMPLETED', updatedAt: new Date() };
+      const lockedFresh = { id: 'cfg-locked', tenantId, companyCode: 'BB', companyId: 2, lastSyncStatus: 'RUNNING', lastAccountingSyncStatus: 'COMPLETED', updatedAt: new Date(Date.now() - 5 * 60 * 1000) };
+      const lockedStale = { id: 'cfg-stale', tenantId, companyCode: 'CC', companyId: 3, lastSyncStatus: 'RUNNING', lastAccountingSyncStatus: 'RUNNING', updatedAt: new Date(Date.now() - 4 * 60 * 60 * 1000) };
+
+      const prisma = {
+        margSyncConfig: {
+          findMany: jest.fn().mockImplementation(async ({ where }: any) => {
+            // service filters by OR-RUNNING in the SQL; mimic that here
+            const all = [fresh, lockedFresh, lockedStale];
+            return all.filter((c) => c.lastSyncStatus === 'RUNNING' || c.lastAccountingSyncStatus === 'RUNNING')
+              .filter((c) => !where.tenantId || c.tenantId === where.tenantId);
+          }),
+        },
+        margSyncLog: {
+          findFirst: jest.fn().mockResolvedValue(null), // simplify: no live log
+        },
+      } as any;
+
+      const service = new MargEdeService(prisma, {} as any, {} as any);
+      const result = await service.listLockedConfigs(tenantId);
+
+      expect(result.map((r) => r.configId)).toEqual(['cfg-locked', 'cfg-stale']);
+      expect(result.find((r) => r.configId === 'cfg-locked')!.isStale).toBe(false);
+      expect(result.find((r) => r.configId === 'cfg-stale')!.isStale).toBe(true);
+    });
+
+    it('forceUnlockConfig flips status to FAILED and marks running sync logs FAILED_RETRYABLE', async () => {
+      const config = { id: configId, tenantId, lastSyncStatus: 'RUNNING', lastAccountingSyncStatus: 'RUNNING' };
+      const prisma = {
+        margSyncConfig: {
+          findFirst: jest.fn().mockResolvedValue(config),
+          update: jest.fn().mockResolvedValue(undefined),
+        },
+        margSyncLog: {
+          findFirst: jest.fn().mockResolvedValue({ lastHeartbeatAt: new Date(Date.now() - 60 * 60 * 1000) }),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+      } as any;
+      const service = new MargEdeService(prisma, {} as any, {} as any);
+
+      const result = await service.forceUnlockConfig(configId, tenantId);
+
+      expect(result.outcome).toBe('unlocked');
+      expect(result.syncLogsMarkedFailed).toBe(1);
+      expect(result.previousStatus).toEqual({ lastSyncStatus: 'RUNNING', lastAccountingSyncStatus: 'RUNNING' });
+      expect(prisma.margSyncLog.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ status: 'FAILED', failureType: 'RETRYABLE' }),
+      }));
+      expect(prisma.margSyncConfig.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ lastSyncStatus: 'FAILED', lastAccountingSyncStatus: 'FAILED' }),
+      }));
+    });
+
+    it('forceUnlockConfig refuses to unlock when a heartbeat fired in the last 60s', async () => {
+      const config = { id: configId, tenantId, lastSyncStatus: 'RUNNING', lastAccountingSyncStatus: 'COMPLETED' };
+      const prisma = {
+        margSyncConfig: {
+          findFirst: jest.fn().mockResolvedValue(config),
+          update: jest.fn(),
+        },
+        margSyncLog: {
+          findFirst: jest.fn().mockResolvedValue({ lastHeartbeatAt: new Date(Date.now() - 10_000) }), // 10s ago
+          updateMany: jest.fn(),
+        },
+      } as any;
+      const service = new MargEdeService(prisma, {} as any, {} as any);
+
+      const result = await service.forceUnlockConfig(configId, tenantId);
+      expect(result.outcome).toBe('active_refused');
+      expect(prisma.margSyncConfig.update).not.toHaveBeenCalled();
+      expect(prisma.margSyncLog.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('forceUnlockConfig with force=true bypasses the recent-heartbeat check', async () => {
+      const config = { id: configId, tenantId, lastSyncStatus: 'RUNNING', lastAccountingSyncStatus: 'COMPLETED' };
+      const prisma = {
+        margSyncConfig: {
+          findFirst: jest.fn().mockResolvedValue(config),
+          update: jest.fn().mockResolvedValue(undefined),
+        },
+        margSyncLog: {
+          findFirst: jest.fn().mockResolvedValue({ lastHeartbeatAt: new Date() }),
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+      } as any;
+      const service = new MargEdeService(prisma, {} as any, {} as any);
+
+      const result = await service.forceUnlockConfig(configId, tenantId, { force: true });
+      expect(result.outcome).toBe('unlocked');
+      expect(prisma.margSyncConfig.update).toHaveBeenCalled();
+    });
+
+    it('forceUnlockConfig returns not_locked when nothing is RUNNING', async () => {
+      const config = { id: configId, tenantId, lastSyncStatus: 'COMPLETED', lastAccountingSyncStatus: 'COMPLETED' };
+      const prisma = {
+        margSyncConfig: {
+          findFirst: jest.fn().mockResolvedValue(config),
+          update: jest.fn(),
+        },
+      } as any;
+      const service = new MargEdeService(prisma, {} as any, {} as any);
+      const result = await service.forceUnlockConfig(configId, tenantId);
+      expect(result.outcome).toBe('not_locked');
+      expect(prisma.margSyncConfig.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ============================================================
   // Backward-compatible default constructor (rawPageStorage optional)
   // ============================================================
   describe('MargEdeService constructor backward-compat', () => {

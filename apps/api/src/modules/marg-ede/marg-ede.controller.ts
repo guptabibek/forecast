@@ -318,6 +318,47 @@ export class MargEdeController {
     return this.margEdeService.getSyncLogStatus(id, syncLogId, user);
   }
 
+  @Get('configs/locked')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'List Marg sync configs whose lock is currently held (lastSyncStatus=RUNNING)',
+    description:
+      'Operator diagnostic for "I keep getting Sync is already running for this configuration". Returns every config (within the caller\'s tenant) whose lastSyncStatus or lastAccountingSyncStatus is RUNNING, with the lock age and the matching latest sync log\'s heartbeat. isStale=true means the lock is older than MARG_SYNC_STALE_AFTER_MS and is safe to /force-unlock without worry.',
+  })
+  async listLockedConfigs(@CurrentUser() user: any) {
+    return this.margEdeService.listLockedConfigs(user.tenantId);
+  }
+
+  @Post('configs/:id/force-unlock')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Release a stuck config-level lock so the next /sync can proceed',
+    description:
+      'Marks every still-RUNNING sync log under this config as FAILED_RETRYABLE and resets the config\'s lastSyncStatus/lastAccountingSyncStatus to FAILED. Refuses by default if the latest sync log produced a heartbeat in the last 60 seconds (= an active worker is still running). Pass force=true ONLY when you are CERTAIN the worker process is dead (e.g. you just restarted the container). After unlock, the operator typically runs /resume on the affected sync logs to recover their progress without refetching from Marg.',
+  })
+  @ApiQuery({ name: 'force', required: false, type: Boolean, description: 'Bypass the recent-heartbeat safety check. Use only when the worker process is known-dead.' })
+  async forceUnlockConfig(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: any,
+    @Query('force') force?: string,
+  ) {
+    const result = await this.margEdeService.forceUnlockConfig(id, user.tenantId, {
+      force: force === 'true' || force === '1',
+    });
+    await this.auditService.log(
+      user.tenantId,
+      user.id,
+      AuditAction.UPDATE,
+      'MargSyncConfig',
+      id,
+      null,
+      null,
+      [],
+      { action: 'marg_sync_force_unlock', ...result },
+    ).catch(() => {/* best-effort */});
+    return result;
+  }
+
   @Post('configs/:id/syncs/:syncLogId/recover-stale')
   @Roles('ADMIN')
   @ApiOperation({

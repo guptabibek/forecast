@@ -100,9 +100,14 @@ export class MargRawPageStorage {
 
     const obj = (payload.parsedPayload ?? {}) as Record<string, unknown>;
 
-    // Generator that yields buffer chunks of the JSON encoding. Each chunk
-    // is at most one row's worth of bytes, so V8 never needs to allocate a
-    // string the size of the whole payload.
+    // Generator that yields buffer chunks of the JSON encoding. We batch
+    // ROWS_PER_CHUNK rows into one chunk so a 500k-row Details array
+    // emits ~500 chunks instead of 500k. Peak in-flight allocation is
+    // bounded by one chunk's serialized size (1000 rows × ~few KB =
+    // a few MB), which still keeps us far below the V8 string ceiling.
+    // The previous one-row-per-chunk variant was memory-correct but
+    // async-overhead-bound — 50k async hops alone took >5s under Jest.
+    const ROWS_PER_CHUNK = 1000;
     async function* encodeChunks(): AsyncGenerator<Buffer> {
       yield Buffer.from('{', 'utf8');
       const keys = Object.keys(obj);
@@ -112,13 +117,24 @@ export class MargRawPageStorage {
         if (i > 0) yield Buffer.from(',', 'utf8');
         yield Buffer.from(JSON.stringify(key) + ':', 'utf8');
         if (Array.isArray(value)) {
-          yield Buffer.from('[', 'utf8');
-          for (let j = 0; j < value.length; j++) {
-            if (j > 0) yield Buffer.from(',', 'utf8');
-            // Per-element JSON.stringify. A single Marg row is tiny;
-            // peak alloc bounded here.
-            yield Buffer.from(JSON.stringify(value[j]), 'utf8');
+          if (value.length === 0) {
+            yield Buffer.from('[]', 'utf8');
+            continue;
           }
+          yield Buffer.from('[', 'utf8');
+          // Emit in row-batches. The accumulator is a plain string so V8
+          // re-uses the rope-string optimization for the concat — much
+          // faster than Array.join. Reset after each yield to release.
+          let acc = '';
+          for (let j = 0; j < value.length; j++) {
+            if (j > 0) acc += ',';
+            acc += JSON.stringify(value[j]);
+            if ((j + 1) % ROWS_PER_CHUNK === 0) {
+              yield Buffer.from(acc, 'utf8');
+              acc = '';
+            }
+          }
+          if (acc.length > 0) yield Buffer.from(acc, 'utf8');
           yield Buffer.from(']', 'utf8');
         } else {
           yield Buffer.from(JSON.stringify(value), 'utf8');
