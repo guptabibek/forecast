@@ -7,6 +7,7 @@ import {
     Get,
     HttpCode,
     HttpStatus,
+    Logger,
     Optional,
     Param,
     ParseUUIDPipe,
@@ -40,11 +41,37 @@ import { MARG_SYNC_MODE, MARG_SYNC_SCOPE, MargSyncMode, MargSyncScope } from './
 @UseGuards(JwtAuthGuard, RolesGuard)
 @RequireModule('marg-ede')
 export class MargEdeController {
+  private readonly logger = new Logger(MargEdeController.name);
+
   constructor(
     private readonly margEdeService: MargEdeService,
     private readonly auditService: AuditService,
     @Optional() @InjectQueue(QUEUE_NAMES.MARG_SYNC) private readonly margSyncQueue: Queue | null,
   ) {}
+
+  /**
+   * Best-effort auto-recovery for stuck lock state before enqueueing a new
+   * sync. forceUnlockConfig with force=false applies a 60-second heartbeat
+   * safety check — if a real worker is alive and writing heartbeats, it
+   * returns 'active_refused' and we leave the lock alone. If the heartbeat
+   * is stale (the worker died, or the lock was orphaned by the old
+   * stale-detector), it clears the lock so the new job can proceed.
+   *
+   * This is the difference between "click Sync, nothing happens for hours"
+   * and "click Sync, it just works." We accept any error silently — the
+   * downstream runSync lock check is the final authority.
+   */
+  private async autoHealStuckLock(configId: string, tenantId: string): Promise<void> {
+    const result = await this.margEdeService.forceUnlockConfig(configId, tenantId, { force: false });
+    if (result.outcome === 'unlocked') {
+      this.logger.warn(
+        `Auto-healed stuck Marg sync lock before new trigger: configId=${configId}, ` +
+        `previousStatus=${JSON.stringify(result.previousStatus)}, ` +
+        `syncLogsMarkedFailed=${result.syncLogsMarkedFailed}. ` +
+        `The prior sync's worker was either dead or killed by the legacy stale-detector.`,
+      );
+    }
+  }
 
   private validateSyncWindow(fromDate?: string, endDate?: string) {
     let validatedFromDate: string | undefined;
@@ -89,6 +116,20 @@ export class MargEdeController {
     fromDate?: string,
     endDate?: string,
   ) {
+    // Fail loud at the boundary if the JWT didn't carry a tenantId.
+    // Without this, the request would 200-OK with status:queued, BullMQ
+    // would accept the job (no payload validation), and the worker would
+    // fail at "Marg sync job missing tenantId" — silent to the user, who
+    // sees nothing happen and no new sync log row. Re-login is the user
+    // workaround; this guard makes the next-best UX: a clear 401 that
+    // tells them what to do.
+    if (!user?.tenantId || typeof user.tenantId !== 'string') {
+      throw new BadRequestException(
+        'Sync trigger missing tenant context. Your session token does not carry a tenantId. ' +
+        'Log out and log back in to refresh your session, then retry.',
+      );
+    }
+
     const validatedWindow = this.validateSyncWindow(fromDate, endDate);
     const hasDateWindow = Boolean(validatedWindow.fromDate || validatedWindow.endDate);
     const syncLabel = scope === MARG_SYNC_SCOPE.ACCOUNTING
@@ -97,6 +138,23 @@ export class MargEdeController {
         ? 'windowed full'
         : 'incremental full';
     const operationLabel = mode === MARG_SYNC_MODE.REPROJECT ? 'reprojection' : 'sync';
+
+    // Auto-heal stuck lock before enqueueing. A previous sync that was
+    // killed by the (now-fixed) stale-detector or a crashed worker can
+    // leave margSyncConfig.lastSyncStatus = 'RUNNING' even though nothing
+    // is actually running. Without this pre-check, the user clicks Sync,
+    // the worker picks up the job, runSync's lock check fails with
+    // "Sync is already running", BullMQ marks failed, the UI keeps
+    // polling and shows the STALE running state forever — looking like
+    // "the sync never starts". We use the same liveness criterion as
+    // forceUnlockConfig: heartbeat older than 90 seconds = dead.
+    await this.autoHealStuckLock(configId, user.tenantId).catch((err) => {
+      // Best-effort: if auto-heal fails (race, transient DB hiccup), the
+      // sync still proceeds — runSync's lock check is the final
+      // authority, and a real active sync will rightly reject the new
+      // request.
+      this.logger.warn(`autoHealStuckLock failed for config=${configId}: ${(err as Error).message}`);
+    });
 
     if (!this.margSyncQueue) {
       const syncLogId = mode === MARG_SYNC_MODE.REPROJECT

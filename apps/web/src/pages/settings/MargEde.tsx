@@ -1095,6 +1095,23 @@ export default function MargEdePage() {
       if (result.status === 'queued') {
         setSyncMonitoringStartedAt(Date.now());
         setIsSyncMonitoring(true);
+        // Worker typically picks the job up in <500ms. Refetch immediately
+        // and again at 1s and 2s so the RUNNING badge appears within a
+        // second of clicking — without this the user waits the full 5s
+        // poll interval before seeing anything change.
+        void refetchLogs();
+        void refetchOverview();
+        void refetchConfigs();
+        window.setTimeout(() => {
+          void refetchLogs();
+          void refetchOverview();
+          void refetchConfigs();
+        }, 1000);
+        window.setTimeout(() => {
+          void refetchLogs();
+          void refetchOverview();
+          void refetchConfigs();
+        }, 2500);
       } else {
         setSyncMonitoringStartedAt(null);
         setIsSyncMonitoring(false);
