@@ -1243,6 +1243,46 @@ export class MargEdeService {
       },
     });
 
+    // Background heartbeat. Long transform phases (per-row upserts over
+    // hundreds of thousands of rows) can run for many minutes between
+    // explicit updateSyncStage calls. Without a heartbeat tick, the
+    // scheduler's stale-detection cron sees an old lastHeartbeatAt and
+    // wrongly marks the still-healthy sync FAILED with
+    // "stale_sync_recovery". This timer fires every 30s and bumps both
+    // margSyncLog.lastHeartbeatAt and margSyncConfig.updatedAt so
+    // healthy long syncs are never killed by mistake.
+    //
+    // It runs independently of the await chain, swallows its own errors
+    // (a transient DB hiccup must not abort the sync), and is cleared in
+    // the finally block below so a completed/failed sync stops emitting
+    // heartbeats immediately.
+    const HEARTBEAT_INTERVAL_MS = 30_000;
+    const heartbeatTimer: NodeJS.Timeout = setInterval(() => {
+      void (async () => {
+        try {
+          await this.margPrisma.margSyncLog.update({
+            where: { id: syncLog.id },
+            data: { lastHeartbeatAt: new Date() },
+          });
+          await this.margPrisma.margSyncConfig.update({
+            where: { id: configId },
+            data: shouldRunInventory
+              ? {
+                lastSyncStatus: MARG_SYNC_STATUS.RUNNING,
+                lastAccountingSyncStatus: MARG_SYNC_STATUS.RUNNING,
+              }
+              : {
+                lastAccountingSyncStatus: MARG_SYNC_STATUS.RUNNING,
+              },
+          });
+        } catch {
+          // Best-effort: a missed heartbeat is recoverable on the next tick.
+        }
+      })();
+    }, HEARTBEAT_INTERVAL_MS);
+    // Don't keep the process alive solely for the heartbeat timer.
+    heartbeatTimer.unref?.();
+
     this.syncLog.info(
       `runSync acquired lock: syncLogId=${syncLog.id}, configId=${configId}, ` +
       `mode=${mode}, scope=${scope}, syncLabel=${syncLabel}, operation=${operationLabel}, ` +
@@ -1941,6 +1981,12 @@ export class MargEdeService {
       ).catch(() => {/* best-effort */});
 
       throw err;
+    } finally {
+      // Stop the background heartbeat regardless of outcome. Without this
+      // a completed/failed sync would keep ticking the timer until the
+      // process exited, producing zombie heartbeat writes on a syncLog
+      // that has already been marked COMPLETED or FAILED.
+      clearInterval(heartbeatTimer);
     }
 
     return syncLog.id;
@@ -3715,6 +3761,32 @@ export class MargEdeService {
     let pagesFailed = 0;
     const resumeErrors: Record<string, unknown>[] = [];
 
+    // Same background heartbeat pattern as runSync — see runSync for the
+    // full rationale. Resume can re-stage hundreds of saved raw pages
+    // and would otherwise be killed by the stale-sync scheduler when an
+    // operator triggers it on a tenant with a large failed window.
+    const HEARTBEAT_INTERVAL_MS = 30_000;
+    const heartbeatTimer: NodeJS.Timeout = setInterval(() => {
+      void (async () => {
+        try {
+          await this.margPrisma.margSyncLog.update({
+            where: { id: syncLogId },
+            data: { lastHeartbeatAt: new Date() },
+          });
+          await this.margPrisma.margSyncConfig.update({
+            where: { id: configId },
+            data: {
+              lastSyncStatus: MARG_SYNC_STATUS.RUNNING,
+              lastAccountingSyncStatus: MARG_SYNC_STATUS.RUNNING,
+            },
+          });
+        } catch {
+          // Best-effort.
+        }
+      })();
+    }, HEARTBEAT_INTERVAL_MS);
+    heartbeatTimer.unref?.();
+
     try {
       await this.margPrisma.margSyncLog.update({
         where: { id: syncLogId },
@@ -3892,6 +3964,8 @@ export class MargEdeService {
         },
       }).catch(() => {/* best-effort */});
       throw err;
+    } finally {
+      clearInterval(heartbeatTimer);
     }
   }
 

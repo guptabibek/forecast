@@ -18,7 +18,40 @@ const MARG_SYNC_WORKER_CONCURRENCY = Math.max(
   Number.parseInt(process.env.MARG_SYNC_WORKER_CONCURRENCY ?? '2', 10) || 2,
 );
 
-@Processor(QUEUE_NAMES.MARG_SYNC, { concurrency: MARG_SYNC_WORKER_CONCURRENCY })
+// BullMQ job lock duration. The worker auto-renews the lock at
+// lockDuration/2 while the handler is awaiting non-blocking I/O. Default
+// BullMQ value is 30s — way too tight for our sync, where a single CPU-
+// heavy batch (large prisma.upsert chain, in-memory transform) can hold
+// the event loop for tens of seconds. If the renewer can't fire, BullMQ
+// marks the job stalled, returns it to the waiting set, and a sibling
+// worker picks it up — producing the cascade of "duplicate" syncs that
+// then trip the per-tenant fairness limit or the config lock check.
+//
+// Default 600_000 (10 min): generous enough that any single batch
+// completes before the next renewal window without producing a false
+// stall. Override with MARG_SYNC_LOCK_DURATION_MS if a tenant has
+// genuinely large single-batch transforms.
+const MARG_SYNC_LOCK_DURATION_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.MARG_SYNC_LOCK_DURATION_MS ?? '600000', 10) || 600_000,
+);
+
+// BullMQ stalled-job tolerance. Default 1 means: one stall and the job is
+// failed. Combined with `attempts: 3` from the global queue defaults that
+// produces 3 retries of an already-failing long sync, each one tripping
+// the config lock check. Cap at 0 — if the lock truly expires, surface a
+// failure rather than auto-retry; the operator can resume from saved
+// raw pages instead.
+const MARG_SYNC_MAX_STALLED_COUNT = Math.max(
+  0,
+  Number.parseInt(process.env.MARG_SYNC_MAX_STALLED_COUNT ?? '0', 10) || 0,
+);
+
+@Processor(QUEUE_NAMES.MARG_SYNC, {
+  concurrency: MARG_SYNC_WORKER_CONCURRENCY,
+  lockDuration: MARG_SYNC_LOCK_DURATION_MS,
+  maxStalledCount: MARG_SYNC_MAX_STALLED_COUNT,
+})
 export class MargSyncProcessor extends WorkerHost {
   private readonly logger = new Logger(MargSyncProcessor.name);
   private readonly syncLog = new SyncLogger(MargSyncProcessor.name);
@@ -56,15 +89,7 @@ export class MargSyncProcessor extends WorkerHost {
   }
 
   async process(job: Job<MargSyncJobData>): Promise<any> {
-    const {
-      configId,
-      tenantId,
-      triggeredBy,
-      fromDate,
-      endDate,
-      scope = MARG_SYNC_SCOPE.FULL,
-      mode = MARG_SYNC_MODE.FETCH,
-    } = job.data;
+    const { tenantId } = job.data;
 
     if (!tenantId) {
       throw new Error('Marg sync job missing tenantId - cannot process without tenant context');
