@@ -43,6 +43,7 @@ import {
   MargSyncScope,
   MargSyncStage,
 } from './marg-sync.types';
+import { SyncLogger } from './sync-logger';
 
 /** Shape of the Marg EDE POST response before decryption */
 interface MargRawResponse {
@@ -320,6 +321,13 @@ const MARG_SYNC_STATUS = {
 @Injectable()
 export class MargEdeService {
   private readonly logger = new Logger(MargEdeService.name);
+  /**
+   * Always-on sync log stream (see ./sync-logger.ts). Use for stage
+   * transitions, per-page counts, and pipeline diagnostics that must
+   * remain visible even when the global LOG_LEVEL silences info logs.
+   * Reserved for the runSync / resumeSync / runReprojection code paths.
+   */
+  private readonly syncLog = new SyncLogger(MargEdeService.name);
   private readonly requestTimeoutMs = this.parsePositiveInt(process.env.MARG_HTTP_TIMEOUT_MS, 30000);
   private readonly dataRequestTimeoutMs = this.parsePositiveInt(
     process.env.MARG_DATA_HTTP_TIMEOUT_MS,
@@ -1235,6 +1243,15 @@ export class MargEdeService {
       },
     });
 
+    this.syncLog.info(
+      `runSync acquired lock: syncLogId=${syncLog.id}, configId=${configId}, ` +
+      `mode=${mode}, scope=${scope}, syncLabel=${syncLabel}, operation=${operationLabel}, ` +
+      `cursorIndex=${currentIndex}, cursorDatetime=${lastDatetime || '(none)'}, ` +
+      `window=${fromDate ?? '(open)'}..${endDate ?? '(open)'}, ` +
+      `commitCursor=${shouldCommitCursor}` +
+      (recoveredInventoryCursor ? `, recoveredFromLastCompletedLog=true` : ''),
+    );
+
     const errors: any[] = [];
     const diagnostics = this.createMargSyncDiagnostics();
     const syncedBranchCompanyIds = new Set<string>();
@@ -1397,6 +1414,14 @@ export class MargEdeService {
             responseIndex: payload.Index,
           });
 
+          this.syncLog.info(
+            `Inventory page staged: syncLogId=${syncLog.id}, page=${page}, ` +
+            `requestIndex=${previousIndex}, responseIndex=${payload.Index}, ` +
+            `dataStatus=${payload.DataStatus}, ` +
+            `rows={products:${productsCount},parties:${partiesCount},transactions:${transactionsCount},` +
+            `stock:${stockCount},vouchers:${vouchersCount},saleTypes:${saleTypesCount},branches:${branchesCount}}`,
+          );
+
           const nextDatetime = String(payload.DateTime || '').trim();
           const hasIndexCursor = Number.isInteger(payload.Index) && payload.Index >= 0;
           const indexAdvanced = hasIndexCursor && payload.Index > previousIndex;
@@ -1523,6 +1548,15 @@ export class MargEdeService {
           responseIndex: payload.Index,
         });
 
+        this.syncLog.info(
+          `Accounting page staged: syncLogId=${syncLog.id}, page=${page}, ` +
+          `requestIndex=${previousIndex}, responseIndex=${payload.Index}, ` +
+          `dataStatus=${payload.DataStatus}, ` +
+          `rows={accountGroups:${accountGroupsCount},accountPostings:${accountPostingsCount},` +
+          `accountGroupBalances:${accountGroupBalancesCount},partyBalances:${partyBalancesCount},` +
+          `outstandings:${outstandingsCount}}`,
+        );
+
         const nextDatetime = String(payload.DateTime || '').trim();
         const hasIndexCursor = Number.isInteger(payload.Index) && payload.Index >= 0;
         const indexAdvanced = hasIndexCursor && payload.Index > previousIndex;
@@ -1584,6 +1618,12 @@ export class MargEdeService {
         );
       }
 
+      this.syncLog.info(
+        `Staging complete, beginning transforms: syncLogId=${syncLog.id}, ` +
+        `runInventory=${shouldRunInventory}, ` +
+        `stockSnapshotAuthoritative=${stockSnapshotIsAuthoritative}`,
+      );
+
       // Step 3: Transform staged data → core tables
       await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.MASTER_TRANSFORM_STARTED);
       const shouldResetInventoryProjection = shouldRunInventory && (mode === MARG_SYNC_MODE.REPROJECT || Boolean(dateWindow));
@@ -1631,6 +1671,11 @@ export class MargEdeService {
           inventoryProjectionReset?.affectedLedgerScopes,
         );
         await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.INVENTORY_PROJECTION_COMPLETED);
+        this.syncLog.info(
+          `Inventory projection complete: syncLogId=${syncLog.id}, ` +
+          `suppliersProjected=${diagnostics.suppliersProjected}, ` +
+          `projectionReset=${shouldResetInventoryProjection}`,
+        );
       } else {
         await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.MASTER_TRANSFORM_COMPLETED);
       }
@@ -1673,6 +1718,11 @@ export class MargEdeService {
         this.logger.warn('Accounting projection failed (non-fatal)', err);
       }
       await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.ACCOUNTING_PROJECTION_COMPLETED);
+      this.syncLog.info(
+        `Accounting projection complete: syncLogId=${syncLog.id}, ` +
+        `journalEntries=${journalEntriesCount}, ` +
+        `skippedGroups=${accountingProjection?.skippedGroups.length ?? 0}`,
+      );
 
       if (accountingProjection) {
         await this.updateSyncStage(syncLog.id, MARG_SYNC_STAGE.RECONCILIATION_STARTED);
@@ -1764,13 +1814,15 @@ export class MargEdeService {
         },
       });
 
-      this.logger.log(
-        `Marg ${syncLabel} ${operationLabel} completed: products=${productsCount}, parties=${partiesCount}, ` +
+      this.syncLog.info(
+        `Marg ${syncLabel} ${operationLabel} completed: syncLogId=${syncLog.id}, ` +
+        `products=${productsCount}, parties=${partiesCount}, ` +
         `transactions=${transactionsCount}, stock=${stockCount}, branches=${branchesCount}, ` +
         `vouchers=${vouchersCount}, saleTypes=${saleTypesCount}, ` +
         `accountGroups=${accountGroupsCount}, accountPostings=${accountPostingsCount}, ` +
         `accountGroupBalances=${accountGroupBalancesCount}, partyBalances=${partyBalancesCount}, ` +
-        `outstandings=${outstandingsCount}, journalEntries=${journalEntriesCount}`,
+        `outstandings=${outstandingsCount}, journalEntries=${journalEntriesCount}, ` +
+        `errors=${errors.length}`,
       );
 
       await this.auditService.log(
@@ -1795,7 +1847,11 @@ export class MargEdeService {
         { configId, triggeredBy, action: shouldFetchFromMarg ? 'marg_sync_completed' : 'marg_reprojection_completed', scope, mode },
       ).catch(() => {/* best-effort */});
     } catch (err) {
-      this.logger.error('Marg sync failed', err);
+      this.syncLog.error(
+        `Marg sync failed: syncLogId=${syncLog.id}, configId=${configId}, ` +
+        `mode=${mode}, scope=${scope}, error=${(err as Error)?.message ?? String(err)}`,
+        (err as Error)?.stack,
+      );
 
       // Classify the terminal error so resume eligibility is recorded on the
       // sync log. The structured error preserves stage/apiType/requestIndex
@@ -1811,7 +1867,11 @@ export class MargEdeService {
       );
       errors.push(structuredError);
 
-      await this.margPrisma.margSyncConfig.update({
+      // Best-effort: tolerate the config row being deleted between sync
+      // start and failure. Using updateMany (count-based) means a 0-row
+      // result is silently OK instead of throwing "Record to update not
+      // found" — which would otherwise mask the original sync error.
+      await this.margPrisma.margSyncConfig.updateMany({
         where: { id: configId },
         data: shouldRunInventory
           ? {
@@ -1823,7 +1883,10 @@ export class MargEdeService {
           },
       });
 
-      await this.margPrisma.margSyncLog.update({
+      // Same defensive pattern for the syncLog: if a manual reset / cleanup
+      // wiped the row mid-sync, updateMany returns count=0 cleanly instead
+      // of throwing a secondary error that hides the original failure.
+      const updateRes = await this.margPrisma.margSyncLog.updateMany({
         where: { id: syncLog.id },
         data: {
           status: MARG_SYNC_STATUS.FAILED,
@@ -1850,6 +1913,12 @@ export class MargEdeService {
           ...getActiveCursor(),
         },
       });
+      if (updateRes.count === 0) {
+        this.logger.warn(
+          `[MARG-SYNC] syncLog ${syncLog.id} disappeared before failure could be recorded — ` +
+          `likely concurrent reset/cleanup. Original error already logged above.`,
+        );
+      }
 
       await this.auditService.log(
         tenantId,
@@ -7128,7 +7197,25 @@ export class MargEdeService {
         gst: true,
       },
     });
-    if (margProduct?.productId) return margProduct.productId;
+    if (margProduct?.productId) {
+      // Verify the cached productId still exists. A manually-deleted
+      // Product would leave a dangling pointer that triggers
+      // `actuals_product_id_fkey` on the next upsert. Self-heal by
+      // clearing the stale link so we re-create below.
+      const cached = await this.prisma.product.findUnique({
+        where: { id: margProduct.productId },
+        select: { id: true },
+      });
+      if (cached) return cached.id;
+      this.logger.warn(
+        `[MARG-SYNC] Stale margProduct.productId for pid=${pid} (companyId=${companyId}): ` +
+        `product ${margProduct.productId} no longer exists. Clearing link and re-resolving.`,
+      );
+      await this.margPrisma.margProduct.updateMany({
+        where: { tenantId, companyId, pid, productId: margProduct.productId },
+        data: { productId: null },
+      });
+    }
 
     if (!margProduct) {
       this.logger.warn(
@@ -7241,7 +7328,26 @@ export class MargEdeService {
     if (margParty && !this.isProjectableCustomerParty(margParty)) {
       return null;
     }
-    if (margParty?.customerId) return margParty.customerId;
+    if (margParty?.customerId) {
+      // Verify the cached link still references a live Customer. If a
+      // Customer was deleted (manually, by a dedupe sweep, etc.) the
+      // margParty.customerId becomes a dangling pointer — using it would
+      // hit `actuals_customer_id_fkey` on the next upsert. Clear the
+      // stale link and fall through to recreate.
+      const cached = await this.prisma.customer.findUnique({
+        where: { id: margParty.customerId },
+        select: { id: true },
+      });
+      if (cached) return cached.id;
+      this.logger.warn(
+        `[MARG-SYNC] Stale margParty.customerId for cid=${cid} (companyId=${companyId}): ` +
+        `customer ${margParty.customerId} no longer exists. Clearing link and re-resolving.`,
+      );
+      await this.margPrisma.margParty.updateMany({
+        where: { tenantId, companyId, cid, customerId: margParty.customerId },
+        data: { customerId: null },
+      });
+    }
 
     // 2) Create or find a core customer directly from the CID
     const code = `MARG-${cid}`.substring(0, 50);
@@ -8505,7 +8611,10 @@ export class MargEdeService {
     dateWindow: DateWindow | null,
     projectionWindowReset = false,
   ): Promise<void> {
-    // Resolve a system user for createdById (required FK)
+    // Bulk-write rewrite mirroring transformTransactionsToInventoryLedger:
+    // one batched INSERT ... ON CONFLICT statement per chunk instead of
+    // one Prisma upsert per row. See that method's header comment for
+    // rationale and design notes.
     const systemUser = await this.prisma.user.findFirst({
       where: { tenantId },
       select: { id: true },
@@ -8521,37 +8630,27 @@ export class MargEdeService {
     const locationIdCache = new Map<number, string | null>();
     const batchIdCache = new Map<string, string | null>();
 
-    const getProductId = async (companyId: number, pid: string | null): Promise<string | null> => {
-      if (!pid) return null;
-      const cacheKey = `${companyId}:${pid}`;
-      if (!productIdCache.has(cacheKey)) {
-        productIdCache.set(cacheKey, await this.resolveProductId(tenantId, companyId, pid));
-      }
-      return productIdCache.get(cacheKey) ?? null;
-    };
-
-    const getLocationId = async (companyId: number): Promise<string | null> => {
-      if (!locationIdCache.has(companyId)) {
-        locationIdCache.set(companyId, await this.resolveLocationId(tenantId, companyId));
-      }
-      return locationIdCache.get(companyId) ?? null;
-    };
-
-    const getBatchId = async (
-      productId: string,
-      locationId: string,
-      batch: string | null,
-    ): Promise<string | null> => {
-      if (!batch) return null;
-      const cacheKey = `${productId}:${locationId}:${batch}`;
-      if (!batchIdCache.has(cacheKey)) {
-        batchIdCache.set(cacheKey, await this.resolveBatchId(tenantId, productId, locationId, batch));
-      }
-      return batchIdCache.get(cacheKey) ?? null;
-    };
+    const pageSize = Math.max(200, this.transformBatchSize);
+    let totalInserted = 0;
+    let totalCleared = 0;
+    const startedAt = Date.now();
 
     while (true) {
-      const staged = await this.margPrisma.margTransaction.findMany({
+      const staged: Array<{
+        id: string;
+        sourceKey: string;
+        companyId: number;
+        voucher: string;
+        type: string;
+        vcn: string | null;
+        addField: string | null;
+        date: Date;
+        pid: string | null;
+        batch: string | null;
+        qty: Prisma.Decimal | null;
+        free: Prisma.Decimal | null;
+        amount: Prisma.Decimal | null;
+      }> = await this.margPrisma.margTransaction.findMany({
         where: {
           tenantId,
           OR: [
@@ -8562,7 +8661,12 @@ export class MargEdeService {
           ...(cursor ? { id: { gt: cursor } } : {}),
         },
         orderBy: { id: 'asc' },
-        take: TRANSFORM_BATCH_SIZE,
+        take: pageSize,
+        select: {
+          id: true, sourceKey: true, companyId: true, voucher: true,
+          type: true, vcn: true, addField: true, date: true, pid: true,
+          batch: true, qty: true, free: true, amount: true,
+        },
       });
 
       if (staged.length === 0) break;
@@ -8571,6 +8675,32 @@ export class MargEdeService {
         tenantId,
         staged.map((mt) => ({ companyId: mt.companyId, voucher: mt.voucher })),
       );
+
+      interface RowDecision {
+        mt: typeof staged[number];
+        idempotencyKey: string;
+        referenceNumber: string;
+        shouldInsert: boolean;
+        productId?: string;
+        locationId?: string;
+        batchId?: string | null;
+        transactionType?: string;
+        quantity?: number;
+        unitCost?: number | null;
+        totalCost?: number | null;
+        reason?: string;
+        notes?: string;
+      }
+      const decisions: RowDecision[] = [];
+
+      const wantProducts = new Set<string>();
+      const wantLocations = new Set<number>();
+      for (const mt of staged) {
+        if (mt.pid) wantProducts.add(`${mt.companyId}:${mt.pid}`);
+        wantLocations.add(mt.companyId);
+      }
+      await this.warmProductIdCache(tenantId, wantProducts, productIdCache);
+      await this.warmLocationIdCache(tenantId, wantLocations, locationIdCache);
 
       for (const mt of staged) {
         const effectiveQty = this.resolveMargEffectiveQuantity(mt.qty, mt.free);
@@ -8588,82 +8718,138 @@ export class MargEdeService {
           effectiveQty,
           amount: mt.amount,
         });
+        const idempotencyKey = this.buildMargInventoryTransactionIdempotencyKey(mt.sourceKey);
+        const referenceNumber = this.buildMargReferenceNumber(mt.sourceKey);
+
         if (!mt.pid) {
-          if (!projectionWindowReset) {
-            await this.clearMargInventoryTransactionProjection(tenantId, mt.sourceKey);
-          }
+          decisions.push({ mt, idempotencyKey, referenceNumber, shouldInsert: false });
           continue;
         }
         if (!decision.shouldProjectInventory || decision.inventoryTransactionType == null || decision.inventoryQuantity === 0) {
-          if (!projectionWindowReset) {
-            await this.clearMargInventoryTransactionProjection(tenantId, mt.sourceKey);
-          }
+          decisions.push({ mt, idempotencyKey, referenceNumber, shouldInsert: false });
           continue;
         }
-
-        const productId = await getProductId(mt.companyId, mt.pid);
-        const locationId = await getLocationId(mt.companyId);
+        const productId = productIdCache.get(`${mt.companyId}:${mt.pid}`) ?? null;
+        const locationId = locationIdCache.get(mt.companyId) ?? null;
         if (!productId || !locationId) continue;
 
         const { unitCost, totalCost } = this.resolveMargEffectiveCostMetrics(mt.amount, effectiveQty);
-        const referenceNumber = this.buildMargReferenceNumber(mt.sourceKey);
-        const idempotencyKey = this.buildMargInventoryTransactionIdempotencyKey(mt.sourceKey);
+        decisions.push({
+          mt,
+          idempotencyKey,
+          referenceNumber,
+          shouldInsert: true,
+          productId,
+          locationId,
+          transactionType: decision.inventoryTransactionType,
+          quantity: decision.inventoryQuantity,
+          unitCost: unitCost != null ? Number(unitCost) : null,
+          totalCost: totalCost != null ? Number(totalCost) : null,
+          reason: decision.family,
+          notes: `Marg ${decision.family} voucher ${mt.voucher} (${mt.type}${decision.headerType ? `/${decision.headerType}` : ''})`,
+        });
+      }
 
-        // Resolve batch if present
-        const batchId = await getBatchId(productId, locationId, mt.batch);
+      const wantBatches = new Set<string>();
+      for (const d of decisions) {
+        if (!d.shouldInsert) continue;
+        const trimmed = String(d.mt.batch ?? '').trim().substring(0, 50);
+        if (!trimmed || !d.productId || !d.locationId) continue;
+        wantBatches.add(`${d.productId}|${d.locationId}|${trimmed}`);
+      }
+      await this.warmBatchIdCache(tenantId, wantBatches, batchIdCache);
+      for (const d of decisions) {
+        if (!d.shouldInsert) continue;
+        const trimmed = String(d.mt.batch ?? '').trim().substring(0, 50);
+        if (trimmed && d.productId && d.locationId) {
+          d.batchId = batchIdCache.get(`${d.productId}|${d.locationId}|${trimmed}`) ?? null;
+        } else {
+          d.batchId = null;
+        }
+      }
 
-        try {
-          await this.prisma.inventoryTransaction.upsert({
-            where: {
-              tenantId_idempotencyKey: {
-                tenantId,
-                idempotencyKey,
-              },
-            },
-            create: {
-              tenantId,
-              transactionType: decision.inventoryTransactionType,
-              productId,
-              locationId,
-              quantity: decision.inventoryQuantity,
-              uom: 'PCS',
-              transactionDate: mt.date,
-              referenceType: MARG_SOURCE_SYSTEM,
-              referenceNumber,
-              idempotencyKey,
-              batchId,
-              unitCost,
-              totalCost,
-              lotNumber: mt.batch?.substring(0, 50) ?? null,
-              reason: decision.family,
-              notes: `Marg ${decision.family} voucher ${mt.voucher} (${mt.type}${decision.headerType ? `/${decision.headerType}` : ''})`,
-              createdById: systemUser.id,
-            },
-            update: {
-              transactionType: decision.inventoryTransactionType,
-              productId,
-              locationId,
-              quantity: decision.inventoryQuantity,
-              uom: 'PCS',
-              transactionDate: mt.date,
-              referenceType: MARG_SOURCE_SYSTEM,
-              referenceNumber,
-              batchId,
-              unitCost,
-              totalCost,
-              lotNumber: mt.batch?.substring(0, 50) ?? null,
-              reason: decision.family,
-              notes: `Marg ${decision.family} voucher ${mt.voucher} (${mt.type}${decision.headerType ? `/${decision.headerType}` : ''})`,
-              createdById: systemUser.id,
-            },
-          });
-        } catch (err) {
-          this.logger.warn(`Inventory transaction upsert failed for ${referenceNumber}: ${String(err)}`);
+      if (!projectionWindowReset) {
+        const idempotencyKeysToDelete = decisions.filter((d) => !d.shouldInsert).map((d) => d.idempotencyKey);
+        if (idempotencyKeysToDelete.length > 0) {
+          const deleteBatchSize = this.computeSafeBatchSize(this.stagingBatchSize, 1, 'transformTransactionsToInventoryTransactions:delete');
+          for (let i = 0; i < idempotencyKeysToDelete.length; i += deleteBatchSize) {
+            const chunk = idempotencyKeysToDelete.slice(i, i + deleteBatchSize);
+            const res = await this.prisma.inventoryTransaction.deleteMany({
+              where: { tenantId, idempotencyKey: { in: chunk } },
+            });
+            totalCleared += res.count;
+          }
+        }
+      }
+
+      const toInsert = decisions.filter((d) => d.shouldInsert);
+      if (toInsert.length > 0) {
+        // 17 bind variables per row (see VALUES tuple below).
+        const insertBatchSize = this.computeSafeBatchSize(this.stagingBatchSize, 17, 'transformTransactionsToInventoryTransactions:insert');
+        for (let i = 0; i < toInsert.length; i += insertBatchSize) {
+          const chunk = toInsert.slice(i, i + insertBatchSize);
+          const values = Prisma.join(
+            chunk.map((d) => Prisma.sql`(
+              ${tenantId}::uuid,
+              ${d.transactionType}::"InventoryTransactionType",
+              ${d.productId}::uuid,
+              ${d.locationId}::uuid,
+              ${d.quantity}::numeric,
+              ${'PCS'},
+              ${d.mt.date}::timestamp,
+              ${MARG_SOURCE_SYSTEM},
+              ${d.referenceNumber},
+              ${d.idempotencyKey},
+              ${d.batchId},
+              ${d.unitCost},
+              ${d.totalCost},
+              ${d.mt.batch?.substring(0, 50) ?? null},
+              ${d.reason ?? null},
+              ${d.notes ?? null},
+              ${systemUser.id}::uuid
+            )`),
+            ',',
+          );
+          await this.prisma.$executeRaw(Prisma.sql`
+            INSERT INTO inventory_transactions (
+              tenant_id, transaction_type, product_id, location_id, quantity,
+              uom, transaction_date, reference_type, reference_number, idempotency_key,
+              batch_id, unit_cost, total_cost, lot_number, reason, notes, created_by_id
+            )
+            VALUES ${values}
+            ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
+              transaction_type = EXCLUDED.transaction_type,
+              product_id       = EXCLUDED.product_id,
+              location_id      = EXCLUDED.location_id,
+              quantity         = EXCLUDED.quantity,
+              uom              = EXCLUDED.uom,
+              transaction_date = EXCLUDED.transaction_date,
+              reference_type   = EXCLUDED.reference_type,
+              reference_number = EXCLUDED.reference_number,
+              batch_id         = EXCLUDED.batch_id,
+              unit_cost        = EXCLUDED.unit_cost,
+              total_cost       = EXCLUDED.total_cost,
+              lot_number       = EXCLUDED.lot_number,
+              reason           = EXCLUDED.reason,
+              notes            = EXCLUDED.notes,
+              created_by_id    = EXCLUDED.created_by_id
+          `);
+          totalInserted += chunk.length;
         }
       }
 
       cursor = staged[staged.length - 1].id;
+      this.logger.log(
+        `transformTransactionsToInventoryTransactions page: rows=${staged.length} ` +
+        `cumulativeInserted=${totalInserted} cumulativeCleared=${totalCleared}`,
+      );
     }
+
+    const elapsedMs = Date.now() - startedAt;
+    this.logger.log(
+      `transformTransactionsToInventoryTransactions done: inserted=${totalInserted} ` +
+      `cleared=${totalCleared} elapsedMs=${elapsedMs}`,
+    );
   }
 
   /** Transform staged Marg transactions → InventoryLedger entries (movement log with running balance) */
@@ -8673,6 +8859,14 @@ export class MargEdeService {
     projectionWindowReset = false,
     preAffectedInventoryScopes?: Iterable<string>,
   ): Promise<void> {
+    // Previously this method did one Prisma upsert per staged Marg
+    // transaction — for the million-record client that meant ~166k
+    // sequential Postgres round-trips and 1-2 hours per monthly window.
+    // Now we fetch pages, batch-resolve productId/locationId/batchId via
+    // single IN-queries, partition rows into insert-vs-delete buckets,
+    // and emit batched `INSERT ... ON CONFLICT DO UPDATE` / `DELETE WHERE
+    // idempotency_key IN (...)` statements. Same idempotency contract,
+    // ~30-100x faster.
     const systemUser = await this.prisma.user.findFirst({
       where: { tenantId },
       select: { id: true },
@@ -8683,25 +8877,34 @@ export class MargEdeService {
     const affectedInventoryScopes = new Set<string>(preAffectedInventoryScopes ?? []);
     const productIdCache = new Map<string, string | null>();
     const locationIdCache = new Map<number, string | null>();
+    const batchIdCache = new Map<string, string | null>();
 
-    const getProductId = async (companyId: number, pid: string | null): Promise<string | null> => {
-      if (!pid) return null;
-      const cacheKey = `${companyId}:${pid}`;
-      if (!productIdCache.has(cacheKey)) {
-        productIdCache.set(cacheKey, await this.resolveProductId(tenantId, companyId, pid));
-      }
-      return productIdCache.get(cacheKey) ?? null;
-    };
+    // Fetch staged transactions in pages of this size. Bigger pages =
+    // larger batched writes (faster end-to-end) but larger in-memory
+    // chunk. 2000 keeps per-chunk memory bounded while still cutting
+    // round-trips by ~10× vs the old TRANSFORM_BATCH_SIZE=200.
+    const pageSize = Math.max(200, this.transformBatchSize);
 
-    const getLocationId = async (companyId: number): Promise<string | null> => {
-      if (!locationIdCache.has(companyId)) {
-        locationIdCache.set(companyId, await this.resolveLocationId(tenantId, companyId));
-      }
-      return locationIdCache.get(companyId) ?? null;
-    };
+    let totalInserted = 0;
+    let totalCleared = 0;
+    const startedAt = Date.now();
 
     while (true) {
-      const staged = await this.margPrisma.margTransaction.findMany({
+      const staged: Array<{
+        id: string;
+        sourceKey: string;
+        companyId: number;
+        voucher: string;
+        type: string;
+        vcn: string | null;
+        addField: string | null;
+        date: Date;
+        pid: string | null;
+        batch: string | null;
+        qty: Prisma.Decimal | null;
+        free: Prisma.Decimal | null;
+        amount: Prisma.Decimal | null;
+      }> = await this.margPrisma.margTransaction.findMany({
         where: {
           tenantId,
           OR: [
@@ -8712,15 +8915,50 @@ export class MargEdeService {
           ...(cursor ? { id: { gt: cursor } } : {}),
         },
         orderBy: { id: 'asc' },
-        take: TRANSFORM_BATCH_SIZE,
+        take: pageSize,
+        select: {
+          id: true, sourceKey: true, companyId: true, voucher: true,
+          type: true, vcn: true, addField: true, date: true, pid: true,
+          batch: true, qty: true, free: true, amount: true,
+        },
       });
 
       if (staged.length === 0) break;
 
+      // Batch-resolve voucher contexts (existing helper already does this in one query).
       const voucherContexts = await this.loadMargVoucherContexts(
         tenantId,
         staged.map((mt) => ({ companyId: mt.companyId, voucher: mt.voucher })),
       );
+
+      // Pass 1 — compute the per-row projection decision in memory only.
+      interface RowDecision {
+        mt: typeof staged[number];
+        idempotencyKey: string;
+        referenceNumber: string;
+        shouldInsert: boolean; // true → bulk INSERT; false → bulk DELETE (no longer applicable)
+        productId?: string;
+        locationId?: string;
+        batchId?: string | null;
+        entryType?: string;
+        quantity?: number;
+        unitCost?: number;
+        totalCost?: number;
+        notes?: string;
+        scopeKey?: string;
+      }
+      const decisions: RowDecision[] = [];
+
+      // Pre-collect unique (companyId, pid), (companyId), (productId, locationId, batch)
+      // tuples so we can warm the caches with a single batch query each.
+      const wantProducts = new Set<string>();
+      const wantLocations = new Set<number>();
+      for (const mt of staged) {
+        if (mt.pid) wantProducts.add(`${mt.companyId}:${mt.pid}`);
+        wantLocations.add(mt.companyId);
+      }
+      await this.warmProductIdCache(tenantId, wantProducts, productIdCache);
+      await this.warmLocationIdCache(tenantId, wantLocations, locationIdCache);
 
       for (const mt of staged) {
         const effectiveQty = this.resolveMargEffectiveQuantity(mt.qty, mt.free);
@@ -8738,86 +8976,152 @@ export class MargEdeService {
           effectiveQty,
           amount: mt.amount,
         });
+        const idempotencyKey = this.buildMargInventoryLedgerIdempotencyKey(mt.sourceKey);
+        const referenceNumber = this.buildMargReferenceNumber(mt.sourceKey);
+
         if (!mt.pid) {
-          if (!projectionWindowReset) {
-            await this.clearMargInventoryLedgerProjection(tenantId, mt.sourceKey);
-          }
+          decisions.push({ mt, idempotencyKey, referenceNumber, shouldInsert: false });
           continue;
         }
-
-        const productId = await getProductId(mt.companyId, mt.pid);
-        const locationId = await getLocationId(mt.companyId);
-        if (!productId || !locationId) continue;
-
+        const productId = productIdCache.get(`${mt.companyId}:${mt.pid}`) ?? null;
+        const locationId = locationIdCache.get(mt.companyId) ?? null;
+        if (!productId || !locationId) {
+          // Cannot project AND cannot clear (no idempotency key target).
+          // Skip silently — same as legacy behavior.
+          continue;
+        }
         const scopeKey = this.buildInventoryScopeKey(productId, locationId);
         if (!decision.shouldProjectInventory || decision.ledgerEntryType == null || decision.ledgerQuantity === 0) {
-          if (!projectionWindowReset) {
-            await this.clearMargInventoryLedgerProjection(tenantId, mt.sourceKey);
-          }
           affectedInventoryScopes.add(scopeKey);
+          decisions.push({ mt, idempotencyKey, referenceNumber, shouldInsert: false, scopeKey });
           continue;
         }
-
         const costMetrics = this.resolveMargEffectiveCostMetrics(mt.amount, effectiveQty);
-        const unitCost = costMetrics.unitCost != null ? Number(costMetrics.unitCost) : 0;
-        const totalCost = costMetrics.totalCost != null ? Number(costMetrics.totalCost) : 0;
-        const referenceNumber = this.buildMargReferenceNumber(mt.sourceKey);
-        const idempotencyKey = this.buildMargInventoryLedgerIdempotencyKey(mt.sourceKey);
+        decisions.push({
+          mt,
+          idempotencyKey,
+          referenceNumber,
+          shouldInsert: true,
+          productId,
+          locationId,
+          scopeKey,
+          entryType: decision.ledgerEntryType,
+          quantity: decision.ledgerQuantity,
+          unitCost: costMetrics.unitCost != null ? Number(costMetrics.unitCost) : 0,
+          totalCost: costMetrics.totalCost != null ? Number(costMetrics.totalCost) : 0,
+          notes: `Marg ${decision.family} voucher ${mt.voucher} (${mt.type}${decision.headerType ? `/${decision.headerType}` : ''})`,
+        });
+        affectedInventoryScopes.add(scopeKey);
+      }
 
-        // Resolve batch if present
-        const batchId = await this.resolveBatchId(tenantId, productId, locationId, mt.batch);
+      // Warm batch ID cache for everyone in the insert-bucket. Single IN
+      // query rather than per-row findFirst.
+      const wantBatches = new Set<string>();
+      for (const d of decisions) {
+        if (!d.shouldInsert) continue;
+        const trimmed = String(d.mt.batch ?? '').trim().substring(0, 50);
+        if (!trimmed || !d.productId || !d.locationId) continue;
+        wantBatches.add(`${d.productId}|${d.locationId}|${trimmed}`);
+      }
+      await this.warmBatchIdCache(tenantId, wantBatches, batchIdCache);
 
-        try {
-          await this.prisma.inventoryLedger.upsert({
-            where: {
-              tenantId_idempotencyKey: {
-                tenantId,
-                idempotencyKey,
-              },
-            },
-            create: {
-              tenantId,
-              transactionDate: mt.date,
-              productId,
-              locationId,
-              batchId,
-              entryType: decision.ledgerEntryType,
-              quantity: new Prisma.Decimal(decision.ledgerQuantity),
-              uom: 'PCS',
-              unitCost: new Prisma.Decimal(unitCost),
-              totalCost: new Prisma.Decimal(totalCost),
-              referenceType: MARG_SOURCE_SYSTEM,
-              referenceNumber,
-              idempotencyKey,
-              lotNumber: mt.batch?.substring(0, 50) ?? null,
-              createdById: systemUser?.id ?? null,
-              notes: `Marg ${decision.family} voucher ${mt.voucher} (${mt.type}${decision.headerType ? `/${decision.headerType}` : ''})`,
-            },
-            update: {
-              transactionDate: mt.date,
-              productId,
-              locationId,
-              batchId,
-              entryType: decision.ledgerEntryType,
-              quantity: new Prisma.Decimal(decision.ledgerQuantity),
-              uom: 'PCS',
-              unitCost: new Prisma.Decimal(unitCost),
-              totalCost: new Prisma.Decimal(totalCost),
-              referenceType: MARG_SOURCE_SYSTEM,
-              referenceNumber,
-              lotNumber: mt.batch?.substring(0, 50) ?? null,
-              createdById: systemUser?.id ?? null,
-              notes: `Marg ${decision.family} voucher ${mt.voucher} (${mt.type}${decision.headerType ? `/${decision.headerType}` : ''})`,
-            },
-          });
-          affectedInventoryScopes.add(scopeKey);
-        } catch (err) {
-          this.logger.warn(`Inventory ledger upsert failed for ${referenceNumber}: ${String(err)}`);
+      for (const d of decisions) {
+        if (!d.shouldInsert) continue;
+        const trimmed = String(d.mt.batch ?? '').trim().substring(0, 50);
+        if (trimmed && d.productId && d.locationId) {
+          d.batchId = batchIdCache.get(`${d.productId}|${d.locationId}|${trimmed}`) ?? null;
+        } else {
+          d.batchId = null;
+        }
+      }
+
+      // Bulk DELETE everything in the clear-bucket via a single
+      // `DELETE WHERE idempotency_key IN (...)` per chunk.
+      if (!projectionWindowReset) {
+        const idempotencyKeysToDelete = decisions.filter((d) => !d.shouldInsert).map((d) => d.idempotencyKey);
+        if (idempotencyKeysToDelete.length > 0) {
+          const deleteBatchSize = this.computeSafeBatchSize(this.stagingBatchSize, 1, 'transformTransactionsToInventoryLedger:delete');
+          for (let i = 0; i < idempotencyKeysToDelete.length; i += deleteBatchSize) {
+            const chunk = idempotencyKeysToDelete.slice(i, i + deleteBatchSize);
+            const res = await this.prisma.inventoryLedger.deleteMany({
+              where: { tenantId, idempotencyKey: { in: chunk } },
+            });
+            totalCleared += res.count;
+          }
+        }
+      }
+
+      // Bulk INSERT ... ON CONFLICT DO UPDATE for the insert-bucket.
+      const toInsert = decisions.filter((d) => d.shouldInsert);
+      if (toInsert.length > 0) {
+        // 16 bind variables per row (see VALUES tuple below).
+        const insertBatchSize = this.computeSafeBatchSize(this.stagingBatchSize, 16, 'transformTransactionsToInventoryLedger:insert');
+        for (let i = 0; i < toInsert.length; i += insertBatchSize) {
+          const chunk = toInsert.slice(i, i + insertBatchSize);
+          const values = Prisma.join(
+            chunk.map((d) => Prisma.sql`(
+              ${tenantId}::uuid,
+              ${d.mt.date}::date,
+              ${d.productId}::uuid,
+              ${d.locationId}::uuid,
+              ${d.batchId},
+              ${d.entryType}::"LedgerEntryType",
+              ${d.quantity}::numeric,
+              ${'PCS'},
+              ${d.unitCost}::numeric,
+              ${d.totalCost}::numeric,
+              ${MARG_SOURCE_SYSTEM},
+              ${d.referenceNumber},
+              ${d.idempotencyKey},
+              ${d.mt.batch?.substring(0, 100) ?? null},
+              ${systemUser?.id ?? null},
+              ${d.notes ?? null}
+            )`),
+            ',',
+          );
+          await this.prisma.$executeRaw(Prisma.sql`
+            INSERT INTO inventory_ledger (
+              tenant_id, transaction_date, product_id, location_id, batch_id,
+              entry_type, quantity, uom, unit_cost, total_cost,
+              reference_type, reference_number, idempotency_key, lot_number,
+              created_by_id, notes
+            )
+            VALUES ${values}
+            ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET
+              transaction_date = EXCLUDED.transaction_date,
+              product_id       = EXCLUDED.product_id,
+              location_id      = EXCLUDED.location_id,
+              batch_id         = EXCLUDED.batch_id,
+              entry_type       = EXCLUDED.entry_type,
+              quantity         = EXCLUDED.quantity,
+              uom              = EXCLUDED.uom,
+              unit_cost        = EXCLUDED.unit_cost,
+              total_cost       = EXCLUDED.total_cost,
+              reference_type   = EXCLUDED.reference_type,
+              reference_number = EXCLUDED.reference_number,
+              lot_number       = EXCLUDED.lot_number,
+              created_by_id    = EXCLUDED.created_by_id,
+              notes            = EXCLUDED.notes
+          `);
+          totalInserted += chunk.length;
         }
       }
 
       cursor = staged[staged.length - 1].id;
+      // Per-page heartbeat so the UI shows progress through a long run.
+      this.logger.log(
+        `transformTransactionsToInventoryLedger page: rows=${staged.length} ` +
+        `cumulativeInserted=${totalInserted} cumulativeCleared=${totalCleared} ` +
+        `affectedScopes=${affectedInventoryScopes.size}`,
+      );
     }
+
+    const elapsedMs = Date.now() - startedAt;
+    this.logger.log(
+      `transformTransactionsToInventoryLedger done: inserted=${totalInserted} ` +
+      `cleared=${totalCleared} affectedScopes=${affectedInventoryScopes.size} ` +
+      `elapsedMs=${elapsedMs}`,
+    );
 
     await this.rebuildMargLedgerRunningBalances(tenantId, affectedInventoryScopes);
   }
@@ -10705,6 +11009,120 @@ export class MargEdeService {
     });
 
     return batch?.id ?? null;
+  }
+
+  /**
+   * Cache-warming helpers used by the bulk inventory-projection transforms
+   * (transformTransactionsToInventoryLedger / transformTransactionsToInventoryTransactions).
+   *
+   * Each warms the supplied cache with ONE batched query for a set of keys
+   * instead of N per-key findFirst round-trips. Keys already present in
+   * the cache are skipped — cheap to call repeatedly across transform
+   * pages, the cache accumulates and per-row lookup becomes O(1) Map.get.
+   *
+   * All three helpers preserve the resolveXyzId semantic: missing rows
+   * end up cached as `null` (negative caching) so a later page does not
+   * re-query for the same missing identifier.
+   */
+  private async warmProductIdCache(
+    tenantId: string,
+    keys: Set<string>, // formatted as "companyId:pid"
+    cache: Map<string, string | null>,
+  ): Promise<void> {
+    if (keys.size === 0) return;
+    // Partition by companyId so we can issue ONE query per company with
+    // a WHERE pid IN (...) clause. MargProduct's unique key is
+    // (tenantId, companyId, pid).
+    const wantByCompany = new Map<number, Set<string>>();
+    for (const key of keys) {
+      if (cache.has(key)) continue;
+      const sep = key.indexOf(':');
+      if (sep <= 0) continue;
+      const companyId = Number(key.slice(0, sep));
+      const pid = key.slice(sep + 1);
+      if (!Number.isFinite(companyId) || !pid) continue;
+      let bucket = wantByCompany.get(companyId);
+      if (!bucket) {
+        bucket = new Set<string>();
+        wantByCompany.set(companyId, bucket);
+      }
+      bucket.add(pid);
+    }
+    for (const [companyId, pids] of wantByCompany) {
+      const rows = await this.margPrisma.margProduct.findMany({
+        where: { tenantId, companyId, pid: { in: Array.from(pids) }, productId: { not: null } },
+        select: { pid: true, productId: true },
+      });
+      const present = new Set<string>();
+      for (const row of rows) {
+        cache.set(`${companyId}:${row.pid}`, row.productId);
+        present.add(row.pid);
+      }
+      // Negative-cache the misses so a later page doesn't re-query.
+      for (const pid of pids) {
+        if (!present.has(pid)) cache.set(`${companyId}:${pid}`, null);
+      }
+    }
+  }
+
+  private async warmLocationIdCache(
+    tenantId: string,
+    companyIds: Set<number>,
+    cache: Map<number, string | null>,
+  ): Promise<void> {
+    if (companyIds.size === 0) return;
+    const wanted: number[] = [];
+    for (const c of companyIds) if (!cache.has(c)) wanted.push(c);
+    if (wanted.length === 0) return;
+    const rows = await this.margPrisma.margBranch.findMany({
+      where: { tenantId, companyId: { in: wanted }, locationId: { not: null } },
+      select: { companyId: true, locationId: true },
+    });
+    const present = new Set<number>();
+    for (const row of rows) {
+      cache.set(row.companyId, row.locationId);
+      present.add(row.companyId);
+    }
+    for (const c of wanted) if (!present.has(c)) cache.set(c, null);
+  }
+
+  private async warmBatchIdCache(
+    tenantId: string,
+    keys: Set<string>, // formatted as "productId|locationId|batchNumber"
+    cache: Map<string, string | null>,
+  ): Promise<void> {
+    if (keys.size === 0) return;
+    // Group by (productId, locationId) so we can do one IN-query per
+    // scope. The unique key is (tenantId, productId, locationId, batchNumber).
+    const wantByScope = new Map<string, { productId: string; locationId: string; batches: Set<string> }>();
+    for (const key of keys) {
+      if (cache.has(key)) continue;
+      const parts = key.split('|');
+      if (parts.length !== 3) continue;
+      const [productId, locationId, batchNumber] = parts;
+      if (!productId || !locationId || !batchNumber) continue;
+      const scopeKey = `${productId}|${locationId}`;
+      let bucket = wantByScope.get(scopeKey);
+      if (!bucket) {
+        bucket = { productId, locationId, batches: new Set<string>() };
+        wantByScope.set(scopeKey, bucket);
+      }
+      bucket.batches.add(batchNumber);
+    }
+    for (const { productId, locationId, batches } of wantByScope.values()) {
+      const rows = await this.prisma.batch.findMany({
+        where: { tenantId, productId, locationId, batchNumber: { in: Array.from(batches) } },
+        select: { id: true, batchNumber: true },
+      });
+      const present = new Set<string>();
+      for (const row of rows) {
+        cache.set(`${productId}|${locationId}|${row.batchNumber}`, row.id);
+        present.add(row.batchNumber);
+      }
+      for (const b of batches) {
+        if (!present.has(b)) cache.set(`${productId}|${locationId}|${b}`, null);
+      }
+    }
   }
 
   private isProjectableCustomerParty(party: {

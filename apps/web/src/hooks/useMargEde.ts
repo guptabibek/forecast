@@ -257,6 +257,49 @@ export function useDeleteMargGlMappingRule() {
   });
 }
 
+// ==================== RECOVERY / OPERATIONAL ====================
+
+export function useResumeMargSync() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ configId, syncLogId }: { configId: string; syncLogId: string }) =>
+      margEdeService.resumeSync(configId, syncLogId),
+    onSuccess: () => invalidateAllMargQueries(queryClient),
+  });
+}
+
+export function useResetMargSyncCursor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      configId,
+      options,
+    }: {
+      configId: string;
+      options?: { scope?: 'FULL' | 'ACCOUNTING'; clearStaging?: boolean };
+    }) => margEdeService.resetSyncCursor(configId, options),
+    onSuccess: () => invalidateAllMargQueries(queryClient),
+  });
+}
+
+export function useForceUnlockMargConfig() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ configId, force = false }: { configId: string; force?: boolean }) =>
+      margEdeService.forceUnlock(configId, force),
+    onSuccess: () => invalidateAllMargQueries(queryClient),
+  });
+}
+
+export function useRecoverStaleMargSyncLog() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ configId, syncLogId }: { configId: string; syncLogId: string }) =>
+      margEdeService.recoverStaleSyncLog(configId, syncLogId),
+    onSuccess: () => invalidateAllMargQueries(queryClient),
+  });
+}
+
 export type MargAnyStagedRow =
   | MargStagedAccountGroup
   | MargStagedAccountGroupBalance

@@ -1,12 +1,16 @@
 import { Badge, Card, Column, DataTable, Modal, QueryErrorBanner } from '@components/ui';
 import {
     ArrowPathIcon,
+    ArrowUturnLeftIcon,
     CloudArrowUpIcon,
+    LockOpenIcon,
     PencilSquareIcon,
     PlayIcon,
     PlusIcon,
     ShieldCheckIcon,
+    StopCircleIcon,
     TrashIcon,
+    WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline';
 import {
     CreateMargConfigDto,
@@ -54,6 +58,10 @@ import {
     useTriggerMargSync,
     useUpdateMargConfig,
     useUpdateMargGlMappingRule,
+    useResumeMargSync,
+    useResetMargSyncCursor,
+    useForceUnlockMargConfig,
+    useRecoverStaleMargSyncLog,
 } from '@hooks/useMargEde';
 import { useAuthStore } from '@stores/auth.store';
 import { useEffect, useMemo, useState } from 'react';
@@ -389,7 +397,16 @@ export default function MargEdePage() {
   const createRuleMutation = useCreateMargGlMappingRule();
   const updateRuleMutation = useUpdateMargGlMappingRule();
   const deleteRuleMutation = useDeleteMargGlMappingRule();
+  const resumeSyncMutation = useResumeMargSync();
+  const resetCursorMutation = useResetMargSyncCursor();
+  const forceUnlockMutation = useForceUnlockMargConfig();
+  const recoverStaleMutation = useRecoverStaleMargSyncLog();
   const isAnySyncActionPending = triggerSyncMutation.isPending || triggerAccountingSyncMutation.isPending;
+  const isAnyRecoveryPending =
+    resumeSyncMutation.isPending
+    || resetCursorMutation.isPending
+    || forceUnlockMutation.isPending
+    || recoverStaleMutation.isPending;
   const monitoredScope = isSyncMonitoring ? (lastTriggeredScope ?? 'full') : null;
   const isAccountingSyncMonitoring = monitoredScope === 'accounting';
   const isFullSyncMonitoring = monitoredScope === 'full';
@@ -612,6 +629,30 @@ export default function MargEdePage() {
             className="btn-ghost btn-sm"
             onClick={(event) => {
               event.stopPropagation();
+              void handleForceUnlock(row.id);
+            }}
+            disabled={isAnyRecoveryPending}
+            title="Release a stuck RUNNING lock when the worker is known-dead. After unlock, use Resume on the failed sync log to recover progress."
+          >
+            <LockOpenIcon className="w-4 h-4 mr-1" />
+            Unlock
+          </button>
+          <button
+            className="btn-ghost btn-sm"
+            onClick={(event) => {
+              event.stopPropagation();
+              void handleResetCursor(row.id);
+            }}
+            disabled={isAnyRecoveryPending || row.lastSyncStatus === 'RUNNING' || row.lastAccountingSyncStatus === 'RUNNING'}
+            title="Reset pagination cursor so the next sync re-pulls a complete snapshot. Use when totals diverge from Marg ERP."
+          >
+            <ArrowUturnLeftIcon className="w-4 h-4 mr-1" />
+            Reset
+          </button>
+          <button
+            className="btn-ghost btn-sm"
+            onClick={(event) => {
+              event.stopPropagation();
               openEditModal(row);
             }}
           >
@@ -676,6 +717,50 @@ export default function MargEdePage() {
           : <Badge variant="success" size="sm">0</Badge>;
       },
       align: 'center',
+    },
+    {
+      key: 'recovery',
+      header: 'Recovery',
+      accessor: (row) => {
+        const isFailed = row.status === 'FAILED';
+        const isRunning = row.status === 'RUNNING';
+        const configId = row.configId;
+        if (!isFailed && !isRunning) {
+          return <span className="text-xs text-slate-400">-</span>;
+        }
+        return (
+          <div className="flex items-center gap-2">
+            {isFailed && (
+              <button
+                className="btn-ghost btn-sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleResumeSync(configId, row.id);
+                }}
+                disabled={isAnyRecoveryPending}
+                title="Re-stage saved raw pages from this failed sync without refetching from Marg. Allowed for FAILED_RETRYABLE runs."
+              >
+                <WrenchScrewdriverIcon className="w-4 h-4 mr-1" />
+                Resume
+              </button>
+            )}
+            {isRunning && (
+              <button
+                className="btn-ghost btn-sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleRecoverStale(configId, row.id);
+                }}
+                disabled={isAnyRecoveryPending}
+                title="Mark a stale RUNNING sync (no recent heartbeat) as FAILED_RETRYABLE so Resume or a fresh sync can proceed."
+              >
+                <StopCircleIcon className="w-4 h-4 mr-1" />
+                Recover
+              </button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -1019,6 +1104,102 @@ export default function MargEdePage() {
       }
     } catch (error) {
       toast.error(getErrorMessage(error, 'Unable to trigger Marg EDE sync.'));
+    }
+  }
+
+  async function handleResumeSync(configId: string, syncLogId: string) {
+    const confirmed = window.confirm(
+      'Resume this failed sync from saved raw pages? ' +
+      'This re-stages without refetching from Marg. ' +
+      'After it completes, run a "Reproject" to apply transforms.',
+    );
+    if (!confirmed) return;
+    try {
+      const result = await resumeSyncMutation.mutateAsync({ configId, syncLogId });
+      toast.success(result.message || `Resume ${result.status}.`);
+      void refetchLogs();
+      void refetchOverview();
+      void refetchConfigs();
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Unable to resume Marg sync.'));
+    }
+  }
+
+  async function handleResetCursor(configId: string) {
+    const choice = window.prompt(
+      'Reset sync cursor for this config.\n\n' +
+      'Type one of:\n' +
+      '  FULL          - reset both inventory and accounting cursors\n' +
+      '  ACCOUNTING    - reset accounting cursor only\n' +
+      '  FULL+CLEAR    - reset both AND flag all staged stock as deleted (slow, exhaustive)\n\n' +
+      'Cancel aborts.',
+      'FULL',
+    );
+    if (!choice) return;
+    const upper = choice.trim().toUpperCase();
+    const clearStaging = upper === 'FULL+CLEAR';
+    const scope: 'FULL' | 'ACCOUNTING' = upper === 'ACCOUNTING' ? 'ACCOUNTING' : 'FULL';
+    if (!['FULL', 'ACCOUNTING', 'FULL+CLEAR'].includes(upper)) {
+      toast.error('Cursor reset aborted: unrecognised option.');
+      return;
+    }
+    try {
+      const result = await resetCursorMutation.mutateAsync({
+        configId,
+        options: { scope, clearStaging },
+      });
+      toast.success(
+        `Cursor reset: inventory=${result.cleared.inventory}, accounting=${result.cleared.accounting}` +
+        (result.stagingCleared ? ', stagingCleared=true' : ''),
+      );
+      void refetchOverview();
+      void refetchConfigs();
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Unable to reset sync cursor.'));
+    }
+  }
+
+  async function handleForceUnlock(configId: string) {
+    const force = window.confirm(
+      'Force-unlock this sync config?\n\n' +
+      'OK = bypass the recent-heartbeat safety check (use ONLY if the worker is known-dead, e.g. just restarted the container).\n' +
+      'Cancel = abort.\n\n' +
+      'After unlock, use "Resume" on any FAILED_RETRYABLE sync to recover progress without refetching from Marg.',
+    );
+    if (!force) return;
+    try {
+      const result = await forceUnlockMutation.mutateAsync({ configId, force: true });
+      if (result.refusedReason) {
+        toast.error(`Force-unlock refused: ${result.refusedReason}`);
+      } else {
+        toast.success(
+          `Lock released. Inventory=${result.inventoryReleased}, accounting=${result.accountingReleased}, ` +
+          `runningLogsRecovered=${result.runningLogsRecovered}.`,
+        );
+      }
+      void refetchLogs();
+      void refetchOverview();
+      void refetchConfigs();
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Unable to force-unlock config.'));
+    }
+  }
+
+  async function handleRecoverStale(configId: string, syncLogId: string) {
+    const confirmed = window.confirm(
+      'Mark this stale RUNNING sync as FAILED_RETRYABLE? ' +
+      'Use when a sync has been RUNNING with no heartbeat (usually a crashed worker). ' +
+      'This does NOT auto-resume — it only releases the lock so you can choose to Resume or start fresh.',
+    );
+    if (!confirmed) return;
+    try {
+      const result = await recoverStaleMutation.mutateAsync({ configId, syncLogId });
+      toast.success(result.message || `Outcome: ${result.outcome}`);
+      void refetchLogs();
+      void refetchOverview();
+      void refetchConfigs();
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Unable to recover stale sync log.'));
     }
   }
 

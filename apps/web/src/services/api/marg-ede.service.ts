@@ -325,6 +325,48 @@ export interface TriggerSyncResponse {
   message: string;
 }
 
+export interface ResumeSyncResponse {
+  jobId?: string | number;
+  syncLogId: string;
+  status: 'queued' | 'completed' | 'partial' | string;
+  message: string;
+  pagesResumed?: number;
+  pagesAlreadyStaged?: number;
+  pagesFailed?: number;
+}
+
+export interface ResetSyncCursorResponse {
+  configId: string;
+  cleared: { inventory: boolean; accounting: boolean };
+  stagingCleared: boolean;
+}
+
+export interface ForceUnlockResponse {
+  configId: string;
+  inventoryReleased: boolean;
+  accountingReleased: boolean;
+  runningLogsRecovered: number;
+  refusedReason?: string | null;
+}
+
+export interface RecoverStaleSyncLogResponse {
+  configId: string;
+  syncLogId: string;
+  outcome: 'recovered' | 'not_stale' | 'already_failed' | 'not_running' | string;
+  message?: string;
+}
+
+export interface LockedConfigInfo {
+  configId: string;
+  companyCode: string;
+  lastSyncStatus: string;
+  lastAccountingSyncStatus: string;
+  lockAgeMs: number;
+  lastHeartbeatAt: string | null;
+  heartbeatAgeMs: number | null;
+  isStale: boolean;
+}
+
 export interface MargConnectionProbeSummary {
   apiType: '1' | '2';
   index: number;
@@ -492,6 +534,48 @@ export const margEdeService = {
 
   async getStagedOutstandings(params?: { page?: number; pageSize?: number }): Promise<PaginatedResponse<MargStagedOutstanding>> {
     const { data } = await apiClient.get<PaginatedResponse<MargStagedOutstanding>>(`${BASE_PATH}/staged/outstandings`, { params });
+    return data;
+  },
+
+  // ==================== RECOVERY / OPERATIONAL ====================
+
+  async resumeSync(configId: string, syncLogId: string): Promise<ResumeSyncResponse> {
+    const { data } = await apiClient.post<ResumeSyncResponse>(
+      `${BASE_PATH}/configs/${configId}/syncs/${syncLogId}/resume`,
+    );
+    return data;
+  },
+
+  async resetSyncCursor(
+    configId: string,
+    options?: { scope?: 'FULL' | 'ACCOUNTING'; clearStaging?: boolean },
+  ): Promise<ResetSyncCursorResponse> {
+    const { data } = await apiClient.post<ResetSyncCursorResponse>(
+      `${BASE_PATH}/configs/${configId}/reset-cursor`,
+      undefined,
+      { params: options },
+    );
+    return data;
+  },
+
+  async forceUnlock(configId: string, force = false): Promise<ForceUnlockResponse> {
+    const { data } = await apiClient.post<ForceUnlockResponse>(
+      `${BASE_PATH}/configs/${configId}/force-unlock`,
+      undefined,
+      { params: { force } },
+    );
+    return data;
+  },
+
+  async recoverStaleSyncLog(configId: string, syncLogId: string): Promise<RecoverStaleSyncLogResponse> {
+    const { data } = await apiClient.post<RecoverStaleSyncLogResponse>(
+      `${BASE_PATH}/configs/${configId}/syncs/${syncLogId}/recover-stale`,
+    );
+    return data;
+  },
+
+  async getLockedConfigs(): Promise<LockedConfigInfo[]> {
+    const { data } = await apiClient.get<LockedConfigInfo[]>(`${BASE_PATH}/configs/locked`);
     return data;
   },
 };

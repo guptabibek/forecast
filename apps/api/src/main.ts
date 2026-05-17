@@ -1,4 +1,4 @@
-import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
+import { Logger, LogLevel, ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -22,9 +22,27 @@ if (typeof (BigInt.prototype as { toJSON?: () => string }).toJSON !== 'function'
   });
 }
 
+// Parse LOG_LEVEL env into Nest log levels.
+//   LOG_LEVEL=error            -> errors only (quiet prod)
+//   LOG_LEVEL=error,warn       -> errors + warnings (recommended default)
+//   LOG_LEVEL=error,warn,log   -> + info (verbose)
+//   LOG_LEVEL=debug            -> + debug + verbose (developer)
+// Sync-flow logs use SyncLogger (./modules/marg-ede/sync-logger.ts) which
+// writes directly to stdout and is NOT subject to this filter — operators
+// always see what the Marg sync is doing even when the rest of the API is
+// silenced. Unrecognised tokens are ignored.
+function parseLogLevels(raw: string | undefined): LogLevel[] {
+  const valid: LogLevel[] = ['error', 'warn', 'log', 'debug', 'verbose'];
+  if (!raw) return ['error', 'warn'];
+  const tokens = raw.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (tokens.includes('debug')) return valid;
+  const picked = tokens.filter((t): t is LogLevel => (valid as string[]).includes(t));
+  return picked.length > 0 ? picked : ['error', 'warn'];
+}
+
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+    logger: parseLogLevels(process.env.LOG_LEVEL),
   });
 
   const configService = app.get(ConfigService);

@@ -1647,4 +1647,342 @@ describe('Marg resumable sync pipeline', () => {
       void writeFileSync;
     });
   });
+
+  // ============================================================
+  // Bulk inventory transforms (ledger + inventory_transactions)
+  // ============================================================
+  describe('bulk inventory transforms', () => {
+    /**
+     * Helper: build a service whose Prisma client and Marg-prisma proxy are
+     * mocked exactly to the surface the new bulk transforms touch.
+     *
+     * - margTransaction.findMany: returns a staged-tx page then [] on second call
+     * - margProduct.findMany / margBranch.findMany / batch.findMany: warm-cache lookups
+     * - margVoucher.findMany: voucher contexts (empty is fine — fallback to transaction fields)
+     * - inventoryLedger.deleteMany / inventoryTransaction.deleteMany: bulk DELETE clears
+     * - $executeRaw: the bulk INSERT statements — we record them and assert on params
+     * - user.findFirst: system user for createdById FK
+     */
+    const tenantId = '00000000-0000-0000-0000-0000000000a1';
+    const systemUserId = '00000000-0000-0000-0000-0000000000a2';
+
+    function buildBulkTransformPrismaStubs(stagedRows: any[]) {
+      const executeRawCalls: Array<{ sql: string; params: unknown[] }> = [];
+      let stagedPagesServed = 0;
+      const margProductRowsByCompany: Record<number, Array<{ pid: string; productId: string }>> = {
+        7: [
+          { pid: 'P-1', productId: '11111111-1111-1111-1111-111111111111' },
+          { pid: 'P-2', productId: '22222222-2222-2222-2222-222222222222' },
+        ],
+      };
+      const margBranchRows = [
+        { companyId: 7, locationId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' },
+      ];
+
+      const prisma = {
+        user: {
+          findFirst: jest.fn().mockResolvedValue({ id: systemUserId }),
+        },
+        inventoryLedger: {
+          deleteMany: jest.fn().mockImplementation(async ({ where }: any) => ({
+            count: Array.isArray(where?.idempotencyKey?.in) ? where.idempotencyKey.in.length : 0,
+          })),
+        },
+        inventoryTransaction: {
+          deleteMany: jest.fn().mockImplementation(async ({ where }: any) => ({
+            count: Array.isArray(where?.idempotencyKey?.in) ? where.idempotencyKey.in.length : 0,
+          })),
+        },
+        batch: {
+          findMany: jest.fn().mockResolvedValue([]), // no batch FKs known
+        },
+        $executeRaw: jest.fn().mockImplementation((sqlObj: any) => {
+          executeRawCalls.push({
+            sql: Array.isArray(sqlObj?.strings) ? sqlObj.strings.join(' ') : String(sqlObj),
+            params: Array.isArray(sqlObj?.values) ? sqlObj.values : [],
+          });
+          return Promise.resolve(1);
+        }),
+      } as any;
+
+      const margPrisma = {
+        margTransaction: {
+          findMany: jest.fn().mockImplementation(async () => {
+            if (stagedPagesServed === 0) {
+              stagedPagesServed += 1;
+              return stagedRows;
+            }
+            return []; // terminates the cursor loop
+          }),
+        },
+        margProduct: {
+          findMany: jest.fn().mockImplementation(async ({ where }: any) => {
+            const companyId = where?.companyId;
+            const wantedPids: string[] = where?.pid?.in ?? [];
+            const rows = margProductRowsByCompany[companyId] ?? [];
+            return rows.filter((r) => wantedPids.includes(r.pid));
+          }),
+        },
+        margBranch: {
+          findMany: jest.fn().mockImplementation(async ({ where }: any) => {
+            const wanted: number[] = where?.companyId?.in ?? [];
+            return margBranchRows.filter((r) => wanted.includes(r.companyId));
+          }),
+        },
+        margVoucher: {
+          findMany: jest.fn().mockResolvedValue([]),
+        },
+      } as any;
+
+      // The service uses `this.prisma.X` for core tables and `this.margPrisma`
+      // for marg_* — but margPrisma is a getter returning this.prisma. So
+      // the mock prisma object needs every model both sides reference.
+      Object.assign(prisma, margPrisma);
+
+      return { prisma, executeRawCalls };
+    }
+
+    it('inventory_ledger bulk transform: insert rows + clear rows partition correctly', async () => {
+      // Two staged tx: one sales (should INSERT into ledger), one stock-receive
+      // type that the resolver decides should NOT project (should DELETE any prior).
+      const stagedRows = [
+        {
+          id: 'mt-1',
+          sourceKey: 'marg:7:1001',
+          companyId: 7,
+          voucher: 'S-1',
+          type: 'S',           // sale → typically should project
+          vcn: null,
+          addField: null,
+          date: new Date('2026-04-15T00:00:00Z'),
+          pid: 'P-1',
+          batch: null,
+          qty: 5,
+          free: null,
+          amount: 1000,
+        },
+        {
+          id: 'mt-2',
+          sourceKey: 'marg:7:1002',
+          companyId: 7,
+          voucher: 'X-9',
+          type: 'X-NOOP',      // unrecognized → resolver returns shouldProjectInventory=false
+          vcn: null,
+          addField: null,
+          date: new Date('2026-04-15T00:00:00Z'),
+          pid: 'P-2',
+          batch: null,
+          qty: 1,
+          free: null,
+          amount: 100,
+        },
+      ];
+
+      const { prisma, executeRawCalls } = buildBulkTransformPrismaStubs(stagedRows);
+      const service = new MargEdeService(prisma, {} as any, {} as any);
+      // Stub: rebuildMargLedgerRunningBalances is its own method — assume it works.
+      (service as any).rebuildMargLedgerRunningBalances = jest.fn().mockResolvedValue(undefined);
+      // Stub the projection-decision resolver so the partition is deterministic.
+      (service as any).resolveMargType2ProjectionDecision = jest.fn().mockImplementation((input: any) => {
+        if (input.transactionType === 'S') {
+          return {
+            shouldProjectInventory: true,
+            ledgerEntryType: 'ISSUE',
+            ledgerQuantity: 5,
+            family: 'SALES_INVOICE',
+            headerType: null,
+            inventoryTransactionType: 'ISSUE',
+            inventoryQuantity: 5,
+          };
+        }
+        return {
+          shouldProjectInventory: false,
+          ledgerEntryType: null,
+          ledgerQuantity: 0,
+          family: 'UNKNOWN',
+          headerType: null,
+          inventoryTransactionType: null,
+          inventoryQuantity: 0,
+        };
+      });
+
+      await (service as any).transformTransactionsToInventoryLedger(tenantId, null, false);
+
+      // Exactly ONE bulk INSERT for the one projectable row.
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+      const insertCall = executeRawCalls[0];
+      expect(insertCall.sql).toMatch(/INSERT INTO inventory_ledger/);
+      expect(insertCall.sql).toMatch(/ON CONFLICT \(tenant_id, idempotency_key\) DO UPDATE/);
+      // 16 binds per row × 1 row = 16 (tenantId, date, productId, locationId,
+      // batchId, entryType, quantity, uom, unitCost, totalCost, refType,
+      // refNumber, idempotencyKey, lotNumber, createdById, notes).
+      expect(insertCall.params).toHaveLength(16);
+      // The productId (P-1 → '111...111'), entry type, qty, and the Marg
+      // reference number prefix all need to flow through unchanged.
+      expect(insertCall.params).toEqual(expect.arrayContaining([
+        '11111111-1111-1111-1111-111111111111',         // productId for P-1
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',         // locationId for companyId=7
+        'ISSUE',                                         // entry_type
+        5,                                               // quantity
+        expect.stringMatching(/^MARG-/),                 // reference_number
+        expect.stringContaining('marg:7:1001'),          // idempotency_key
+      ]));
+
+      // Exactly ONE bulk DELETE for the one non-projectable row (idempotency
+      // key cleanup so a previously-projected ledger row gets removed).
+      expect(prisma.inventoryLedger.deleteMany).toHaveBeenCalledTimes(1);
+      const deleteArgs = prisma.inventoryLedger.deleteMany.mock.calls[0][0];
+      expect(deleteArgs.where.tenantId).toBe(tenantId);
+      expect(deleteArgs.where.idempotencyKey.in).toHaveLength(1);
+    });
+
+    it('inventory_ledger bulk transform: skips clears when projectionWindowReset=true', async () => {
+      // When the caller already cleared the window upfront, the transform
+      // must NOT re-issue per-row deletes (saves cost on reproject paths).
+      const stagedRows = [
+        {
+          id: 'mt-3',
+          sourceKey: 'marg:7:1003',
+          companyId: 7,
+          voucher: 'X',
+          type: 'X-NOOP',
+          vcn: null,
+          addField: null,
+          date: new Date('2026-04-15T00:00:00Z'),
+          pid: 'P-1',
+          batch: null,
+          qty: 1,
+          free: null,
+          amount: 100,
+        },
+      ];
+      const { prisma } = buildBulkTransformPrismaStubs(stagedRows);
+      const service = new MargEdeService(prisma, {} as any, {} as any);
+      (service as any).rebuildMargLedgerRunningBalances = jest.fn().mockResolvedValue(undefined);
+      (service as any).resolveMargType2ProjectionDecision = jest.fn().mockReturnValue({
+        shouldProjectInventory: false,
+        ledgerEntryType: null,
+        ledgerQuantity: 0,
+        family: 'UNKNOWN',
+        headerType: null,
+      });
+
+      await (service as any).transformTransactionsToInventoryLedger(tenantId, null, /* projectionWindowReset */ true);
+
+      // Neither inserts nor deletes — nothing to project AND reset says
+      // "operator already cleaned the window upstream".
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+      expect(prisma.inventoryLedger.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('inventory_transactions bulk transform: warms caches with ONE batched query each', async () => {
+      // Two rows for the same companyId; we want exactly one margProduct
+      // findMany (with WHERE pid IN) and one margBranch findMany — NOT a
+      // findFirst per row, which was the old hot path.
+      const stagedRows = [
+        {
+          id: 'mt-10',
+          sourceKey: 'marg:7:2001',
+          companyId: 7,
+          voucher: 'S-A',
+          type: 'S',
+          vcn: null,
+          addField: null,
+          date: new Date('2026-04-10T00:00:00Z'),
+          pid: 'P-1',
+          batch: null,
+          qty: 2,
+          free: null,
+          amount: 200,
+        },
+        {
+          id: 'mt-11',
+          sourceKey: 'marg:7:2002',
+          companyId: 7,
+          voucher: 'S-B',
+          type: 'S',
+          vcn: null,
+          addField: null,
+          date: new Date('2026-04-11T00:00:00Z'),
+          pid: 'P-2',
+          batch: null,
+          qty: 3,
+          free: null,
+          amount: 600,
+        },
+      ];
+      const { prisma } = buildBulkTransformPrismaStubs(stagedRows);
+      const service = new MargEdeService(prisma, {} as any, {} as any);
+      (service as any).resolveMargType2ProjectionDecision = jest.fn().mockReturnValue({
+        shouldProjectInventory: true,
+        inventoryTransactionType: 'ISSUE',
+        inventoryQuantity: 1,
+        family: 'SALES_INVOICE',
+        headerType: null,
+        ledgerEntryType: 'ISSUE',
+        ledgerQuantity: 1,
+      });
+
+      await (service as any).transformTransactionsToInventoryTransactions(tenantId, null, false);
+
+      // ONE warm-cache call per resource, not per row.
+      expect(prisma.margProduct.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.margBranch.findMany).toHaveBeenCalledTimes(1);
+      // The WHERE clause must use IN over the unique pid set.
+      const productCall = prisma.margProduct.findMany.mock.calls[0][0];
+      expect(productCall.where.companyId).toBe(7);
+      expect(productCall.where.pid.in.sort()).toEqual(['P-1', 'P-2']);
+      // ONE bulk INSERT (both rows in same statement, 17 binds × 2 = 34 params).
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('inventory_ledger bulk transform: applies the 32k Postgres bind-cap clamp on the insert', async () => {
+      // Generate enough rows that 16 × rows would exceed 32767 binds at the
+      // default batch size — verify the clamp chunked them across multiple
+      // INSERT statements all staying under the cap.
+      const ROWS = 3000;
+      const stagedRows = Array.from({ length: ROWS }, (_, i) => ({
+        id: `mt-bulk-${i}`,
+        sourceKey: `marg:7:${i + 5000}`,
+        companyId: 7,
+        voucher: `V-${i}`,
+        type: 'S',
+        vcn: null,
+        addField: null,
+        date: new Date('2026-04-10T00:00:00Z'),
+        pid: 'P-1',
+        batch: null,
+        qty: 1,
+        free: null,
+        amount: 100,
+      }));
+
+      const { prisma, executeRawCalls } = buildBulkTransformPrismaStubs(stagedRows);
+      // Force a large requested batch so the clamp has to kick in.
+      process.env.MARG_STAGING_BATCH_SIZE = '5000';
+      try {
+        const service = new MargEdeService(prisma, {} as any, {} as any);
+        (service as any).rebuildMargLedgerRunningBalances = jest.fn().mockResolvedValue(undefined);
+        (service as any).resolveMargType2ProjectionDecision = jest.fn().mockReturnValue({
+          shouldProjectInventory: true,
+          ledgerEntryType: 'ISSUE',
+          ledgerQuantity: 1,
+          family: 'SALES_INVOICE',
+          headerType: null,
+        });
+
+        await (service as any).transformTransactionsToInventoryLedger(tenantId, null, false);
+
+        // Expect >1 INSERT batch because 5000 × 16 = 80k binds would exceed 32767.
+        // 3000 rows × 16 = 48k binds — clamp ≈ floor(32000/16) = 2000 per batch
+        // → 2 batches.
+        expect(prisma.$executeRaw.mock.calls.length).toBeGreaterThan(1);
+        for (const call of executeRawCalls) {
+          expect(call.params.length).toBeLessThan(32767);
+        }
+      } finally {
+        delete process.env.MARG_STAGING_BATCH_SIZE;
+      }
+    });
+  });
 });

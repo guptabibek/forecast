@@ -1,10 +1,11 @@
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger, Optional } from '@nestjs/common';
-import { DelayedError, Job, Queue } from 'bullmq';
+import { Logger, NotFoundException, Optional } from '@nestjs/common';
+import { UnrecoverableError, DelayedError, Job, Queue } from 'bullmq';
 import { PrismaService } from '../../core/database/prisma.service';
 import { QUEUE_NAMES } from '../../core/queue/queue.constants';
 import { MargEdeService } from './marg-ede.service';
 import { MARG_SYNC_MODE, MARG_SYNC_SCOPE, MargSyncJobData } from './marg-sync.types';
+import { SyncLogger } from './sync-logger';
 
 // How many Marg sync jobs this worker process pulls from the shared BullMQ
 // queue at the same time. Default 2 — enough to let two tenants sync in
@@ -20,6 +21,7 @@ const MARG_SYNC_WORKER_CONCURRENCY = Math.max(
 @Processor(QUEUE_NAMES.MARG_SYNC, { concurrency: MARG_SYNC_WORKER_CONCURRENCY })
 export class MargSyncProcessor extends WorkerHost {
   private readonly logger = new Logger(MargSyncProcessor.name);
+  private readonly syncLog = new SyncLogger(MargSyncProcessor.name);
 
   /**
    * Cap on how many ACTIVE jobs a single tenant may have across the entire
@@ -45,10 +47,11 @@ export class MargSyncProcessor extends WorkerHost {
     @Optional() @InjectQueue(QUEUE_NAMES.MARG_SYNC) private readonly margSyncQueue?: Queue,
   ) {
     super();
-    this.logger.log(
+    this.syncLog.info(
       `Marg sync worker initialized: workerConcurrency=${MARG_SYNC_WORKER_CONCURRENCY}, ` +
       `perTenantConcurrency=${this.perTenantConcurrency}, ` +
-      `queuePeek=${this.margSyncQueue ? 'enabled' : 'disabled'}`,
+      `queuePeek=${this.margSyncQueue ? 'enabled' : 'disabled'}, ` +
+      `debug=${this.syncLog.debugEnabled}`,
     );
   }
 
@@ -196,13 +199,14 @@ export class MargSyncProcessor extends WorkerHost {
       resumeSyncLogId,
     } = job.data;
 
-    this.logger.log(
+    this.syncLog.info(
       `Starting Marg EDE sync: configId=${configId}, tenantId=${tenantId}` +
       `, mode=${mode}` +
       `, scope=${scope}` +
       `${fromDate ? `, fromDate=${fromDate}` : ''}` +
       `${endDate ? `, endDate=${endDate}` : ''}` +
-      `${resumeSyncLogId ? `, resumeSyncLogId=${resumeSyncLogId}` : ''}`,
+      `${resumeSyncLogId ? `, resumeSyncLogId=${resumeSyncLogId}` : ''}` +
+      `, jobId=${job.id}`,
     );
 
     try {
@@ -211,7 +215,7 @@ export class MargSyncProcessor extends WorkerHost {
           throw new Error('Marg sync resume mode requires resumeSyncLogId in job data');
         }
         const result = await this.margEdeService.resumeSync(configId, tenantId, resumeSyncLogId, triggeredBy);
-        this.logger.log(
+        this.syncLog.info(
           `Marg EDE resume completed: syncLogId=${result.syncLogId}, ` +
           `pagesResumed=${result.pagesResumed}, pagesFailed=${result.pagesFailed}`,
         );
@@ -221,10 +225,20 @@ export class MargSyncProcessor extends WorkerHost {
       const syncLogId = mode === MARG_SYNC_MODE.REPROJECT
         ? await this.margEdeService.runReprojection(configId, tenantId, triggeredBy, fromDate, endDate, scope)
         : await this.margEdeService.runSync(configId, tenantId, triggeredBy, fromDate, endDate, scope);
-      this.logger.log(`Marg EDE ${mode} completed: syncLogId=${syncLogId}`);
+      this.syncLog.info(`Marg EDE ${mode} completed: syncLogId=${syncLogId}`);
       return { syncLogId, status: 'completed', mode };
     } catch (err) {
-      this.logger.error(`Marg EDE ${mode} failed: ${err}`, (err as Error).stack);
+      // Config was deleted/disabled between enqueue and run. Retrying will
+      // never succeed; surface as terminal so BullMQ stops attempting and
+      // the operator gets a single clear failure rather than a retry storm.
+      if (err instanceof NotFoundException) {
+        this.syncLog.warn(
+          `Marg EDE ${mode} aborted: config no longer exists (configId=${configId}, tenantId=${tenantId}). ` +
+          `Job will not retry. Recreate or re-enable the config to resume syncing.`,
+        );
+        throw new UnrecoverableError(`Marg config not found (configId=${configId})`);
+      }
+      this.syncLog.error(`Marg EDE ${mode} failed: ${err}`, (err as Error).stack);
       throw err;
     }
   }
