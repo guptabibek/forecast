@@ -18,7 +18,9 @@
       "PowerShell(npx --prefix apps/api tsc --noEmit -p apps/api/tsconfig.json 2>&1)",
       "Bash(echo \"exit=$?\")",
       "Bash(echo \"web-exit=$?\")",
-      "Bash(echo \"api-exit=$?\")"
+      "Bash(echo \"api-exit=$?\")",
+      "Bash(xargs grep -l \"ADD COLUMN\")",
+      "Bash(echo \"tsc=$?\")"
     ]
   }
 }
