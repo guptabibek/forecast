@@ -130,6 +130,14 @@ describe('MargEdeService helpers', () => {
   });
 
   it('refreshes linked core products with Marg master fields on every product transform', async () => {
+    // The bulk transformProducts emits one `INSERT INTO products … ON
+    // CONFLICT (tenant_id, code) DO UPDATE … RETURNING id, code` per chunk,
+    // joined via CTE with an `UPDATE marg_products SET product_id = …`.
+    // We assert on the raw-SQL invocation shape (no longer prisma.product.*
+    // method calls) and on the projection of the Marg master fields into
+    // the VALUES tuple.
+    const executeRaw = jest.fn().mockResolvedValue(1);
+    const queryRaw = jest.fn().mockResolvedValue([]); // sweepMargLegacyPidProducts
     const prisma = {
       margProduct: {
         findMany: jest.fn()
@@ -151,31 +159,37 @@ describe('MargEdeService helpers', () => {
         update: jest.fn().mockResolvedValue(undefined),
       },
       product: {
-        findFirst: jest.fn().mockResolvedValue({ id: 'product-1' }),
-        update: jest.fn().mockResolvedValue({ id: 'product-1' }),
+        findFirst: jest.fn(),
+        update: jest.fn(),
         upsert: jest.fn(),
       },
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
     } as any;
     service = new MargEdeService(prisma, {} as any, {} as any);
-    (service as any).mergeMargLegacyPidProduct = jest.fn().mockResolvedValue(undefined);
 
     await (service as any).transformProducts('tenant-1');
 
     expect(prisma.margProduct.findMany.mock.calls[0][0].where).toEqual({ tenantId: 'tenant-1' });
-    expect(prisma.product.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'product-1' },
-      data: expect.objectContaining({
-        productCompany: 'COMPANY',
-        salt: 'SALT',
-        productGroup: 'GROUP',
-        hsnCode: '3004',
-        externalId: 'marg:7:1002180',
-      }),
-    }));
-    expect(prisma.margProduct.update).toHaveBeenCalledWith({
-      where: { id: 'mp-1' },
-      data: { productId: 'product-1' },
-    });
+    // One bulk INSERT/ON CONFLICT/CTE-UPDATE per chunk.
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    // Reconstruct the rendered SQL from the Prisma.sql template to assert
+    // both the upsert shape and the master-field projection.
+    const sqlArg = executeRaw.mock.calls[0][0];
+    const renderedSql: string = Array.isArray(sqlArg?.strings) ? sqlArg.strings.join('?') : String(sqlArg);
+    expect(renderedSql).toContain('INSERT INTO products');
+    expect(renderedSql).toContain('ON CONFLICT (tenant_id, code) DO UPDATE');
+    expect(renderedSql).toContain('UPDATE marg_products');
+    expect(renderedSql).toContain('product_id = ins.id');
+    // Master fields land in the bind values; assert by inspecting the
+    // interpolated values array on the template literal.
+    const values: unknown[] = Array.isArray(sqlArg?.values) ? sqlArg.values : [];
+    expect(values).toEqual(expect.arrayContaining([
+      'COMPANY', 'SALT', 'GROUP', '3004', 'marg:7:1002180',
+    ]));
+    // Legacy mergeMargLegacyPidProduct sweep is invoked exactly once
+    // (returns no legacy pairs in this fixture).
+    expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it('persists Marg named masters from SaleType and product code fields', async () => {
