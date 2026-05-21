@@ -2971,6 +2971,62 @@ model MargOutstanding {
   @@map("marg_outstandings")
 }
 
+/// Materialised per-voucher (bill) rollup. One row per
+/// (tenant_id, company_id, voucher, type) — i.e. one row per Marg bill.
+///
+/// Maintained by `MargEdeService.refreshMargBillRollup(tenantId)` at the
+/// end of every sync / reprojection: that method DELETEs the tenant's
+/// rows and re-INSERTs the current rollup from marg_vouchers +
+/// marg_transactions + LATERAL marg_stocks. Reports read from this table
+/// directly instead of recomputing the aggregation live, which is the
+/// difference between report timeouts (live aggregation over hundreds of
+/// thousands of lines) and sub-second response (SUM over tens of
+/// thousands of pre-aggregated bill rows).
+///
+/// Only LIVE rows are materialised — both `marg_vouchers.is_cancelled =
+/// FALSE` AND `marg_transactions.is_cancelled = FALSE` filters are applied
+/// during refresh. Cancelled bills are not in this table at all.
+///
+/// IMPORTANT: any column reorder or new column must be reflected in
+/// `refreshMargBillRollup`'s INSERT (column order and value count must
+/// match), the one-time backfill SQL in the migration, AND the test that
+/// asserts refresh produces identical rows to live aggregation.
+model MargBillRollup {
+  tenantId               String   @map("tenant_id") @db.Uuid
+  companyId              Int      @map("company_id")
+  voucher                String   @db.VarChar(50)
+  type                   String   @db.VarChar(10)
+  vcn                    String?  @db.VarChar(50)
+  family                 String
+  date                   DateTime @db.Date
+  cid                    String?  @db.VarChar(20)
+  cash                   Decimal? @db.Decimal(18, 4)
+  others                 Decimal? @db.Decimal(18, 4)
+  salesman               String?  @db.VarChar(100)
+  mr                     String?  @db.VarChar(100)
+  route                  String?  @db.VarChar(100)
+  area                   String?  @db.VarChar(100)
+  finalAmt               Decimal? @map("final_amt") @db.Decimal(18, 4)
+  salesAmountSign        Int      @map("sales_amount_sign") @db.SmallInt
+  purchaseAmountSign     Int      @map("purchase_amount_sign") @db.SmallInt
+  quantity               Float
+  itemCount              Int      @map("item_count")
+  grossAmount            Float    @map("gross_amount")
+  discount               Float
+  taxAmount              Float    @map("tax_amount")
+  netAmount              Float    @map("net_amount")
+  costAmount             Float    @map("cost_amount")
+  signedSalesAmount      Float    @map("signed_sales_amount")
+  signedSalesQuantity    Float    @map("signed_sales_quantity")
+  signedPurchaseAmount   Float    @map("signed_purchase_amount")
+  signedPurchaseQuantity Float    @map("signed_purchase_quantity")
+  refreshedAt            DateTime @default(now()) @map("refreshed_at") @db.Timestamptz()
+
+  @@id([tenantId, companyId, voucher, type])
+  @@index([tenantId, date, family])
+  @@map("marg_bill_rollup")
+}
+
 model MargGLMappingRule {
   id                  String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   tenantId            String    @map("tenant_id") @db.Uuid

@@ -23,7 +23,10 @@
       "Bash(echo \"tsc=$?\")",
       "Bash(python -c ' *)",
       "Bash(python)",
-      "Bash(grep -n \"^}\\);$\\\\|^  }\\);$\" \"d:/RabbitTech/forecast-saas/apps/api/src/modules/marg-ede/marg-ede.service.spec.ts\")"
+      "Bash(grep -n \"^}\\);$\\\\|^  }\\);$\" \"d:/RabbitTech/forecast-saas/apps/api/src/modules/marg-ede/marg-ede.service.spec.ts\")",
+      "Bash(awk -F',' 'NR>1 {prefix=$1; gsub\\(/[0-9].*/, \"\", prefix\\); print prefix}' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")",
+      "Bash(awk -F',' 'NR>1 {prefix=$1; gsub\\(/[0-9].*/, \"\", prefix\\); count[prefix]++} END {for \\(p in count\\) print p, count[p]}' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")",
+      "Bash(awk -F',' 'NR==1 || /^W/' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")"
     ]
   }
 }

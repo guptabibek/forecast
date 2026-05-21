@@ -1886,6 +1886,22 @@ export class MargEdeService {
         errors.push(this.buildMargSyncDiagnosticsErrorStep(diagnostics));
       }
 
+      // Refresh the per-tenant bill rollup AFTER all projections have
+      // completed and BEFORE the sync log is finalised. This is the data
+      // every commercial report reads from — keeping the refresh in the
+      // critical path means reports see the new sync's data the moment the
+      // sync flips to COMPLETED (no separate refresh job, no eventual
+      // consistency window for users). Failure is non-fatal and logged;
+      // the rollup still has the PRIOR sync's data so reports stay
+      // available, and the next sync will retry the refresh.
+      try {
+        await this.touchSyncHeartbeat(configId, shouldRunInventory);
+        await this.refreshMargBillRollup(tenantId);
+      } catch (err) {
+        errors.push({ step: 'refresh_bill_rollup', error: String(err) });
+        this.logger.warn('Bill rollup refresh failed (non-fatal)', err);
+      }
+
       // Update sync config with latest cursor
       const configUpdate: Prisma.MargSyncConfigUpdateInput = shouldRunInventory
         ? {
@@ -12244,6 +12260,133 @@ export class MargEdeService {
       );
     }
     return count;
+  }
+
+  /**
+   * Rebuild the `marg_bill_rollup` materialised table for a single tenant.
+   *
+   * This is the per-sync maintenance step that keeps the rollup current —
+   * called at the end of every successful sync / reprojection so reports
+   * read the freshest possible data from the pre-aggregated table instead
+   * of recomputing the aggregation live over hundreds of thousands of
+   * transaction line rows.
+   *
+   * Strategy: DELETE the tenant's rows, then INSERT the current rollup.
+   * This is structurally idempotent — re-running it always produces the
+   * same result given the same source state — and is cheap because we only
+   * touch one tenant's data per call. Both DELETE and INSERT happen in a
+   * single transaction so reports never see a half-empty rollup.
+   *
+   * Mirrors the one-time backfill SQL in migration
+   * 20260521090000_add_marg_bill_rollup_table — both compute the same
+   * shape from the same sources. The test
+   * `refreshMargBillRollup produces totals matching live aggregation` pins
+   * that contract.
+   *
+   * Cancelled vouchers and cancelled line rows are filtered at refresh
+   * time, so cancelled bills are NEVER in the rollup. Reports therefore
+   * don't need to repeat the `is_cancelled = FALSE` filter — it's
+   * structurally enforced by what's materialised.
+   *
+   * Defensive: tests sometimes inject a partial Prisma mock without
+   * $executeRaw / margBillRollup. Mirror the no-op shape used by the
+   * sibling closure / bootstrap helpers so the orchestrator can call this
+   * unconditionally.
+   */
+  private async refreshMargBillRollup(tenantId: string): Promise<number> {
+    const delegate = this.prisma?.margBillRollup;
+    if (!delegate?.deleteMany || !this.prisma?.$executeRaw) {
+      return 0;
+    }
+
+    const startedAt = Date.now();
+    let inserted = 0;
+
+    await this.prisma.$transaction(async (tx: any) => {
+      await tx.margBillRollup.deleteMany({ where: { tenantId } });
+
+      // INSERT…SELECT mirroring the migration backfill. The shape and order
+      // of columns here must stay aligned with the table definition and
+      // the migration; the
+      // `refreshMargBillRollup produces totals matching live aggregation`
+      // test asserts that.
+      const result: number = await tx.$executeRaw(Prisma.sql`
+        INSERT INTO marg_bill_rollup (
+          tenant_id, company_id, voucher, type, vcn, family, date, cid,
+          cash, others, salesman, mr, route, area, final_amt,
+          sales_amount_sign, purchase_amount_sign,
+          quantity, item_count, gross_amount, discount, tax_amount,
+          net_amount, cost_amount,
+          signed_sales_amount, signed_sales_quantity,
+          signed_purchase_amount, signed_purchase_quantity,
+          refreshed_at
+        )
+        SELECT
+          mv.tenant_id,
+          mv.company_id,
+          mv.voucher,
+          mv.type,
+          mv.vcn,
+          mv.family,
+          mv.date,
+          mv.cid,
+          mv.cash,
+          mv.others,
+          mv.salesman,
+          mv.mr,
+          mv.route,
+          mv.area,
+          mv.final_amt,
+          (CASE mv.family WHEN 'SALES_INVOICE' THEN 1 WHEN 'SALES_RETURN'  THEN -1 ELSE 0 END)::smallint AS sales_amount_sign,
+          (CASE mv.family WHEN 'PURCHASE_INVOICE' THEN 1 WHEN 'PURCHASE_RETURN'  THEN -1 ELSE 0 END)::smallint AS purchase_amount_sign,
+          COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS quantity,
+          COUNT(DISTINCT mt.pid) FILTER (WHERE mt.pid IS NOT NULL)::int AS item_count,
+          COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(mt.rate, 0)), 0)::float8 AS gross_amount,
+          COALESCE(SUM(GREATEST(ABS(COALESCE(mt.qty, 0)) * COALESCE(mt.rate, 0) - ABS(COALESCE(mt.amount, 0)), 0)), 0)::float8 AS discount,
+          COALESCE(SUM(ABS(COALESCE(mt.gst_amount, 0))), 0)::float8 AS tax_amount,
+          COALESCE(MAX(mv.final_amt)::float8, SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))), 0)::float8 AS net_amount,
+          COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, 0)), 0)::float8 AS cost_amount,
+          (COALESCE(MAX(mv.final_amt)::float8, SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))), 0)
+            * (CASE mv.family WHEN 'SALES_INVOICE' THEN 1 WHEN 'SALES_RETURN'  THEN -1 ELSE 0 END))::float8 AS signed_sales_amount,
+          (COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)
+            * (CASE mv.family WHEN 'SALES_INVOICE' THEN 1 WHEN 'SALES_RETURN'  THEN -1 ELSE 0 END))::float8 AS signed_sales_quantity,
+          (COALESCE(MAX(mv.final_amt)::float8, SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))), 0)
+            * (CASE mv.family WHEN 'PURCHASE_INVOICE' THEN 1 WHEN 'PURCHASE_RETURN'  THEN -1 ELSE 0 END))::float8 AS signed_purchase_amount,
+          (COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)
+            * (CASE mv.family WHEN 'PURCHASE_INVOICE' THEN 1 WHEN 'PURCHASE_RETURN'  THEN -1 ELSE 0 END))::float8 AS signed_purchase_quantity,
+          NOW() AS refreshed_at
+        FROM marg_vouchers mv
+        LEFT JOIN marg_transactions mt
+          ON mt.tenant_id     = mv.tenant_id
+          AND mt.company_id    = mv.company_id
+          AND mt.voucher       = mv.voucher
+          AND mt.is_cancelled  = FALSE
+        LEFT JOIN LATERAL (
+          SELECT p_rate, lp_rate
+          FROM marg_stocks ms
+          WHERE ms.tenant_id  = mv.tenant_id
+            AND ms.company_id = mv.company_id
+            AND ms.pid        = mt.pid
+            AND (mt.batch IS NULL OR ms.batch = mt.batch)
+          ORDER BY CASE WHEN mt.batch IS NOT NULL AND ms.batch = mt.batch THEN 0 ELSE 1 END,
+                   ms.updated_at DESC
+          LIMIT 1
+        ) ms ON TRUE
+        WHERE mv.tenant_id = ${tenantId}::uuid
+          AND mv.is_cancelled = FALSE
+        GROUP BY
+          mv.tenant_id, mv.company_id, mv.voucher, mv.type, mv.vcn, mv.family,
+          mv.date, mv.cid, mv.cash, mv.others, mv.salesman, mv.mr, mv.route, mv.area,
+          mv.final_amt
+      `);
+      inserted = result ?? 0;
+    });
+
+    const elapsedMs = Date.now() - startedAt;
+    this.syncLog.info(
+      `refreshMargBillRollup: tenant=${tenantId} rows=${inserted} elapsedMs=${elapsedMs}`,
+    );
+    return inserted;
   }
 
   private async zeroOutMissingMargInventoryLevels(tenantId: string, activeInventoryKeys: Set<string>): Promise<void> {

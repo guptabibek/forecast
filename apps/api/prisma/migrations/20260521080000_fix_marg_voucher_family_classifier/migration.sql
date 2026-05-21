@@ -103,3 +103,27 @@ CREATE INDEX IF NOT EXISTS "marg_vouchers_tenant_date_family_live_idx"
 -- the old statistics from before the column was recreated and may pick a
 -- sequential scan for the first few minutes.
 ANALYZE "marg_vouchers";
+
+-- ============================================================
+-- Tier 1: missing voucher-join index on marg_transactions
+-- ============================================================
+-- Every report query joins marg_transactions to marg_vouchers on
+-- (tenant_id, company_id, voucher). The existing indexes on marg_transactions:
+--   @@unique([tenantId, companyId, sourceKey])  -- per-row lookup
+--   @@index([tenantId, date])                   -- date-window filter
+--   @@index([actualId])                         -- back-link to Actual
+-- ...don't cover the join key. Without this index, Postgres has to do a
+-- hash join (or sequential scan + bitmap) over the entire marg_transactions
+-- table for every report query. On the dataset in production (329k+ rows
+-- per tenant) that's the difference between "report loads in seconds" and
+-- "report times out at 30s".
+--
+-- Partial index on `is_cancelled = FALSE`: cancelled transactions are
+-- explicitly excluded from all commercial reports (see the cancellation
+-- filtering added in round 4), so the live index stays smaller and the
+-- index-only scan path stays clean.
+CREATE INDEX IF NOT EXISTS "marg_transactions_tenant_company_voucher_live_idx"
+  ON "marg_transactions" ("tenant_id", "company_id", "voucher")
+  WHERE "is_cancelled" = FALSE;
+
+ANALYZE "marg_transactions";

@@ -2514,4 +2514,62 @@ describe('MargEdeService helpers', () => {
     const cancelledNoTimestamp = helper.parseMargCancellation('foo;CANCELLED : 1');
     expect(cancelledNoTimestamp).toEqual({ isCancelled: true, cancelledOn: null });
   });
+
+  // ===================================================================
+  // refreshMargBillRollup — the Tier 2 performance step.
+  //
+  // The method DELETEs the tenant's rollup rows then INSERT…SELECTs a
+  // fresh per-bill rollup from marg_vouchers + marg_transactions +
+  // LATERAL marg_stocks. Reports read from this table instead of
+  // recomputing the aggregation live, which is the difference between
+  // dashboard timeouts (live aggregation over hundreds of thousands of
+  // transaction lines) and sub-second response.
+  //
+  // Without a live Postgres in unit tests we can't validate the
+  // arithmetic of the materialised rows, but we CAN pin the structural
+  // contract:
+  //   - Defensive: it's a no-op when the margBillRollup delegate or
+  //     $executeRaw are missing (so partial-mock tests don't break)
+  //   - Wraps the DELETE + INSERT in a single $transaction so reports
+  //     never see a half-empty rollup mid-refresh
+  // ===================================================================
+
+  it('refreshMargBillRollup: no-op when the margBillRollup delegate is missing (defensive shape)', async () => {
+    // Plain Prisma mock with no margBillRollup at all
+    service = new MargEdeService({} as any, {} as any, {} as any);
+    const helper = service as any;
+    await expect(helper.refreshMargBillRollup('tenant-1')).resolves.toBe(0);
+  });
+
+  it('refreshMargBillRollup: runs DELETE + INSERT inside a single $transaction so reports never see a half-empty rollup', async () => {
+    const deleteMany = jest.fn().mockResolvedValue({ count: 0 });
+    const executeRaw = jest.fn().mockResolvedValue(42);
+    const transaction = jest.fn().mockImplementation(async (cb: any) => {
+      // Mirror Prisma's transactional client: tx exposes the same delegate
+      // surface as the outer client. Our refreshMargBillRollup uses both
+      // tx.margBillRollup.deleteMany and tx.$executeRaw, so the test client
+      // must expose both.
+      return cb({
+        margBillRollup: { deleteMany },
+        $executeRaw: executeRaw,
+      });
+    });
+
+    service = new MargEdeService({
+      margBillRollup: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      $transaction: transaction,
+    } as any, {} as any, {} as any);
+
+    const helper = service as any;
+    const inserted = await helper.refreshMargBillRollup('tenant-1');
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(deleteMany).toHaveBeenCalledWith({ where: { tenantId: 'tenant-1' } });
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    // The INSERT…SELECT runs INSIDE the transaction, AFTER the DELETE.
+    // Verify the DELETE call landed before $executeRaw inside the tx.
+    expect(deleteMany.mock.invocationCallOrder[0]).toBeLessThan(executeRaw.mock.invocationCallOrder[0]);
+    expect(inserted).toBe(42);
+  });
 });
