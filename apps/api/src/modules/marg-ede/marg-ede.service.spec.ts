@@ -2228,6 +2228,40 @@ describe('MargEdeService helpers', () => {
     }));
   });
 
+  // Regression test: a tenant whose invoice numbering does NOT start with
+  // STR (e.g. INV-, BILL-, a customised series) must still be classified as
+  // SALES_INVOICE. An earlier version of the SQL GENERATED column gated
+  // SALES_INVOICE on `vcn LIKE 'STR%'`, which silently misclassified every
+  // non-11093 tenant's S-type vouchers as UNKNOWN. Reports then showed
+  // NEGATIVE sales (returns counted with sign -1, invoices counted with
+  // sign 0). The TS classifier always defaulted by `headerType` regardless
+  // of VCN — this test pins that behaviour so the bug can't return.
+  it('strict classifier: S-type voucher with non-canonical (non-STR, non-CHAL) VCN still classifies as SALES_INVOICE', () => {
+    const helper = service as any;
+    for (const vcn of ['INV-001', 'BILL/2026/0042', 'SI26-90001', 'CUSTOM-SERIES-7']) {
+      const decision = helper.resolveMargType2ProjectionDecision({
+        transactionType: 'G',
+        transactionVcn: vcn,
+        transactionAddField: 'I; ;;00;0',
+        voucherType: 'S',
+        voucherVcn: vcn,
+        voucherAddField: 'I;0.00',
+        effectiveQty: 12,
+        amount: 18040,
+      });
+      expect(decision).toEqual(expect.objectContaining({
+        family: 'SALES_INVOICE',
+        // Confidence is MEDIUM rather than HIGH because the VCN doesn't
+        // match the canonical STR series, but the document is still
+        // unambiguously a sales invoice and must project as one.
+        confidence: 'MEDIUM',
+        skipReason: null,
+        shouldProjectActual: true,
+        actualType: ActualType.SALES,
+      }));
+    }
+  });
+
   it('strict classifier happy path: S/CHAL/C with Dis.Type=G projects challan inventory but NO sales actual', () => {
     const helper = service as any;
     const decision = helper.resolveMargType2ProjectionDecision({

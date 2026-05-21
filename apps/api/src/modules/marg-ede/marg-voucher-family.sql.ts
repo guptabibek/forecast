@@ -4,22 +4,35 @@ import { Prisma } from '@prisma/client';
  * Single source of truth for classifying a Marg voucher (MDis row) into a
  * commercial document family from raw SQL. Mirrors the TypeScript classifier
  * in `marg-ede.service.ts` (resolveMargType2ProjectionDecision) — any change
- * to the canonical mapping must be applied to both the TS classifier AND the
- * Postgres GENERATED expression defined in the
- * `20260520130000_add_marg_voucher_family_generated_column` migration.
+ * to the canonical mapping must be applied to ALL THREE places that hold
+ * the rule:
  *
- * Families:
- *  - SALES_INVOICE              : MDis.Type=S + VCN starts STR + AddField[0]=I
+ *   1. resolveMargType2ProjectionDecision (TS) — for projection decisions
+ *   2. marg_vouchers.family GENERATED expression — for SQL aggregations
+ *   3. The unit tests in marg-voucher-family.sql.spec.ts
+ *
+ * IMPORTANT: VCN prefixes are tenant-specific. Tenant 11093's STR prefix is
+ * NOT universal — other tenants use INV-, BILL-, custom series, etc. The
+ * classifier MUST default by `type` for every recognised header type and
+ * use VCN only to make intra-type distinctions (e.g. CHAL vs invoice within
+ * type='S'). An earlier version gated SALES_INVOICE on `vcn LIKE 'STR%'`
+ * and silently misclassified every non-11093 tenant's invoices as
+ * UNKNOWN — producing negative reported sales for those tenants
+ * (returns -1, invoices 0). Fixed in migration
+ * 20260521080000_fix_marg_voucher_family_classifier.
+ *
+ * Families (mapping):
+ *  - SALES_INVOICE              : MDis.Type=S, default (any VCN that isn't CHAL/*CHAL)
  *  - SALES_CHALLAN              : MDis.Type=S + VCN starts CHAL/*CHAL (no A/C impact, no sales actual; inventory only)
- *  - SALES_ORDER                : MDis.Type=V + VCN starts OS (no commercial actual)
+ *  - SALES_ORDER                : MDis.Type=V (no commercial actual)
  *  - PURCHASE_INVOICE           : MDis.Type=P
- *  - SALES_RETURN               : MDis.Type=R + VCN starts CN (negative sales actual + inventory return)
- *  - SALES_RETURN_ADJUSTMENT    : MDis.Type=T + VCN starts SC (accounting-only credit, NO commercial actual, NO inventory)
- *  - PURCHASE_RETURN            : MDis.Type=B + VCN starts DN
- *  - PURCHASE_ORDER             : MDis.Type=X + VCN starts PO-
- *  - STOCK_RECEIVE              : MDis.Type=D + VCN starts AD
+ *  - SALES_RETURN               : MDis.Type=R (negative sales actual + inventory return)
+ *  - SALES_RETURN_ADJUSTMENT    : MDis.Type=T (accounting-only credit, NO commercial actual, NO inventory)
+ *  - PURCHASE_RETURN            : MDis.Type=B
+ *  - PURCHASE_ORDER             : MDis.Type=X
+ *  - STOCK_RECEIVE              : MDis.Type=D
  *  - STOCK_ISSUE                : MDis.Type=L
- *  - UNKNOWN                    : any other shape
+ *  - UNKNOWN                    : any other type
  */
 export type MargVoucherFamily =
   | 'SALES_INVOICE'
