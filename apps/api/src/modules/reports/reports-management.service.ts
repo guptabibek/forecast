@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ActualType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/database/prisma.service';
+import { margSalesAmountSignSql } from '../marg-ede/marg-voucher-family.sql';
 import {
   ExportReportDto,
   GenerateReportDto,
@@ -63,10 +64,14 @@ export class ReportsManagementService {
     let count = 0;
 
     if (report.type === 'pie') {
+      // Category breakdown uses family-signed per-line amounts so a returned
+      // unit's revenue nets against the prior sale and SC/CHAL contribute 0.
+      // The header filter drops 'T' (SC) since SC is accounting-only and
+      // never belongs in commercial category aggregates.
       const categoryData = await this.prisma.$queryRaw<Array<{ category: string; total_value: number }>>(Prisma.sql`
         SELECT
           COALESCE(p.category, mprod.g_code5, 'Other') AS category,
-          COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS total_value
+          COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS total_value
         FROM marg_vouchers mv
         JOIN marg_transactions mt
           ON mt.tenant_id = mv.tenant_id
@@ -76,7 +81,8 @@ export class ReportsManagementService {
         LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
         LEFT JOIN products p ON p.id = mprod.product_id AND p.tenant_id = mt.tenant_id
         WHERE mv.tenant_id = ${tenantId}::uuid
-          AND mv.type IN ('S', 'R', 'T')
+          AND mv.is_cancelled = FALSE
+          AND mv.type IN ('S', 'R')
         GROUP BY COALESCE(p.category, mprod.g_code5, 'Other')
         ORDER BY total_value DESC
         LIMIT 5
@@ -89,12 +95,16 @@ export class ReportsManagementService {
         return { name: item.category, value: Math.round(value) };
       });
     } else {
+      // Monthly actuals: per-voucher bill amount signed by family before the
+      // outer SUM, so the rolled-up monthly figure subtracts CN returns,
+      // excludes challan totals, and drops SC entirely (T filtered out above).
       const actualsData = await this.prisma.$queryRaw<Array<{ period: string; total_value: number }>>(Prisma.sql`
         SELECT
           TO_CHAR(mv.date, 'YYYY-MM') AS period,
           COALESCE(SUM(bill_amount), 0)::float8 AS total_value
         FROM (
-          SELECT mv.company_id, mv.voucher, mv.date, COALESCE(MAX(mv.final_amt), SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))))::float8 AS bill_amount
+          SELECT mv.company_id, mv.voucher, mv.date,
+            (COALESCE(MAX(mv.final_amt), SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0)))) * ${margSalesAmountSignSql('mv')})::float8 AS bill_amount
           FROM marg_vouchers mv
           LEFT JOIN marg_transactions mt
             ON mt.tenant_id = mv.tenant_id
@@ -102,8 +112,16 @@ export class ReportsManagementService {
             AND mt.voucher = mv.voucher
             AND ${this.erpSalesLineTypeSql('mv', 'mt')}
           WHERE mv.tenant_id = ${tenantId}::uuid
-            AND mv.type IN ('S', 'R', 'T')
-          GROUP BY mv.company_id, mv.voucher, mv.date
+            AND mv.is_cancelled = FALSE
+            AND mv.type IN ('S', 'R')
+          -- mv.family is referenced by the sign multiplier OUTSIDE the
+          -- per-voucher aggregates (the multiplication is at the
+          -- single-row-per-group level, not inside MAX/SUM). Postgres does
+          -- not infer functional dependency of a STORED GENERATED column
+          -- from (type, vcn), so list mv.family explicitly to avoid error
+          -- 42803. Adding it does not expand cardinality -- family is
+          -- constant per voucher.
+          GROUP BY mv.company_id, mv.voucher, mv.date, mv.type, mv.vcn, mv.family
         ) mv
         GROUP BY TO_CHAR(mv.date, 'YYYY-MM')
         ORDER BY period

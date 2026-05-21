@@ -415,6 +415,12 @@ describe('MargEdeService helpers', () => {
       supplierFacing: false,
     }));
 
+    // SC (T/SC) is a price-difference credit note. Per business rules
+    // confirmed by QA, SC must have ZERO commercial impact (no sales actual,
+    // no inventory, no ledger) — its only effect is the credit posting in
+    // Book E, which lives in the accounting projection path and is verified
+    // separately. Lumping SC together with full sales returns (R/CN) was
+    // double-counting it against gross sales.
     const customerCreditAdjustment = helper.resolveMargType2ProjectionDecision({
       transactionType: 'X',
       transactionVcn: 'SC00001',
@@ -427,15 +433,15 @@ describe('MargEdeService helpers', () => {
     });
     expect(customerCreditAdjustment).toEqual(expect.objectContaining({
       family: 'SALES_RETURN_ADJUSTMENT',
-      shouldProjectActual: true,
-      actualType: ActualType.SALES,
-      actualQuantity: -2,
-      actualAmount: -610,
-      shouldProjectInventory: true,
-      inventoryTransactionType: InventoryTransactionType.RETURN,
-      inventoryQuantity: 2,
-      ledgerEntryType: LedgerEntryType.LEDGER_RETURN,
-      ledgerQuantity: 2,
+      shouldProjectActual: false,
+      actualType: null,
+      actualQuantity: null,
+      actualAmount: null,
+      shouldProjectInventory: false,
+      inventoryTransactionType: null,
+      inventoryQuantity: 0,
+      ledgerEntryType: null,
+      ledgerQuantity: 0,
       customerFacing: true,
       supplierFacing: false,
     }));
@@ -739,33 +745,52 @@ describe('MargEdeService helpers', () => {
 
   it('queries voucherless account posting groups by Marg row id', async () => {
     const changedAt = new Date('2026-04-21T00:00:00.000Z');
-    const margAccountPostingFindMany = jest.fn()
-      .mockResolvedValueOnce([
-        {
-          margId: BigInt(101),
-          companyId: 2,
-          voucher: null,
-          date: changedAt,
-          book: 'SA',
-          amount: 50,
-          code: 'CUST-1',
-          code1: null,
-          gCode: 'SALES',
-          remark: null,
-        },
-        {
-          margId: BigInt(102),
-          companyId: 2,
-          voucher: null,
-          date: changedAt,
-          book: 'SA',
-          amount: -50,
-          code: 'CUST-2',
-          code1: null,
-          gCode: 'SALES',
-          remark: null,
-        },
-      ]);
+    const row101 = {
+      margId: BigInt(101),
+      companyId: 2,
+      voucher: null,
+      date: changedAt,
+      book: 'SA',
+      amount: 50,
+      code: 'CUST-1',
+      code1: null,
+      gCode: 'SALES',
+      remark: null,
+    };
+    const row102 = {
+      margId: BigInt(102),
+      companyId: 2,
+      voucher: null,
+      date: changedAt,
+      book: 'SA',
+      amount: -50,
+      code: 'CUST-2',
+      code1: null,
+      gCode: 'SALES',
+      remark: null,
+    };
+
+    // The journal projection now runs in two phases:
+    //  1) a changed-since query to discover which (companyId, date, book, voucher)
+    //     groups have any touched row; and
+    //  2) a per-group reload of the FULL row set so partial Marg updates can
+    //     never produce an unbalanced journal entry.
+    // The mock distinguishes the two phases by the presence of `updatedAt` in
+    // the `where` clause: the discovery call carries the changed-since filter,
+    // the reload call addresses a single voucherless group via `margId`.
+    const margAccountPostingFindMany = jest.fn().mockImplementation((args: any) => {
+      const where = args?.where ?? {};
+      if (where.updatedAt) {
+        return Promise.resolve([row101, row102]);
+      }
+      if (where.margId === BigInt(101)) {
+        return Promise.resolve([row101]);
+      }
+      if (where.margId === BigInt(102)) {
+        return Promise.resolve([row102]);
+      }
+      return Promise.resolve([]);
+    });
 
     service = new MargEdeService({
       margGLMappingRule: {
@@ -799,10 +824,21 @@ describe('MargEdeService helpers', () => {
     );
 
     expect(result.journalEntriesSynced).toBe(0);
-    expect(margAccountPostingFindMany).toHaveBeenCalledTimes(1);
+    // 1 discovery query + 1 reload per unique voucherless group = 3 total.
+    expect(margAccountPostingFindMany).toHaveBeenCalledTimes(3);
     expect(margAccountPostingFindMany.mock.calls[0][0].where).toEqual({
       tenantId: 'tenant-1',
       updatedAt: { gte: new Date('2026-04-21T00:00:00.000Z') },
+    });
+    expect(margAccountPostingFindMany.mock.calls[1][0].where).toEqual({
+      tenantId: 'tenant-1',
+      companyId: 2,
+      margId: BigInt(101),
+    });
+    expect(margAccountPostingFindMany.mock.calls[2][0].where).toEqual({
+      tenantId: 'tenant-1',
+      companyId: 2,
+      margId: BigInt(102),
     });
   });
 
@@ -1783,5 +1819,665 @@ describe('MargEdeService helpers', () => {
       'transformAccountPostingsToJournalEntries',
       `runPostSyncReconciliations:${MARG_SYNC_SCOPE.ACCOUNTING}`,
     ]);
+  });
+
+  it('maps Marg book codes to the correct subsidiary ledgers (A=Purchase, P=Payment)', () => {
+    // Real-data verification against APIType=1: Book A rows are 100% covered
+    // by MDis.Type=P (purchase invoices); Book P rows have no MDis header and
+    // carry bank-payment remarks (e.g. "STAN CHART BANK..."). The earlier
+    // mapping had A and P swapped.
+    const helper = service as any;
+    expect(helper.describeMargBook('S')).toBe('Sales');
+    expect(helper.describeMargBook('A')).toBe('Purchase');
+    expect(helper.describeMargBook('P')).toBe('Payment');
+    expect(helper.describeMargBook('R')).toBe('Receipt');
+    expect(helper.describeMargBook('E')).toBe('Sales Adjustment');
+    expect(helper.describeMargBook('D')).toBe('Debit Note');
+    expect(helper.describeMargBook('J')).toBe('Journal');
+    expect(helper.describeMargBook('!')).toBe('Opening');
+  });
+
+  it('parses Marg AddField cancellation markers (CANCELLED:1 with CANCELLEDON timestamp)', () => {
+    const helper = service as any;
+
+    expect(helper.parseMargCancellation(null)).toEqual({ isCancelled: false, cancelledOn: null });
+    expect(helper.parseMargCancellation('')).toEqual({ isCancelled: false, cancelledOn: null });
+    expect(helper.parseMargCancellation('I; ;BWIA;00;0;;;0;CANCELLED : 0')).toEqual({
+      isCancelled: false,
+      cancelledOn: null,
+    });
+
+    const cancelled = helper.parseMargCancellation(
+      'I; ;BWIA;00;0;;;0;CANCELLED : 1; CANCELLEDON : 17-04-2026 14:30:25',
+    );
+    expect(cancelled.isCancelled).toBe(true);
+    expect(cancelled.cancelledOn).toEqual(new Date(Date.UTC(2026, 3, 17, 14, 30, 25)));
+
+    // Cancellation flag without timestamp is still a cancellation.
+    const cancelledNoTimestamp = helper.parseMargCancellation('foo;CANCELLED : 1');
+    expect(cancelledNoTimestamp.isCancelled).toBe(true);
+    expect(cancelledNoTimestamp.cancelledOn).toBeNull();
+  });
+
+  it('suppresses every projection when a Marg document is cancelled', () => {
+    const helper = service as any;
+
+    // Same payload as the SALES_INVOICE happy-path test, but with cancellation
+    // markers appended. The classified family should still be SALES_INVOICE
+    // (for audit) but every shouldProject* flag must be false so neither the
+    // actuals, inventory, nor ledger paths produce a row.
+    const cancelledInvoice = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G',
+      transactionVcn: 'STR26-00012',
+      transactionAddField: 'I; ;;00;0;CANCELLED : 1; CANCELLEDON : 01-04-2026 10:15:00',
+      voucherType: 'S',
+      voucherVcn: 'STR26-00012',
+      voucherAddField: 'I;0.00',
+      effectiveQty: 12,
+      amount: 18040,
+    });
+
+    expect(cancelledInvoice).toEqual(expect.objectContaining({
+      family: 'SALES_INVOICE',
+      isCancelled: true,
+      shouldProjectActual: false,
+      actualType: null,
+      actualQuantity: null,
+      actualAmount: null,
+      shouldProjectInventory: false,
+      inventoryTransactionType: null,
+      inventoryQuantity: 0,
+      ledgerEntryType: null,
+      ledgerQuantity: 0,
+    }));
+    expect(cancelledInvoice.cancelledOn).toEqual(new Date(Date.UTC(2026, 3, 1, 10, 15, 0)));
+  });
+
+  it('returns null instead of a silent first-context fallback when multiple MDis headers conflict', () => {
+    const helper = service as any;
+
+    const result = helper.selectMargVoucherContextForTransaction(
+      { companyId: 11093, voucher: '1832495', type: 'G', vcn: 'STR26-00012' },
+      // Two header candidates whose types neither match 'S' nor any other
+      // line-type-preferred fallback for a 'G' line.
+      [
+        { companyId: 11093, voucher: '1832495', type: 'L', vcn: 'STR26-00012', addField: null },
+        { companyId: 11093, voucher: '1832495', type: 'B', vcn: 'STR26-00012', addField: null },
+      ],
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('bootstraps Marg GL accounts and mapping rules even when other GL accounts already exist', async () => {
+    // Regression: ensureMargAccountingBootstrap used to short-circuit on the
+    // first existing GL account, leaving tenants with a curated chart of
+    // accounts but no Marg mapping rules unable to project journals. The
+    // bootstrap must now run whenever no active Marg rule exists, regardless
+    // of whether the tenant has unrelated GL accounts. The MARG-prefixed
+    // account numbers cannot collide with user-curated accounts.
+    const gLAccountUpsert = jest.fn().mockResolvedValue({ id: 'gl-marg-c6', parentId: null });
+    const margGLMappingRuleCreate = jest.fn().mockResolvedValue(undefined);
+
+    const tx = {
+      gLAccount: {
+        upsert: gLAccountUpsert,
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      margGLMappingRule: {
+        create: margGLMappingRuleCreate,
+      },
+    };
+
+    service = new MargEdeService({
+      gLAccount: {
+        // 12 unrelated GL accounts already exist (e.g. seeded chart of
+        // accounts). The bootstrap must still run.
+        count: jest.fn().mockResolvedValue(12),
+      },
+      margGLMappingRule: {
+        count: jest.fn().mockResolvedValue(0),
+      },
+      margAccountGroup: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            companyId: 11093,
+            aid: 'C6',
+            name: 'Sundry Debtors',
+            under: null,
+            addField: null,
+          },
+        ]),
+      },
+      $transaction: jest.fn(async (callback: any) => callback(tx)),
+    } as any, {} as any, {} as any);
+
+    const helper = service as any;
+    await helper.ensureMargAccountingBootstrap('tenant-1');
+
+    expect(gLAccountUpsert).toHaveBeenCalledTimes(1);
+    // Auto-provisioned account numbers follow buildAutoMargGlAccountNumber's
+    // format `M{companyId}-{aid}-{hash}` which cannot collide with curated
+    // user accounts.
+    expect(gLAccountUpsert.mock.calls[0][0].create.accountNumber).toMatch(/^M\d+-/);
+    expect(margGLMappingRuleCreate).toHaveBeenCalled();
+  });
+
+  it('reloads the full voucher group when only one row was touched by the sync run', async () => {
+    // Phase B regression: journal projection used to group the changed-since
+    // rows directly, which produces an unbalanced 1-line journal whenever
+    // Marg emits a partial update for a multi-line voucher. The projection
+    // must now treat changed rows as a discovery list and reload every row
+    // in each touched (companyId, date, book, voucher) group before building
+    // the journal entry.
+    const voucherDate = new Date('2026-04-04T00:00:00.000Z');
+    const debitRow = {
+      margId: BigInt(101),
+      companyId: 11093,
+      voucher: 'STR26-00367',
+      date: voucherDate,
+      book: 'S',
+      code: 'CGKF',
+      code1: 'GJU',
+      gCode: 'C6',
+      amount: 17076,
+      remark: 'STR26-00367',
+    };
+    const creditRow = {
+      margId: BigInt(102),
+      companyId: 11093,
+      voucher: 'STR26-00367',
+      date: voucherDate,
+      book: 'S',
+      code: 'GJU',
+      code1: 'CGKF',
+      gCode: 'J61',
+      amount: -17076,
+      remark: 'STR26-00367',
+    };
+
+    const tx = {
+      margAccountJournalProjection: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'projection-1' }),
+        update: jest.fn().mockResolvedValue(undefined),
+      },
+      journalEntry: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+    };
+
+    // Discovery query (filtered by updatedAt) returns ONLY the debit row.
+    // Reload query (keyed by companyId/date/book/voucher) returns BOTH rows.
+    const margAccountPostingFindMany = jest.fn().mockImplementation((args: any) => {
+      const where = args?.where ?? {};
+      if (where.updatedAt) {
+        return Promise.resolve([debitRow]);
+      }
+      if (where.companyId === 11093 && where.voucher === 'STR26-00367') {
+        return Promise.resolve([debitRow, creditRow]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const createJournalEntry = jest.fn().mockResolvedValue({ id: 'journal-1' });
+
+    service = new MargEdeService({
+      margGLMappingRule: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'rule-c6',
+            companyId: 11093,
+            bookCode: null,
+            groupCode: 'C6',
+            partyCode: null,
+            counterpartyCode: null,
+            remarkContains: null,
+            glAccountId: 'gl-c6',
+            priority: 10,
+          },
+          {
+            id: 'rule-j61',
+            companyId: 11093,
+            bookCode: null,
+            groupCode: 'J61',
+            partyCode: null,
+            counterpartyCode: null,
+            remarkContains: null,
+            glAccountId: 'gl-j61',
+            priority: 10,
+          },
+        ]),
+      },
+      margAccountPosting: { findMany: margAccountPostingFindMany },
+      $transaction: jest.fn(async (callback: any) => callback(tx)),
+    } as any, {} as any, {
+      createJournalEntry,
+      reverseJournalEntry: jest.fn().mockResolvedValue(undefined),
+    } as any);
+
+    const helper = service as any;
+    helper.resolveJournalPostingUserId = jest.fn().mockResolvedValue('user-1');
+
+    const result = await helper.transformAccountPostingsToJournalEntries(
+      'tenant-1',
+      { id: 'sync-log-1', startedAt: new Date('2026-04-21T00:00:00.000Z') },
+      null,
+      'user-1',
+    );
+
+    // The single touched row triggered a reload of the full 2-row voucher,
+    // which projects as one balanced journal entry rather than being
+    // skipped for "Insufficient mapped lines".
+    expect(result.journalEntriesSynced).toBe(1);
+    expect(result.skippedGroups).toEqual([]);
+    expect(margAccountPostingFindMany).toHaveBeenCalledTimes(2);
+    expect(margAccountPostingFindMany.mock.calls[0][0].where).toEqual({
+      tenantId: 'tenant-1',
+      updatedAt: { gte: new Date('2026-04-21T00:00:00.000Z') },
+    });
+    expect(margAccountPostingFindMany.mock.calls[1][0].where).toMatchObject({
+      tenantId: 'tenant-1',
+      companyId: 11093,
+      voucher: 'STR26-00367',
+      book: 'S',
+    });
+    expect(createJournalEntry).toHaveBeenCalledTimes(1);
+    const journalArg = createJournalEntry.mock.calls[0][1];
+    expect(journalArg.lines).toHaveLength(2);
+  });
+
+  // ===================================================================
+  // Strict Type 2 classifier acceptance tests
+  //
+  // Locks down the production-hardening contract: Dis.Type alone NEVER
+  // produces an actual / inventory movement / purchase document / report
+  // contribution. Every "happy path" requires a matching MDis header; every
+  // "missing or ambiguous MDis" path returns UNKNOWN with shouldProject*
+  // false so the caller's reversal sweep can clean up any prior projection
+  // idempotently. These tests are the regression net for any future drift
+  // back to a Dis.Type fallback.
+  // ===================================================================
+
+  it('strict classifier: missing MDis header + Dis.Type=G does NOT project a sales actual', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G',
+      transactionVcn: 'STR26-00012',
+      transactionAddField: 'I; ;;00;0',
+      voucherType: null,
+      voucherVcn: null,
+      voucherAddField: null,
+      effectiveQty: 12,
+      amount: 18040,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'UNKNOWN',
+      confidence: 'LOW',
+      skipReason: 'MISSING_MDIS_HEADER',
+      shouldProjectActual: false,
+      shouldProjectInventory: false,
+      actualType: null,
+      actualAmount: null,
+      inventoryTransactionType: null,
+      ledgerEntryType: null,
+    }));
+  });
+
+  it('strict classifier: missing MDis header + Dis.Type=P does NOT project a purchase', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'P',
+      transactionVcn: 'PO12345',
+      transactionAddField: 'I; ;;00;0',
+      voucherType: null,
+      voucherVcn: null,
+      voucherAddField: null,
+      effectiveQty: 10,
+      amount: 5000,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'UNKNOWN',
+      skipReason: 'MISSING_MDIS_HEADER',
+      shouldProjectActual: false,
+      shouldProjectInventory: false,
+    }));
+  });
+
+  it('strict classifier: missing MDis header + Dis.Type=X does NOT project a purchase order or stock movement', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'X',
+      transactionVcn: 'PO-001',
+      transactionAddField: 'C; ;;00;0',
+      voucherType: null,
+      voucherVcn: null,
+      voucherAddField: null,
+      effectiveQty: 4,
+      amount: 100,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'UNKNOWN',
+      skipReason: 'MISSING_MDIS_HEADER',
+      shouldProjectActual: false,
+      shouldProjectInventory: false,
+    }));
+  });
+
+  it('strict classifier: ambiguous MDis header (caller flagged) does NOT project, distinguished from "missing"', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G',
+      transactionVcn: 'STR26-00012',
+      transactionAddField: 'I; ;;00;0',
+      voucherType: null,
+      voucherVcn: null,
+      voucherAddField: null,
+      voucherContextAmbiguous: true,
+      effectiveQty: 12,
+      amount: 18040,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'UNKNOWN',
+      skipReason: 'AMBIGUOUS_MDIS_HEADER',
+      shouldProjectActual: false,
+      shouldProjectInventory: false,
+    }));
+  });
+
+  it('strict classifier: unknown MDis header type does NOT project (no Dis.Type rescue)', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G',
+      transactionVcn: 'STR26-00012',
+      transactionAddField: 'I; ;;00;0',
+      voucherType: 'Z', // fabricated MDis type the classifier doesn't recognise
+      voucherVcn: 'XYZ123',
+      voucherAddField: null,
+      effectiveQty: 12,
+      amount: 18040,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'UNKNOWN',
+      skipReason: 'UNKNOWN_DOCUMENT_FAMILY',
+      shouldProjectActual: false,
+      shouldProjectInventory: false,
+    }));
+  });
+
+  it('strict classifier happy path: S/STR/I with Dis.Type=G projects SALES_INVOICE with HIGH confidence', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G',
+      transactionVcn: 'STR26-00012',
+      transactionAddField: 'I; ;;00;0',
+      voucherType: 'S',
+      voucherVcn: 'STR26-00012',
+      voucherAddField: 'I;0.00',
+      effectiveQty: 12,
+      amount: 18040,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'SALES_INVOICE',
+      confidence: 'HIGH',
+      skipReason: null,
+      shouldProjectActual: true,
+      shouldProjectInventory: true,
+      actualType: ActualType.SALES,
+      inventoryTransactionType: InventoryTransactionType.ISSUE,
+    }));
+  });
+
+  it('strict classifier happy path: S/CHAL/C with Dis.Type=G projects challan inventory but NO sales actual', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G',
+      transactionVcn: 'CHAL032585',
+      transactionAddField: 'C; ;;00;0',
+      voucherType: 'S',
+      voucherVcn: 'CHAL032585',
+      voucherAddField: 'C;0.00',
+      effectiveQty: 4,
+      amount: 200,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'SALES_CHALLAN',
+      confidence: 'HIGH',
+      skipReason: null,
+      shouldProjectActual: false,
+      shouldProjectInventory: true,
+      inventoryTransactionType: InventoryTransactionType.ISSUE,
+    }));
+  });
+
+  it('strict classifier happy path: P/<supplier-vcn>/I projects PURCHASE_INVOICE + inventory receipt', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'P',
+      transactionVcn: 'INV-12345',
+      transactionAddField: 'I; ;;00;0',
+      voucherType: 'P',
+      voucherVcn: 'INV-12345',
+      voucherAddField: 'I;0.00',
+      effectiveQty: 25,
+      amount: 12500,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'PURCHASE_INVOICE',
+      confidence: 'HIGH',
+      skipReason: null,
+      shouldProjectActual: true,
+      actualType: ActualType.PURCHASES,
+      shouldProjectInventory: true,
+      inventoryTransactionType: InventoryTransactionType.RECEIPT,
+    }));
+  });
+
+  it('strict classifier happy path: X/PO-/C projects PURCHASE_ORDER only (no actual, no stock)', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'X',
+      transactionVcn: 'PO-001',
+      transactionAddField: 'C; ;;00;0',
+      voucherType: 'X',
+      voucherVcn: 'PO-001',
+      voucherAddField: 'C;0.00',
+      effectiveQty: 10,
+      amount: 5000,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'PURCHASE_ORDER',
+      confidence: 'HIGH',
+      skipReason: null,
+      shouldProjectActual: false,
+      shouldProjectInventory: false,
+    }));
+  });
+
+  it('strict classifier: T/SC/I is LOW confidence and skipped by default (accounting-only Book E posting elsewhere)', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'X',
+      transactionVcn: 'SC00001',
+      transactionAddField: 'I; ;;00;0',
+      voucherType: 'T',
+      voucherVcn: 'SC00001',
+      voucherAddField: 'I;0.00',
+      effectiveQty: 2,
+      amount: 610,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'SALES_RETURN_ADJUSTMENT',
+      confidence: 'LOW',
+      skipReason: 'LOW_CONFIDENCE_DOCUMENT_FAMILY',
+      shouldProjectActual: false,
+      shouldProjectInventory: false,
+    }));
+  });
+
+  it('strict classifier: cancelled document classifies to family + isCancelled=true + skip across every pipeline', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G',
+      transactionVcn: 'STR26-00012',
+      transactionAddField: 'I; ;;00;0;CANCELLED : 1; CANCELLEDON : 01-04-2026 10:15:00',
+      voucherType: 'S',
+      voucherVcn: 'STR26-00012',
+      voucherAddField: 'I;0.00',
+      effectiveQty: 12,
+      amount: 18040,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'SALES_INVOICE',
+      isCancelled: true,
+      skipReason: 'CANCELLED_DOCUMENT',
+      shouldProjectActual: false,
+      shouldProjectInventory: false,
+      actualType: null,
+      inventoryTransactionType: null,
+      ledgerEntryType: null,
+    }));
+  });
+
+  it('accumulateMargProjectionDiagnostics: increments the right counter for each skipReason and tracks projected families', () => {
+    const helper = service as any;
+    const diag = {
+      missingMdisHeaderCount: 0,
+      ambiguousMdisHeaderCount: 0,
+      unknownDocumentFamilyCount: 0,
+      lowConfidenceDocumentFamilyCount: 0,
+      cancelledRowsSkippedCount: 0,
+      cancelledRowsReversedCount: 0,
+      projectedByFamily: {} as Record<string, number>,
+    };
+
+    const missingHeaderDecision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G', transactionVcn: 'STR26-00001', transactionAddField: 'I',
+      voucherType: null, voucherVcn: null, voucherAddField: null,
+      effectiveQty: 1, amount: 100,
+    });
+    helper.accumulateMargProjectionDiagnostics(missingHeaderDecision, diag, {
+      wasPreviouslyProjected: false, willProject: false,
+    });
+    expect(diag.missingMdisHeaderCount).toBe(1);
+
+    const ambiguousDecision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G', transactionVcn: 'STR26-00001', transactionAddField: 'I',
+      voucherType: null, voucherVcn: null, voucherAddField: null,
+      voucherContextAmbiguous: true,
+      effectiveQty: 1, amount: 100,
+    });
+    helper.accumulateMargProjectionDiagnostics(ambiguousDecision, diag, {
+      wasPreviouslyProjected: false, willProject: false,
+    });
+    expect(diag.ambiguousMdisHeaderCount).toBe(1);
+
+    const scDecision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'X', transactionVcn: 'SC00001', transactionAddField: 'I',
+      voucherType: 'T', voucherVcn: 'SC00001', voucherAddField: 'I',
+      effectiveQty: 1, amount: 100,
+    });
+    helper.accumulateMargProjectionDiagnostics(scDecision, diag, {
+      wasPreviouslyProjected: false, willProject: false,
+    });
+    expect(diag.lowConfidenceDocumentFamilyCount).toBe(1);
+
+    const cancelledDecision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G',
+      transactionVcn: 'STR26-00001',
+      transactionAddField: 'I;CANCELLED : 1',
+      voucherType: 'S', voucherVcn: 'STR26-00001', voucherAddField: 'I',
+      effectiveQty: 1, amount: 100,
+    });
+    helper.accumulateMargProjectionDiagnostics(cancelledDecision, diag, {
+      wasPreviouslyProjected: true, willProject: false,
+    });
+    expect(diag.cancelledRowsReversedCount).toBe(1);
+    expect(diag.cancelledRowsSkippedCount).toBe(0);
+
+    const healthyDecision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G', transactionVcn: 'STR26-00001', transactionAddField: 'I',
+      voucherType: 'S', voucherVcn: 'STR26-00001', voucherAddField: 'I',
+      effectiveQty: 1, amount: 100,
+    });
+    helper.accumulateMargProjectionDiagnostics(healthyDecision, diag, {
+      wasPreviouslyProjected: false, willProject: true,
+    });
+    expect(diag.projectedByFamily.SALES_INVOICE).toBe(1);
+  });
+
+  // ===================================================================
+  // Production-hardening: staging-time cancellation, outstanding-snapshot
+  // closure, procurement cancellation, supplier-side family signing.
+  //
+  // These tests lock the contract that:
+  //  - parseMargCancellation is invoked once at sync staging time so
+  //    is_cancelled / cancelled_on land on every staged row without
+  //    re-parsing AddField at projection / report time.
+  //  - closeUnseenMargOutstandings only updates rows whose
+  //    last_seen_sync_log_id != currentSyncLogId AND sourceDeleted=false,
+  //    leaving live rows (just seen) untouched and resurrected rows
+  //    (re-emitted with new lastSeen) un-closed.
+  //  - The helper is defensive against partial Prisma mocks (matches the
+  //    shape used by ensureMargAccountingBootstrap) so the sync
+  //    orchestrator can call it unconditionally without breaking fixtures.
+  // ===================================================================
+
+  it('closeUnseenMargOutstandings: marks rows whose last_seen_sync_log_id is null or stale, leaves live rows alone', async () => {
+    const updateMany = jest.fn().mockResolvedValue({ count: 7 });
+    service = new MargEdeService({
+      margOutstanding: { updateMany },
+    } as any, {} as any, {} as any);
+
+    const helper = service as any;
+    const closed = await helper.closeUnseenMargOutstandings('tenant-1', 'sync-log-99');
+
+    expect(closed).toBe(7);
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    // The OR captures both "never seen since the column existed" and "seen
+    // by an earlier sync but not this one". Live rows (lastSeen ==
+    // currentSyncLogId) are NOT in the OR set and stay untouched.
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        sourceDeleted: false,
+        OR: [
+          { lastSeenSyncLogId: null },
+          { lastSeenSyncLogId: { not: 'sync-log-99' } },
+        ],
+      },
+      data: { sourceDeleted: true },
+    });
+  });
+
+  it('closeUnseenMargOutstandings: is a no-op when the margOutstanding delegate is missing (defensive against partial mocks)', async () => {
+    service = new MargEdeService({} as any, {} as any, {} as any);
+    const helper = service as any;
+    // Should not throw — must early-return 0 when the delegate isn't there.
+    const closed = await helper.closeUnseenMargOutstandings('tenant-1', 'sync-log-99');
+    expect(closed).toBe(0);
+  });
+
+  it('parseMargCancellation: invoked at staging time so is_cancelled lands on the row before projection', () => {
+    // The contract: callers (syncVouchers / syncTransactions) parse cancellation
+    // ONCE from AddField and persist it as a first-class column. We don't
+    // exercise the bulk-SQL insert here (it requires a live Postgres) — we
+    // exercise the pure parser the staging code calls so the persisted
+    // shape (boolean + nullable timestamp) is locked.
+    const helper = service as any;
+
+    const live = helper.parseMargCancellation('I; ;BWIN;00;0;;;0;CANCELLED : 0');
+    expect(live).toEqual({ isCancelled: false, cancelledOn: null });
+
+    const cancelled = helper.parseMargCancellation(
+      'I; ;BWIN;00;0;;;0;CANCELLED : 1; CANCELLEDON : 18-04-2026 09:30:00',
+    );
+    expect(cancelled.isCancelled).toBe(true);
+    expect(cancelled.cancelledOn).toEqual(new Date(Date.UTC(2026, 3, 18, 9, 30, 0)));
+
+    // Garbled timestamp still marks the row cancelled (the boolean is the
+    // load-bearing signal; the timestamp is informational).
+    const cancelledNoTimestamp = helper.parseMargCancellation('foo;CANCELLED : 1');
+    expect(cancelledNoTimestamp).toEqual({ isCancelled: true, cancelledOn: null });
   });
 });

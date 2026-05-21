@@ -8,12 +8,31 @@ import {
   buildPharmaOrderBySql,
   parsePharmaFilters,
 } from '../pharma-filter.helper';
+import {
+  margPurchaseAmountSignSql,
+  margSalesAmountSignSql,
+  margVoucherFamilySql,
+} from '../../marg-ede/marg-voucher-family.sql';
 
 type AnalysisKind = 'sales' | 'purchase';
 
+// Header MDis.Type filters that load vouchers into the rollup. Note:
+//  - 'T' (SC price-diff) is DELIBERATELY excluded from SALES_TYPES because
+//    SC is accounting-only per business rules (Book E credit) and must not
+//    surface in commercial sales reports at all.
+//  - 'S' includes BOTH STR invoices AND CHAL challans. Challans are filtered
+//    OUT of sales monetary totals by `margSalesAmountSignSql` returning 0
+//    for them — but they remain in the rollup so that customer/product
+//    drilldowns can still display challan activity. The family classifier
+//    (see marg-voucher-family.sql.ts) is the single source of truth for
+//    distinguishing invoice vs challan from raw MDis columns.
 const SALES_TYPES = ['S'];
 const PURCHASE_TYPES = ['P'];
-const SALES_RETURN_TYPES = ['R', 'T'];
+// Header types that contribute net-NEGATIVE rows in commercial reports.
+// `R` (CN) is a true sales return — included as a contra in sales totals.
+// `T` (SC) is intentionally NOT here: it's accounting-only and excluded from
+// `documentTypes('sales')` entirely.
+const SALES_RETURN_TYPES = ['R'];
 const PURCHASE_RETURN_TYPES = ['B'];
 const SALES_LINE_TYPES = ['G', 'S', 'O', 'R', 'X'];
 const PURCHASE_LINE_TYPES = ['P', 'B'];
@@ -61,6 +80,11 @@ export class SalesPurchaseAnalysisService {
     const documentTypes = this.documentTypes(kind);
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
     const returnTypes = kind === 'sales' ? SALES_RETURN_TYPES : PURCHASE_RETURN_TYPES;
+    // Both pulled into filtered_lines so the bill_rollup CTE can derive the
+    // signed columns (signed_net_amount / signed_quantity / amount_sign) the
+    // outer headline SELECT consumes. The sign expression is the canonical
+    // family-aware multiplier — see margSalesAmountSignSql / margPurchaseAmountSignSql.
+    const signExpr = this.familyAwareAmountSignSql(kind, 'mv');
 
     const [summary] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH filtered_lines AS (
@@ -78,6 +102,14 @@ export class SalesPurchaseAnalysisService {
           mv.mr,
           mv.route,
           mv.area,
+          -- mv.family + per-row sign are loaded once at the line level so the
+          -- bill_rollup CTE can roll them up with MAX (they are functionally
+          -- constant per voucher, so MAX is just the value). This is the
+          -- cheapest place to pull them in -- adding to bill_rollup directly
+          -- is not possible because the marg_vouchers table is out of scope
+          -- there.
+          mv.family,
+          ${signExpr}::int AS amount_sign,
           mt.pid,
           mt.qty,
           mt.free,
@@ -123,28 +155,57 @@ export class SalesPurchaseAnalysisService {
           MAX(date) AS date,
           MAX(cid) AS cid,
           MAX(final_amt)::float8 AS final_amt,
+          -- Family is constant per (company_id, voucher, type) bucket since
+          -- it is derived from the voucher own type+vcn. MAX is a cheap way
+          -- to surface the single value without needing to add family to
+          -- the GROUP BY.
+          MAX(family) AS family,
+          MAX(amount_sign)::int AS amount_sign,
           SUM(ABS(COALESCE(qty, 0)))::float8 AS quantity,
           COUNT(DISTINCT pid) FILTER (WHERE pid IS NOT NULL)::int AS item_count,
           COALESCE(SUM(ABS(COALESCE(qty, 0)) * COALESCE(rate, 0)), 0)::float8 AS gross_amount,
           COALESCE(SUM(GREATEST(ABS(COALESCE(qty, 0)) * COALESCE(rate, 0) - ABS(COALESCE(amount, 0)), 0)), 0)::float8 AS discount,
           COALESCE(SUM(ABS(COALESCE(gst_amount, 0))), 0)::float8 AS tax_amount,
-          COALESCE(SUM(ABS(COALESCE(qty, 0)) * COALESCE(p_rate, lp_rate, 0)), 0)::float8 AS cost_amount
+          COALESCE(SUM(ABS(COALESCE(qty, 0)) * COALESCE(p_rate, lp_rate, 0)), 0)::float8 AS cost_amount,
+          -- Per-bill net amount: prefer the voucher header's final_amt (which
+          -- includes round-off / freight that doesn't appear in Dis lines).
+          -- Fall back to Σ(amount + gst_amount) only when final_amt is NULL.
+          COALESCE(MAX(final_amt), SUM(ABS(COALESCE(amount, 0)) + ABS(COALESCE(gst_amount, 0))))::float8 AS net_amount,
+          -- Signed columns: per-bill net × family-sign so the outer SELECT can
+          -- SUM(signed_*) for a correctly contra-signed total (sales invoices
+          -- add, sales returns subtract, challans / SC / other families
+          -- contribute zero).
+          (COALESCE(MAX(final_amt), SUM(ABS(COALESCE(amount, 0)) + ABS(COALESCE(gst_amount, 0)))) * MAX(amount_sign))::float8 AS signed_net_amount,
+          (SUM(ABS(COALESCE(qty, 0))) * MAX(amount_sign))::float8 AS signed_quantity
         FROM filtered_lines
         GROUP BY company_id, voucher, type
       )
       SELECT
-        COALESCE(SUM(COALESCE(final_amt, gross_amount)), 0)::float8 AS total_amount,
+        -- Headline total uses the family-signed amount so:
+        --   Sales: invoices add, R/CN returns subtract, S/CHAL & T/SC contribute zero.
+        --   Purchase: P invoices add, B/DN returns subtract, other families zero.
+        COALESCE(SUM(signed_net_amount), 0)::float8 AS total_amount,
+        -- Bill counts and party counts still respect every loaded header (so
+        -- challan activity remains visible to callers who consume total_bills
+        -- as an activity metric). If a strict invoices-only count is needed
+        -- downstream, filter by family.
         COUNT(*)::int AS total_bills,
         COUNT(DISTINCT cid)::int AS total_parties,
-        COALESCE(SUM(quantity), 0)::float8 AS total_quantity,
+        -- total_quantity uses signed_quantity so a return's quantity nets out
+        -- against an invoice's quantity (consistent with total_amount semantics).
+        COALESCE(SUM(signed_quantity), 0)::float8 AS total_quantity,
         COUNT(DISTINCT company_id || ':' || COALESCE(NULLIF(voucher, ''), vcn, ''))::int AS voucher_count,
         COALESCE(SUM(item_count), 0)::int AS item_count,
-        COALESCE(SUM(cost_amount), 0)::float8 AS cost_amount,
-        COALESCE(SUM(COALESCE(final_amt, gross_amount) - cost_amount), 0)::float8 AS gross_profit,
-        CASE WHEN COALESCE(SUM(COALESCE(final_amt, gross_amount)), 0) > 0
-          THEN (COALESCE(SUM(COALESCE(final_amt, gross_amount) - cost_amount), 0) / COALESCE(SUM(COALESCE(final_amt, gross_amount)), 0) * 100)::float8
+        COALESCE(SUM(cost_amount * amount_sign), 0)::float8 AS cost_amount,
+        COALESCE(SUM(signed_net_amount - cost_amount * amount_sign), 0)::float8 AS gross_profit,
+        CASE WHEN COALESCE(SUM(signed_net_amount), 0) > 0
+          THEN (COALESCE(SUM(signed_net_amount - cost_amount * amount_sign), 0) / COALESCE(SUM(signed_net_amount), 0) * 100)::float8
           ELSE NULL
         END AS margin_pct,
+        -- return_amount is the absolute magnitude of returns (positive number),
+        -- shown alongside total_amount as an informational breakdown. It is NOT
+        -- subtracted again — the subtraction is already baked into total_amount
+        -- via the negative sign on SALES_RETURN.
         COALESCE(SUM(COALESCE(final_amt, gross_amount)) FILTER (WHERE type = ANY(${returnTypes}::text[])), 0)::float8 AS return_amount
       FROM bill_rollup
     `);
@@ -398,37 +459,66 @@ export class SalesPurchaseAnalysisService {
       : Prisma.sql`ms.pid = ${itemKey}`;
     const scopedFilters = { ...filters, item: undefined, productIds: undefined };
     const where = this.buildHeaderWhere(tenantId, kind, scopedFilters, 'mv', 'mt', 'mp', 'mprod');
+    // Item drilldown deliberately loads the full mixed type set (S/P/R/T/B)
+    // and partitions by FAMILY rather than raw mv.type so SC adjustments
+    // and challans cannot inflate the commercial sales/purchase totals.
+    // `is_cancelled = FALSE` excludes Marg-cancelled vouchers from item
+    // analytics — mirrors the same suppression the centralised
+    // `buildHeaderWhere` applies for the other drilldowns.
     const allTypeConds: Prisma.Sql[] = [
       Prisma.sql`mv.tenant_id = ${tenantId}::uuid`,
+      Prisma.sql`mv.is_cancelled = FALSE`,
       Prisma.sql`mv.type IN ('S', 'P', 'R', 'T', 'B')`,
     ];
     if (scopedFilters.startDate) allTypeConds.push(Prisma.sql`mv.date >= ${scopedFilters.startDate}::date`);
     if (scopedFilters.endDate) allTypeConds.push(Prisma.sql`mv.date <= ${scopedFilters.endDate}::date`);
     if (scopedFilters.companyId !== undefined && scopedFilters.companyId !== null) allTypeConds.push(Prisma.sql`mv.company_id = ${Number(scopedFilters.companyId)}`);
     const allTypesWhere = Prisma.sql`${Prisma.join(allTypeConds, ' AND ')}`;
+    const familyExpr = margVoucherFamilySql('mv');
 
     const [metrics] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH item_lines AS (
+        SELECT
+          mt.qty,
+          mt.amount,
+          mt.rate,
+          mt.gst_amount,
+          ${familyExpr} AS family,
+          COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0) AS cost_rate
+        FROM marg_vouchers mv
+        JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleLineTypeSql('mv', 'mt')}
+        LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
+        LEFT JOIN products p ON p.id = mprod.product_id AND p.tenant_id = mt.tenant_id
+        LEFT JOIN marg_parties mp ON mp.tenant_id = mv.tenant_id AND mp.company_id = mv.company_id AND mp.cid = mv.cid
+        LEFT JOIN LATERAL (
+          SELECT p_rate, lp_rate FROM marg_stocks ms
+          WHERE ms.tenant_id = mt.tenant_id AND ms.company_id = mt.company_id AND ms.pid = mt.pid
+          ORDER BY ms.updated_at DESC LIMIT 1
+        ) ms ON TRUE
+        WHERE ${allTypesWhere} AND ${transactionItemFilter}
+      )
       SELECT
-        COALESCE(SUM(ABS(mt.qty)) FILTER (WHERE mv.type IN ('S', 'R', 'T')), 0)::float8 AS sales_quantity,
-        COALESCE(SUM(ABS(mt.qty)) FILTER (WHERE mv.type IN ('P', 'B')), 0)::float8 AS purchase_quantity,
-        COALESCE(SUM(ABS(mt.amount)) FILTER (WHERE mv.type IN ('S', 'R', 'T')), 0)::float8 AS sales_amount,
-        COALESCE(SUM(ABS(mt.amount)) FILTER (WHERE mv.type IN ('P', 'B')), 0)::float8 AS purchase_amount,
-        AVG(mt.rate) FILTER (WHERE mv.type IN ('S', 'R', 'T') AND mt.rate IS NOT NULL AND mt.rate > 0)::float8 AS average_sale_rate,
-        AVG(mt.rate) FILTER (WHERE mv.type IN ('P', 'B') AND mt.rate IS NOT NULL AND mt.rate > 0)::float8 AS average_purchase_rate,
-        COALESCE(SUM(ABS(mt.qty)) FILTER (WHERE mv.type IN ('R', 'T')), 0)::float8 AS sales_return_quantity,
-        COALESCE(SUM(ABS(mt.qty)) FILTER (WHERE mv.type = 'B'), 0)::float8 AS purchase_return_quantity,
-        AVG(COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0))::float8 AS cost_rate
-      FROM marg_vouchers mv
-      JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleLineTypeSql('mv', 'mt')}
-      LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
-      LEFT JOIN products p ON p.id = mprod.product_id AND p.tenant_id = mt.tenant_id
-      LEFT JOIN marg_parties mp ON mp.tenant_id = mv.tenant_id AND mp.company_id = mv.company_id AND mp.cid = mv.cid
-      LEFT JOIN LATERAL (
-        SELECT p_rate, lp_rate FROM marg_stocks ms
-        WHERE ms.tenant_id = mt.tenant_id AND ms.company_id = mt.company_id AND ms.pid = mt.pid
-        ORDER BY ms.updated_at DESC LIMIT 1
-      ) ms ON TRUE
-      WHERE ${allTypesWhere} AND ${transactionItemFilter}
+        -- Sales-side metrics: invoices add, CN returns subtract. Challans and
+        -- SC contribute nothing (their families are excluded from the filters).
+        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'SALES_INVOICE'), 0)::float8
+          - COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'SALES_RETURN'), 0)::float8
+          AS sales_quantity,
+        COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'SALES_INVOICE'), 0)::float8
+          - COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'SALES_RETURN'), 0)::float8
+          AS sales_amount,
+        AVG(rate) FILTER (WHERE family = 'SALES_INVOICE' AND rate IS NOT NULL AND rate > 0)::float8 AS average_sale_rate,
+        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'SALES_RETURN'), 0)::float8 AS sales_return_quantity,
+        -- Purchase-side metrics: purchase invoices add, DN returns subtract.
+        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'PURCHASE_INVOICE'), 0)::float8
+          - COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'PURCHASE_RETURN'), 0)::float8
+          AS purchase_quantity,
+        COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'PURCHASE_INVOICE'), 0)::float8
+          - COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'PURCHASE_RETURN'), 0)::float8
+          AS purchase_amount,
+        AVG(rate) FILTER (WHERE family = 'PURCHASE_INVOICE' AND rate IS NOT NULL AND rate > 0)::float8 AS average_purchase_rate,
+        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'PURCHASE_RETURN'), 0)::float8 AS purchase_return_quantity,
+        AVG(cost_rate)::float8 AS cost_rate
+      FROM item_lines
     `);
 
     const stockByWarehouse = await this.prisma.$queryRaw<any[]>(Prisma.sql`
@@ -491,9 +581,9 @@ export class SalesPurchaseAnalysisService {
     const [metrics] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH bills AS (${this.billRollupSql(tenantId, kind, where)})
       SELECT
-        COALESCE(SUM(net_amount), 0)::float8 AS total_amount,
+        COALESCE(SUM(signed_net_amount), 0)::float8 AS total_amount,
         COUNT(*)::int AS total_bills,
-        CASE WHEN COUNT(*) > 0 THEN (COALESCE(SUM(net_amount), 0) / COUNT(*))::float8 ELSE 0 END AS average_bill_value
+        CASE WHEN COUNT(*) > 0 THEN (COALESCE(SUM(signed_net_amount), 0) / COUNT(*))::float8 ELSE 0 END AS average_bill_value
       FROM bills
     `);
     const topItems = await this.topItems(tenantId, kind, scopedFilters);
@@ -513,8 +603,8 @@ export class SalesPurchaseAnalysisService {
       WITH bills AS (${this.billRollupSql(tenantId, kind, where)})
       SELECT to_char(date_trunc('month', date), 'YYYY-MM') AS period,
         COUNT(*)::int AS bills,
-        COALESCE(SUM(net_amount), 0)::float8 AS amount,
-        COALESCE(SUM(quantity), 0)::float8 AS quantity
+        COALESCE(SUM(signed_net_amount), 0)::float8 AS amount,
+        COALESCE(SUM(signed_quantity), 0)::float8 AS quantity
       FROM bills
       GROUP BY date_trunc('month', date)
       ORDER BY date_trunc('month', date)
@@ -526,7 +616,7 @@ export class SalesPurchaseAnalysisService {
     return this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH bills AS (${this.billRollupSql(tenantId, kind, where)}),
       ranked AS (
-        SELECT party_code, party_name, COUNT(*)::int AS bills, COALESCE(SUM(net_amount), 0)::float8 AS value
+        SELECT party_code, party_name, COUNT(*)::int AS bills, COALESCE(SUM(signed_net_amount), 0)::float8 AS value
         FROM bills GROUP BY party_code, party_name
       )
       SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank, party_code, party_name AS name, bills, value,
@@ -539,13 +629,17 @@ export class SalesPurchaseAnalysisService {
 
   private async topItems(tenantId: string, kind: AnalysisKind, filters: SalesPurchaseAnalysisFilterDto) {
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
+    const signExpr = this.familyAwareAmountSignSql(kind, 'mv');
     return this.prisma.$queryRaw<any[]>(Prisma.sql`
-      SELECT ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0))) DESC)::int AS rank,
+      SELECT ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0)) * ${signExpr}) DESC)::int AS rank,
         COALESCE(p.id::text, mprod.product_id::text, mt.pid) AS item_key,
         COALESCE(p.code, mprod.code, mt.pid) AS item_code,
         COALESCE(p.name, mprod.name, 'Unmapped Item') AS item_name,
-        COALESCE(SUM(ABS(mt.qty)), 0)::float8 AS quantity,
-        COALESCE(SUM(ABS(mt.amount)), 0)::float8 AS value
+        -- Per-line sums are signed by the parent voucher's family so that for
+        -- a sold-then-returned item the quantities/amounts net out, and
+        -- challan/SC lines contribute zero (sign = 0).
+        COALESCE(SUM(ABS(mt.qty) * ${signExpr}), 0)::float8 AS quantity,
+        COALESCE(SUM(ABS(mt.amount) * ${signExpr}), 0)::float8 AS value
       FROM marg_vouchers mv
       JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleLineTypeSql('mv', 'mt')}
       LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
@@ -560,10 +654,15 @@ export class SalesPurchaseAnalysisService {
 
   private async taxSummary(tenantId: string, kind: AnalysisKind, filters: SalesPurchaseAnalysisFilterDto) {
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
+    // Family-signed tax aggregation: an invoice's tax is positive, a return's
+    // tax is negative (net GST liability), and a challan / SC / unknown line
+    // contributes zero (sign = 0). Without the multiplier, returning a sold
+    // batch would *increase* the reported tax_amount, which is wrong.
+    const signExpr = this.familyAwareAmountSignSql(kind, 'mv');
     return this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT COALESCE(mt.gst, 0)::float8 AS tax_pct,
-        COALESCE(SUM(ABS(mt.gst_amount)), 0)::float8 AS tax_amount,
-        COALESCE(SUM(ABS(mt.amount)), 0)::float8 AS taxable_amount
+        COALESCE(SUM(ABS(mt.gst_amount) * ${signExpr}), 0)::float8 AS tax_amount,
+        COALESCE(SUM(ABS(mt.amount) * ${signExpr}), 0)::float8 AS taxable_amount
       FROM marg_vouchers mv
       JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleLineTypeSql('mv', 'mt')}
       LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
@@ -578,20 +677,35 @@ export class SalesPurchaseAnalysisService {
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
     return this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH bills AS (${this.billRollupSql(tenantId, kind, where)})
-      SELECT payment_mode, COUNT(*)::int AS bills, COALESCE(SUM(net_amount), 0)::float8 AS amount
+      SELECT payment_mode, COUNT(*)::int AS bills, COALESCE(SUM(signed_net_amount), 0)::float8 AS amount
       FROM bills
       GROUP BY payment_mode
       ORDER BY amount DESC
     `);
   }
 
-  private billRollupSql(_tenantId: string, _kind: AnalysisKind, where: Prisma.Sql): Prisma.Sql {
+  private familyAwareAmountSignSql(kind: AnalysisKind, voucherAlias: string = 'mv'): Prisma.Sql {
+    // Per-family multiplier applied to bill / line amounts before summing.
+    // Sales:    invoice → +1, return → -1, challan/SC/everything else → 0.
+    // Purchase: invoice → +1, return → -1, everything else → 0.
+    // Producing zero for challan and SC is what excludes them from commercial
+    // headline totals while keeping their rows visible in drilldown lists.
+    return kind === 'sales'
+      ? margSalesAmountSignSql(voucherAlias)
+      : margPurchaseAmountSignSql(voucherAlias);
+  }
+
+  private billRollupSql(_tenantId: string, kind: AnalysisKind, where: Prisma.Sql): Prisma.Sql {
+    const familyExpr = margVoucherFamilySql('mv');
+    const signExpr = this.familyAwareAmountSignSql(kind, 'mv');
     return Prisma.sql`
       SELECT
         mv.company_id || ':' || mv.voucher AS bill_key,
         mv.company_id,
         mv.voucher,
         mv.type,
+        ${familyExpr} AS family,
+        ${signExpr} AS amount_sign,
         COALESCE(mv.vcn, mv.voucher) AS invoice_number,
         mv.date,
         mv.cid AS party_code,
@@ -640,7 +754,16 @@ export class SalesPurchaseAnalysisService {
         END AS margin_pct,
         COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS quantity,
         COUNT(DISTINCT mt.pid) FILTER (WHERE mt.pid IS NOT NULL)::int AS item_count,
-        CASE WHEN mv.type IN ('R', 'T', 'B') THEN 'RETURN' ELSE 'POSTED' END AS status
+        CASE WHEN mv.type IN ('R', 'T', 'B') THEN 'RETURN' ELSE 'POSTED' END AS status,
+        -- Pre-computed signed amount: net_amount × amount_sign so callers
+        -- can SUM(signed_net_amount) for a correctly contra-signed total
+        -- (sales invoices add, sales returns subtract, challans / SC / other
+        -- families contribute zero).
+        (
+          COALESCE(MAX(mv.final_amt), SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))))
+          * ${signExpr}
+        )::float8 AS signed_net_amount,
+        (COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0) * ${signExpr})::float8 AS signed_quantity
       FROM marg_vouchers mv
       LEFT JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleLineTypeSql('mv', 'mt')}
       LEFT JOIN marg_products mprod ON mprod.tenant_id = mv.tenant_id AND mprod.company_id = mv.company_id AND mprod.pid = mt.pid
@@ -664,7 +787,14 @@ export class SalesPurchaseAnalysisService {
         LIMIT 1
       ) ms ON TRUE
       WHERE ${where}
-      GROUP BY mv.company_id, mv.voucher, mv.type, mv.vcn, mv.date, mv.cid, mp.par_name, mb.name, mb.branch, mb.location_id, mv.salesman, mv.mr, sm.name, smp.par_name, mv.cash, mv.others
+      -- mv.family is the STORED GENERATED column the sign helpers
+      -- reference. The multiplication MAX(final_amt) * signExpr above sits
+      -- OUTSIDE the aggregate, so Postgres requires mv.family in the
+      -- GROUP BY (it does NOT infer functional dependency from type+vcn
+      -- even though they are listed here). Functionally constant within a
+      -- (company_id, voucher, type) group, so adding it does not expand
+      -- result cardinality.
+      GROUP BY mv.company_id, mv.voucher, mv.type, mv.vcn, mv.family, mv.date, mv.cid, mp.par_name, mb.name, mb.branch, mb.location_id, mv.salesman, mv.mr, sm.name, smp.par_name, mv.cash, mv.others
     `;
   }
 
@@ -682,8 +812,14 @@ export class SalesPurchaseAnalysisService {
     const mp = Prisma.raw(partyAlias);
     const mprod = Prisma.raw(productAlias);
     const types = this.documentTypes(kind);
+    // Cancelled vouchers are NEVER part of commercial sales / purchase
+    // aggregates regardless of which downstream query consumes this where
+    // clause. Filtering here keeps the contract in one place — every callsite
+    // that uses buildHeaderWhere automatically inherits cancellation
+    // suppression without having to remember to add it.
     const conds: Prisma.Sql[] = [
       Prisma.sql`${mv}.tenant_id = ${tenantId}::uuid`,
+      Prisma.sql`${mv}.is_cancelled = FALSE`,
       Prisma.sql`${mv}.type = ANY(${types}::text[])`,
     ];
 

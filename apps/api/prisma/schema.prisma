@@ -2715,33 +2715,39 @@ model MargParty {
 
 /// Staged Marg transaction details
 model MargTransaction {
-  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId  String   @map("tenant_id") @db.Uuid
-  margId    BigInt   @map("marg_id")
-  companyId Int      @map("company_id")
-  sourceKey String   @map("source_key") @db.VarChar(255)
-  voucher   String   @db.VarChar(50)
-  type      String   @db.VarChar(10)
-  vcn       String?  @db.VarChar(50)
-  date      DateTime @db.Date
-  cid       String?  @db.VarChar(20)
-  pid       String?  @db.VarChar(20)
-  gCode     String?  @map("g_code") @db.VarChar(20)
-  batch     String?  @db.VarChar(50)
-  batDet    String?  @map("bat_det") @db.VarChar(50)
-  qty       Decimal? @db.Decimal(18, 4)
-  free      Decimal? @db.Decimal(18, 4)
-  mrp       Decimal? @db.Decimal(18, 4)
-  rate      Decimal? @db.Decimal(18, 4)
-  discount  Decimal? @db.Decimal(18, 4)
-  amount    Decimal? @db.Decimal(18, 4)
-  gst       Decimal? @db.Decimal(5, 2)
-  gstAmount Decimal? @map("gst_amount") @db.Decimal(18, 4)
-  addField  String?  @map("add_field")
-  actualId  String?  @map("actual_id") @db.Uuid
-  rawData   Json?    @map("raw_data")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  margId      BigInt    @map("marg_id")
+  companyId   Int       @map("company_id")
+  sourceKey   String    @map("source_key") @db.VarChar(255)
+  voucher     String    @db.VarChar(50)
+  type        String    @db.VarChar(10)
+  vcn         String?   @db.VarChar(50)
+  date        DateTime  @db.Date
+  cid         String?   @db.VarChar(20)
+  pid         String?   @db.VarChar(20)
+  gCode       String?   @map("g_code") @db.VarChar(20)
+  batch       String?   @db.VarChar(50)
+  batDet      String?   @map("bat_det") @db.VarChar(50)
+  qty         Decimal?  @db.Decimal(18, 4)
+  free        Decimal?  @db.Decimal(18, 4)
+  mrp         Decimal?  @db.Decimal(18, 4)
+  rate        Decimal?  @db.Decimal(18, 4)
+  discount    Decimal?  @db.Decimal(18, 4)
+  amount      Decimal?  @db.Decimal(18, 4)
+  gst         Decimal?  @db.Decimal(5, 2)
+  gstAmount   Decimal?  @map("gst_amount") @db.Decimal(18, 4)
+  addField    String?   @map("add_field")
+  /// See MargVoucher.isCancelled — same parser, same contract. A line can
+  /// be cancelled independently of its voucher header (Marg sometimes
+  /// cancels a single line in a multi-line invoice). Reports and projections
+  /// must check both isCancelled flags.
+  isCancelled Boolean   @default(false) @map("is_cancelled")
+  cancelledOn DateTime? @map("cancelled_on")
+  actualId    String?   @map("actual_id") @db.Uuid
+  rawData     Json?     @map("raw_data")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   @@unique([tenantId, companyId, sourceKey])
   @@index([tenantId, date])
@@ -2751,28 +2757,36 @@ model MargTransaction {
 
 /// Staged Marg voucher headers (MDis = master distribution records)
 model MargVoucher {
-  id        String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId  String    @map("tenant_id") @db.Uuid
-  margId    BigInt    @map("marg_id")
-  companyId Int       @map("company_id")
-  voucher   String    @db.VarChar(50)
-  type      String    @db.VarChar(10)
-  vcn       String?   @db.VarChar(50)
-  date      DateTime  @db.Date
-  cid       String?   @db.VarChar(20)
-  finalAmt  Decimal?  @map("final_amt") @db.Decimal(18, 4)
-  cash      Decimal?  @db.Decimal(18, 4)
-  others    Decimal?  @db.Decimal(18, 4)
-  salesman  String?   @db.VarChar(100)
-  mr        String?   @db.VarChar(100)
-  route     String?   @db.VarChar(100)
-  area      String?   @db.VarChar(100)
-  orn       String?   @db.VarChar(100)
-  addField  String?   @map("add_field")
-  oDate     DateTime? @map("o_date") @db.Date
-  rawData   Json?     @map("raw_data")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  margId       BigInt    @map("marg_id")
+  companyId    Int       @map("company_id")
+  voucher      String    @db.VarChar(50)
+  type         String    @db.VarChar(10)
+  vcn          String?   @db.VarChar(50)
+  date         DateTime  @db.Date
+  cid          String?   @db.VarChar(20)
+  finalAmt     Decimal?  @map("final_amt") @db.Decimal(18, 4)
+  cash         Decimal?  @db.Decimal(18, 4)
+  others       Decimal?  @db.Decimal(18, 4)
+  salesman     String?   @db.VarChar(100)
+  mr           String?   @db.VarChar(100)
+  route        String?   @db.VarChar(100)
+  area         String?   @db.VarChar(100)
+  orn          String?   @db.VarChar(100)
+  addField     String?   @map("add_field")
+  oDate        DateTime? @map("o_date") @db.Date
+  /// Set TRUE when parseMargCancellation detects `CANCELLED : 1` on this
+  /// voucher's AddField (header or any of its lines). Populated at staging
+  /// time so reports / projections can filter cancelled documents with a
+  /// single boolean check instead of re-parsing AddField in every query.
+  /// Cancelled vouchers contribute no commercial actual, inventory
+  /// movement, ledger entry, procurement document, or report total.
+  isCancelled  Boolean   @default(false) @map("is_cancelled")
+  cancelledOn  DateTime? @map("cancelled_on")
+  rawData      Json?     @map("raw_data")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   @@unique([tenantId, companyId, voucher, type])
   @@index([tenantId, date])
@@ -2921,24 +2935,35 @@ model MargPartyBalance {
 
 /// Staged Marg outstandings from API type 1
 model MargOutstanding {
-  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId  String   @map("tenant_id") @db.Uuid
-  margId    BigInt   @map("marg_id")
-  companyId Int      @map("company_id")
-  ord       String   @db.VarChar(20)
-  date      DateTime @db.Date
-  vcn       String?  @db.VarChar(50)
-  days      Int      @default(0)
-  finalAmt  Decimal? @map("final_amt") @db.Decimal(18, 4)
-  balance   Decimal? @db.Decimal(18, 4)
-  pdLess    Decimal? @map("pd_less") @db.Decimal(18, 4)
-  groupCode String?  @map("group_code") @db.VarChar(20)
-  voucher   String?  @db.VarChar(50)
-  sVoucher  String?  @map("s_voucher") @db.VarChar(50)
-  addField  String?  @map("add_field")
-  rawData   Json?    @map("raw_data")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                  String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  margId              BigInt   @map("marg_id")
+  companyId           Int      @map("company_id")
+  ord                 String   @db.VarChar(20)
+  date                DateTime @db.Date
+  vcn                 String?  @db.VarChar(50)
+  days                Int      @default(0)
+  finalAmt            Decimal? @map("final_amt") @db.Decimal(18, 4)
+  balance             Decimal? @db.Decimal(18, 4)
+  pdLess              Decimal? @map("pd_less") @db.Decimal(18, 4)
+  groupCode           String?  @map("group_code") @db.VarChar(20)
+  voucher             String?  @db.VarChar(50)
+  sVoucher            String?  @map("s_voucher") @db.VarChar(50)
+  addField            String?  @map("add_field")
+  /// Soft-delete marker set by the authoritative-snapshot closure pass.
+  /// Outstandings that disappear from Marg's APIType=1 payload (because
+  /// they've been settled or cancelled at source) are marked
+  /// source_deleted = TRUE rather than physically deleted, preserving an
+  /// audit trail. Reports filter `WHERE NOT sourceDeleted` to exclude
+  /// settled rows from open AR/AP aging.
+  sourceDeleted       Boolean  @default(false) @map("source_deleted")
+  /// Sync log that most recently observed this row in the payload. Lets the
+  /// closure pass detect rows that an authoritative snapshot did NOT emit
+  /// (lastSeenSyncLogId != currentSyncLogId).
+  lastSeenSyncLogId   String?  @map("last_seen_sync_log_id") @db.Uuid
+  rawData             Json?    @map("raw_data")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
   @@unique([tenantId, companyId, margId])
   @@index([tenantId, date])

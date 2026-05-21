@@ -31,14 +31,52 @@ export class MargSyncScheduler {
     @Optional() @InjectQueue(QUEUE_NAMES.MARG_SYNC) private readonly margSyncQueue: Queue | null,
   ) {}
 
-  /** Run every hour. Configs are checked against their syncFrequency. */
+  /**
+   * Run every hour. Configs are checked against their syncFrequency.
+   *
+   * EVERY query inside this tick is deliberately cross-tenant — the scheduler
+   * is a platform-level housekeeper that scans / heals / dispatches across
+   * the whole fleet. We wrap the entire tick in `executeWithoutTenantScopeWarning`
+   * so:
+   *   - The Prisma tenant-scope middleware does NOT log a `Tenant-scoped
+   *     model … accessed without tenant context` warning for each query
+   *     (it would fire on every cron tick, polluting logs and masking real
+   *     accidental bypasses elsewhere).
+   *   - The intent ("yes, this is global by design") is explicit in code.
+   *   - Per-config sync execution still happens inside
+   *     `executeInTenantContext` further down, so the actual sync work is
+   *     tenant-scoped correctly. Only the cross-tenant DISCOVERY /
+   *     RECOVERY / ENQUEUE steps run unscoped.
+   *
+   * Tick cadence: every hour matches the most aggressive `syncFrequency`
+   * tenants can configure (HOURLY). DAILY / WEEKLY configs simply skip the
+   * `isDue` check on most ticks. If your deployment needs HOURLY syncs to
+   * start within <60 min of becoming due, switch the cron expression to
+   * `EVERY_30_MINUTES` (or finer) — there's no correctness cost, only
+   * marginally more DB chatter per tick.
+   */
   @Cron(CronExpression.EVERY_HOUR)
   async scheduleActiveSyncs(): Promise<void> {
-    // Stale = heartbeat older than threshold. Crucial: a sync that has been
-    // RUNNING for hours is NOT stale if its heartbeat is fresh; only the
-    // ABSENCE of recent heartbeat indicates a crashed worker. Previously
-    // this used `startedAt < 2h ago`, which incorrectly killed healthy
-    // long-running syncs the moment they crossed the 2h mark.
+    return this.prisma.executeWithoutTenantScopeWarning(async () => {
+      await this.recoverStaleConfigsAndLogs();
+      await this.dispatchDueConfigs();
+    });
+  }
+
+  /**
+   * Cross-tenant stale-lock recovery.
+   *
+   * Stale = heartbeat older than threshold. Crucial: a sync that has been
+   * RUNNING for hours is NOT stale if its heartbeat is fresh; only the
+   * ABSENCE of recent heartbeat indicates a crashed worker. Previously
+   * this used `startedAt < 2h ago`, which incorrectly killed healthy
+   * long-running syncs the moment they crossed the 2h mark.
+   *
+   * Intentionally global: a worker death in any tenant's namespace
+   * produces a stuck lock that only this sweep can unstick. Iterating
+   * tenant-by-tenant would just be slower with no safety benefit.
+   */
+  private async recoverStaleConfigsAndLogs(): Promise<void> {
     const staleCutoff = new Date(Date.now() - this.staleAfterMs);
 
     // Reset configs whose updatedAt is older than the threshold. updatedAt
@@ -89,7 +127,26 @@ export class MargSyncScheduler {
         `(cutoff=${staleCutoff.toISOString()}, threshold=${Math.round(this.staleAfterMs / 60000)}min)`,
       );
     }
+  }
 
+  /**
+   * Cross-tenant due-config dispatcher. Pulls every active config across
+   * every tenant whose lock is not currently held, asks `isDue` whether
+   * the next sync window has elapsed, and either:
+   *   - enqueues a BullMQ job (the worker picks it up and runs the actual
+   *     sync inside `executeInTenantContext`), or
+   *   - falls back to inline execution when Redis is not configured
+   *     (development / single-process deployments). Inline execution
+   *     wraps the call in `executeInTenantContext` itself, so even the
+   *     inline path is tenant-scoped correctly.
+   *
+   * Intentionally global at the discovery step: we have to enumerate all
+   * tenants' configs to know which are due. Tenant-scoped per-config
+   * filtering would require either looping over tenants (extra DB
+   * round-trips) or registering a per-tenant cron (operationally
+   * impossible since tenants are dynamic).
+   */
+  private async dispatchDueConfigs(): Promise<void> {
     const configs = await this.prisma.margSyncConfig.findMany({
       where: {
         isActive: true,

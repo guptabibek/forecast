@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/database/prisma.service';
+import { margSalesAmountSignSql } from '../marg-ede/marg-voucher-family.sql';
 import {
     ABCAnalysisDto,
     DashboardFilterDto,
@@ -154,9 +155,18 @@ export class ReportsService {
     const mv = Prisma.raw(voucherAlias);
     const mprod = Prisma.raw(productAlias);
     const mp = Prisma.raw(partyAlias);
+    // Header type filter intentionally excludes 'T' (SC price-difference) —
+    // SC is accounting-only per business rules confirmed by QA and must not
+    // contribute to commercial sales dashboards. Challans (S/CHAL) remain in
+    // the load so they can be filtered by family downstream, but their
+    // contribution to monetary aggregates is suppressed by margSalesAmountSignSql
+    // returning 0 for the SALES_CHALLAN family.
+    // `is_cancelled = FALSE` excludes Marg-cancelled vouchers — cancelled
+    // documents must never contribute to dashboard sales totals.
     const conds: Prisma.Sql[] = [
       Prisma.sql`${mv}.tenant_id = ${tenantId}::uuid`,
-      Prisma.sql`${mv}.type IN ('S', 'R', 'T')`,
+      Prisma.sql`${mv}.is_cancelled = FALSE`,
+      Prisma.sql`${mv}.type IN ('S', 'R')`,
     ];
 
     if (range?.start) conds.push(Prisma.sql`${mv}.date >= ${this.dashboardDateKey(range.start)}::date`);
@@ -184,9 +194,13 @@ export class ReportsService {
         mv.date,
         COALESCE(mb.location_id::text, mv.company_id::text) AS location_id,
         COALESCE(mb.name, mb.branch, 'Company ' || mv.company_id::text) AS location_name,
-        COALESCE(MAX(mv.final_amt), SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))))::float8 AS net_amount,
-        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS taxable_amount,
-        COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS quantity,
+        -- Family-signed monetary amounts: invoice +1, return -1, challan 0.
+        -- Downstream SUM(net_amount) gives net commercial sales (gross less
+        -- returns, excluding challans). The pre-fix expression summed every
+        -- type unsigned which double-counted returns and inflated headlines.
+        (COALESCE(MAX(mv.final_amt), SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0)))) * ${margSalesAmountSignSql('mv')})::float8 AS net_amount,
+        (COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0) * ${margSalesAmountSignSql('mv')})::float8 AS taxable_amount,
+        (COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0) * ${margSalesAmountSignSql('mv')})::float8 AS quantity,
         COUNT(DISTINCT mt.pid) FILTER (WHERE mt.pid IS NOT NULL)::int AS item_count
       FROM marg_vouchers mv
       LEFT JOIN marg_transactions mt
@@ -206,7 +220,17 @@ export class ReportsService {
         ON mb.tenant_id = mv.tenant_id
         AND mb.company_id = mv.company_id
       WHERE ${where}
-      GROUP BY mv.company_id, mv.voucher, mv.type, mv.date, mb.location_id, mb.name, mb.branch
+      -- mv.family is referenced by the signed_net_amount / signed_taxable
+      -- / signed_quantity expressions above OUTSIDE any aggregate (it sits
+      -- next to MAX/SUM in the multiplication). Postgres does NOT infer
+      -- functional dependency of a STORED GENERATED column from its source
+      -- columns, even when those source columns are in GROUP BY -- so we
+      -- must list mv.family explicitly to avoid error 42803
+      -- (column must appear in the GROUP BY clause or be used in an
+      -- aggregate function). The column is functionally constant within
+      -- a (company_id, voucher, type) group so listing it does not change
+      -- the result cardinality.
+      GROUP BY mv.company_id, mv.voucher, mv.type, mv.date, mv.family, mb.location_id, mb.name, mb.branch
     `;
   }
 
@@ -601,7 +625,9 @@ export class ReportsService {
         COALESCE(p.id::text, mprod.product_id::text, mt.pid, 'unknown') AS id,
         COALESCE(p.name, mprod.name, 'Unmapped Item') AS name,
         COALESCE(p.code, mprod.code, mt.pid, '') AS code,
-        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS revenue
+        -- Per-line revenue signed by the parent voucher's family so returned
+        -- units net against sold units and challan/SC contribute 0.
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS revenue
       FROM marg_vouchers mv
       JOIN marg_transactions mt
         ON mt.tenant_id = mv.tenant_id
@@ -976,7 +1002,7 @@ export class ReportsService {
           COALESCE(p.id::text, mprod.product_id::text, mt.pid, 'unknown') AS id,
           COALESCE(p.name, mprod.name, 'Unmapped Item') AS name,
           COALESCE(p.code, mprod.code, mt.pid, '') AS code,
-          COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS total_sales,
+          COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS total_sales,
           COUNT(DISTINCT date_trunc('month', mv.date))::int AS months_of_data
         FROM marg_vouchers mv
         JOIN marg_transactions mt
@@ -1148,9 +1174,12 @@ export class ReportsService {
           COALESCE(p.name, mprod.name, 'Unmapped Item') AS name,
           COALESCE(p.code, mprod.code, mt.pid, '') AS code,
           COALESCE(p.category, mprod.g_code5, 'Uncategorized') AS category,
-          COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS total_revenue,
-          COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS total_quantity,
-          COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) - ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0)), 0)::float8 AS total_margin
+          -- All per-line aggregates are family-signed so a returned unit's
+          -- revenue / quantity / margin nets against the same item's prior
+          -- invoice and challan/SC are excluded entirely.
+          COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS total_revenue,
+          COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS total_quantity,
+          COALESCE(SUM((ABS(COALESCE(mt.amount, 0)) - ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS total_margin
         FROM marg_vouchers mv
         JOIN marg_transactions mt
           ON mt.tenant_id = mv.tenant_id

@@ -241,7 +241,64 @@ interface MargType2ProjectionInput {
   voucherAddField?: string | null | undefined;
   effectiveQty: number;
   amount: Prisma.Decimal | number | null | undefined;
+  // Hint from the caller: when true, `voucherType` is null because we found
+  // multiple MDis candidates for (companyId, voucher) but none matched the
+  // line-type preference — i.e. the header is ambiguous, not missing. Lets
+  // the diagnostic counter distinguish these two distinct cases.
+  voucherContextAmbiguous?: boolean;
 }
+
+/**
+ * Aggregated commercial-projection diagnostics, emitted at the end of each
+ * pipeline pass and surfaced in the sync log. Each counter has a single
+ * documented meaning so an operator can spot misclassifications, missing
+ * MDis headers, or unexpected cancellation surges without reading source.
+ */
+interface MargProjectionDiagnostics {
+  missingMdisHeaderCount: number;
+  ambiguousMdisHeaderCount: number;
+  unknownDocumentFamilyCount: number;
+  lowConfidenceDocumentFamilyCount: number;
+  cancelledRowsSkippedCount: number;
+  cancelledRowsReversedCount: number;
+  projectedByFamily: Record<string, number>;
+}
+
+function buildMargProjectionDiagnostics(): MargProjectionDiagnostics {
+  return {
+    missingMdisHeaderCount: 0,
+    ambiguousMdisHeaderCount: 0,
+    unknownDocumentFamilyCount: 0,
+    lowConfidenceDocumentFamilyCount: 0,
+    cancelledRowsSkippedCount: 0,
+    cancelledRowsReversedCount: 0,
+    projectedByFamily: {},
+  };
+}
+
+function summarizeMargProjectionDiagnostics(diag: MargProjectionDiagnostics): string {
+  const familySummary = Object.entries(diag.projectedByFamily)
+    .map(([family, count]) => `${family}=${count}`)
+    .join(',') || 'none';
+  return (
+    `missingMdis=${diag.missingMdisHeaderCount} ` +
+    `ambiguousMdis=${diag.ambiguousMdisHeaderCount} ` +
+    `unknownFamily=${diag.unknownDocumentFamilyCount} ` +
+    `lowConfidence=${diag.lowConfidenceDocumentFamilyCount} ` +
+    `cancelledSkipped=${diag.cancelledRowsSkippedCount} ` +
+    `cancelledReversed=${diag.cancelledRowsReversedCount} ` +
+    `projectedByFamily=[${familySummary}]`
+  );
+}
+
+type MargType2DocumentConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
+
+type MargType2DocumentSkipReason =
+  | 'MISSING_MDIS_HEADER'
+  | 'AMBIGUOUS_MDIS_HEADER'
+  | 'UNKNOWN_DOCUMENT_FAMILY'
+  | 'LOW_CONFIDENCE_DOCUMENT_FAMILY'
+  | 'CANCELLED_DOCUMENT';
 
 interface MargType2ProjectionDecision {
   family: MargType2DocumentFamily;
@@ -260,6 +317,15 @@ interface MargType2ProjectionDecision {
   ledgerQuantity: number;
   customerFacing: boolean;
   supplierFacing: boolean;
+  isCancelled: boolean;
+  cancelledOn: Date | null;
+  // Provenance / diagnostic metadata for the strict classifier.
+  // `confidence` lets callers gate projection behind a quality threshold;
+  // `skipReason` is non-null when the decision suppresses every downstream
+  // projection (cancelled, missing MDis header, unknown family, low-confidence
+  // accounting-only document) and feeds the projection diagnostics counters.
+  confidence: MargType2DocumentConfidence;
+  skipReason: MargType2DocumentSkipReason | null;
 }
 
 export interface MargConnectionProbeSummary {
@@ -1646,6 +1712,24 @@ export class MargEdeService {
         && startedFromCleanCursor
         && !dateWindow;
 
+      // Outstanding closure has its own authoritativeness gate because
+      // outstandings live in the *accounting* (APIType=1) payload, which can
+      // be fetched independently of the inventory snapshot. We can close
+      // unseen outstanding rows only when we just completed a full accounting
+      // pull from cleanly-cursored state with no date window — anything else
+      // (resume, incremental, windowed) would soft-delete rows Marg simply
+      // didn't re-emit in this slice, silently zeroing legitimate AR/AP.
+      const startedFromCleanAccountingCursor = !fromDate
+        && (config.lastAccountingSyncIndex ?? 0) === 0
+        && !config.lastAccountingSyncDatetime;
+      const outstandingSnapshotIsAuthoritative = shouldFetchFromMarg
+        && accountingCompleted
+        && startedFromCleanAccountingCursor
+        && !dateWindow;
+      if (outstandingSnapshotIsAuthoritative) {
+        await this.closeUnseenMargOutstandings(tenantId, syncLog.id);
+      }
+
       if (stockSnapshotIsAuthoritative) {
         await this.markMissingStockAsDeleted(tenantId, syncLog.id);
       } else if (shouldFetchFromMarg && shouldRunInventory && shouldProcessStockSnapshot && !receivedStockSnapshot) {
@@ -2215,8 +2299,12 @@ export class MargEdeService {
         ? { startsWith: 'D' }
         : undefined;
 
+    // Always exclude source-deleted rows: an outstanding that Marg's
+    // authoritative snapshot dropped (closeUnseenMargOutstandings) has been
+    // settled or cancelled at source and must not surface in open AR/AP aging.
     const baseWhere: Prisma.MargOutstandingWhereInput = {
       tenantId,
+      sourceDeleted: false,
       ...(options.companyId ? { companyId: options.companyId } : {}),
       ...(groupFilter ? { groupCode: groupFilter } : {}),
     };
@@ -2555,6 +2643,11 @@ export class MargEdeService {
 
     const where: Prisma.MargOutstandingWhereInput = {
       tenantId,
+      // Excludes Marg-side closed/settled rows. The `includeSettled` flag
+      // below still controls the zero-balance display; source_deleted is
+      // a stronger "this row no longer exists in Marg" signal that should
+      // not show up in either mode of the report.
+      sourceDeleted: false,
       ord: normalizedCode,
       ...(options.companyId ? { companyId: options.companyId } : {}),
       ...(options.includeSettled ? {} : { balance: { not: 0 } }),
@@ -2735,6 +2828,7 @@ export class MargEdeService {
 
     const baseWhere: Prisma.MargOutstandingWhereInput = {
       tenantId,
+      sourceDeleted: false,
       ...(options.companyId ? { companyId: options.companyId } : {}),
       ...(groupFilter ? { groupCode: groupFilter } : {}),
       balance: { not: 0 },
@@ -2913,8 +3007,9 @@ export class MargEdeService {
    * window with running balance, and closing balance — driven entirely by
    * MargAccountPosting rows, which carry one signed entry per voucher
    * (positive = DR, negative = CR per Marg's convention). Every row includes
-   * the source voucher number, book code (S=Sales, P=Purchase, R=Receipt,
-   * E=Adjustment, J=Journal, …), counter-party code, and Marg's own remark
+   * the source voucher number, book code (S=Sales, A=Purchase, P=Payment,
+   * R=Receipt, E=Adjustment, D=Debit Note, J=Journal, …), counter-party
+   * code, and Marg's own remark
    * so users can reconcile a single line back to a Marg voucher in seconds.
    */
   async getMargPartyLedger(
@@ -3554,9 +3649,9 @@ export class MargEdeService {
     const code = String(book || '').trim().toUpperCase();
     switch (code) {
       case 'S': return 'Sales';
-      case 'P': return 'Purchase';
+      case 'A': return 'Purchase';
+      case 'P': return 'Payment';
       case 'R': return 'Receipt';
-      case 'A': return 'Payment';
       case 'E': return 'Sales Adjustment';
       case 'D': return 'Debit Note';
       case 'C': return 'Credit Note';
@@ -4493,6 +4588,8 @@ export class MargEdeService {
       gst: number | null;
       gstAmount: number | null;
       addField: string | null;
+      isCancelled: boolean;
+      cancelledOn: Date | null;
       rawData: unknown;
     }> = [];
 
@@ -4521,6 +4618,9 @@ export class MargEdeService {
       if (seen.has(dedupKey)) continue;
       seen.add(dedupKey);
 
+      const addField = String(d.AddField || '').trim() || null;
+      const cancellation = this.parseMargCancellation(addField);
+
       prepared.push({
         margId,
         companyId,
@@ -4542,17 +4642,19 @@ export class MargEdeService {
         amount: d.Amount != null ? Number(d.Amount) : null,
         gst: d.GST != null ? Number(d.GST) : null,
         gstAmount: d.GSTAmount != null ? Number(d.GSTAmount) : null,
-        addField: String(d.AddField || '').trim() || null,
+        addField,
+        isCancelled: cancellation.isCancelled,
+        cancelledOn: cancellation.cancelledOn,
         rawData: d,
       });
     }
 
     if (prepared.length === 0) return 0;
 
-    // 23 bind variables per row × BATCH_SIZE must stay under Postgres'
-    // 32_767 prepared-statement parameter cap. The helper clamps for us so
-    // raising MARG_STAGING_BATCH_SIZE in env never trips the cap.
-    const BATCH_SIZE = this.computeSafeBatchSize(this.stagingBatchSize, 23, 'syncTransactions');
+    // 25 bind variables per row now that is_cancelled + cancelled_on are
+    // included in the bulk INSERT. The helper clamps for us so raising
+    // MARG_STAGING_BATCH_SIZE in env never trips Postgres' 32_767 cap.
+    const BATCH_SIZE = this.computeSafeBatchSize(this.stagingBatchSize, 25, 'syncTransactions');
     let written = 0;
     const startedAt = Date.now();
 
@@ -4583,6 +4685,8 @@ export class MargEdeService {
           ${r.gst},
           ${r.gstAmount},
           ${r.addField},
+          ${r.isCancelled},
+          ${r.cancelledOn},
           ${JSON.stringify(r.rawData)}::jsonb,
           NOW(),
           NOW()
@@ -4597,30 +4701,33 @@ export class MargEdeService {
           cid, pid, g_code, batch, bat_det,
           qty, free, mrp, rate, discount,
           amount, gst, gst_amount, add_field,
+          is_cancelled, cancelled_on,
           raw_data, created_at, updated_at
         )
         VALUES ${values}
         ON CONFLICT (tenant_id, company_id, source_key) DO UPDATE SET
-          marg_id    = EXCLUDED.marg_id,
-          type       = EXCLUDED.type,
-          vcn        = EXCLUDED.vcn,
-          date       = EXCLUDED.date,
-          cid        = EXCLUDED.cid,
-          pid        = EXCLUDED.pid,
-          g_code     = EXCLUDED.g_code,
-          batch      = EXCLUDED.batch,
-          bat_det    = EXCLUDED.bat_det,
-          qty        = EXCLUDED.qty,
-          free       = EXCLUDED.free,
-          mrp        = EXCLUDED.mrp,
-          rate       = EXCLUDED.rate,
-          discount   = EXCLUDED.discount,
-          amount     = EXCLUDED.amount,
-          gst        = EXCLUDED.gst,
-          gst_amount = EXCLUDED.gst_amount,
-          add_field  = EXCLUDED.add_field,
-          raw_data   = EXCLUDED.raw_data,
-          updated_at = NOW()
+          marg_id      = EXCLUDED.marg_id,
+          type         = EXCLUDED.type,
+          vcn          = EXCLUDED.vcn,
+          date         = EXCLUDED.date,
+          cid          = EXCLUDED.cid,
+          pid          = EXCLUDED.pid,
+          g_code       = EXCLUDED.g_code,
+          batch        = EXCLUDED.batch,
+          bat_det      = EXCLUDED.bat_det,
+          qty          = EXCLUDED.qty,
+          free         = EXCLUDED.free,
+          mrp          = EXCLUDED.mrp,
+          rate         = EXCLUDED.rate,
+          discount     = EXCLUDED.discount,
+          amount       = EXCLUDED.amount,
+          gst          = EXCLUDED.gst,
+          gst_amount   = EXCLUDED.gst_amount,
+          add_field    = EXCLUDED.add_field,
+          is_cancelled = EXCLUDED.is_cancelled,
+          cancelled_on = EXCLUDED.cancelled_on,
+          raw_data     = EXCLUDED.raw_data,
+          updated_at   = NOW()
       `);
 
       written += chunk.length;
@@ -4835,6 +4942,11 @@ export class MargEdeService {
       orn: string | null;
       addField: string | null;
       oDate: Date | null;
+      // Cancellation state parsed once at staging time from AddField so
+      // downstream reports / projections can filter cancelled documents with
+      // a single boolean check.
+      isCancelled: boolean;
+      cancelledOn: Date | null;
       rawData: unknown;
     }
 
@@ -4854,6 +4966,8 @@ export class MargEdeService {
       if (!this.isWithinDateWindow(parsedDate, dateWindow)) continue;
 
       const type = String(m.Type || '').trim();
+      const addField = String(m.AddField || '').trim() || null;
+      const cancellation = this.parseMargCancellation(addField);
 
       const dedupKey = `${companyId}:${voucher}:${type}`;
       const row: PreparedVoucher = {
@@ -4873,8 +4987,10 @@ export class MargEdeService {
         route: String(m.Rout || '').trim() || null,
         area: String(m.Area || '').trim() || null,
         orn: String(m.ORN || '').trim() || null,
-        addField: String(m.AddField || '').trim() || null,
+        addField,
         oDate: m.ODate ? this.parseMargDate(m.ODate) : null,
+        isCancelled: cancellation.isCancelled,
+        cancelledOn: cancellation.cancelledOn,
         rawData: m,
       };
       const existingIdx = seen.get(dedupKey);
@@ -4888,7 +5004,9 @@ export class MargEdeService {
 
     if (prepared.length === 0) return 0;
 
-    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 19, 'syncVouchers');
+    // 21 bind variables per row now that is_cancelled + cancelled_on are
+    // included in the bulk INSERT statement.
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 21, 'syncVouchers');
     let written = 0;
     const startedAt = Date.now();
 
@@ -4914,6 +5032,8 @@ export class MargEdeService {
           ${r.orn},
           ${r.addField},
           ${r.oDate},
+          ${r.isCancelled},
+          ${r.cancelledOn},
           ${JSON.stringify(r.rawData)}::jsonb,
           NOW(),
           NOW()
@@ -4925,26 +5045,29 @@ export class MargEdeService {
         INSERT INTO marg_vouchers (
           tenant_id, marg_id, company_id, voucher, type, vcn, date,
           cid, final_amt, cash, others, salesman, mr, route, area, orn,
-          add_field, o_date, raw_data, created_at, updated_at
+          add_field, o_date, is_cancelled, cancelled_on,
+          raw_data, created_at, updated_at
         )
         VALUES ${values}
         ON CONFLICT (tenant_id, company_id, voucher, type) DO UPDATE SET
-          marg_id    = EXCLUDED.marg_id,
-          vcn        = EXCLUDED.vcn,
-          date       = EXCLUDED.date,
-          cid        = EXCLUDED.cid,
-          final_amt  = EXCLUDED.final_amt,
-          cash       = EXCLUDED.cash,
-          others     = EXCLUDED.others,
-          salesman   = EXCLUDED.salesman,
-          mr         = EXCLUDED.mr,
-          route      = EXCLUDED.route,
-          area       = EXCLUDED.area,
-          orn        = EXCLUDED.orn,
-          add_field  = EXCLUDED.add_field,
-          o_date     = EXCLUDED.o_date,
-          raw_data   = EXCLUDED.raw_data,
-          updated_at = NOW()
+          marg_id      = EXCLUDED.marg_id,
+          vcn          = EXCLUDED.vcn,
+          date         = EXCLUDED.date,
+          cid          = EXCLUDED.cid,
+          final_amt    = EXCLUDED.final_amt,
+          cash         = EXCLUDED.cash,
+          others       = EXCLUDED.others,
+          salesman     = EXCLUDED.salesman,
+          mr           = EXCLUDED.mr,
+          route        = EXCLUDED.route,
+          area         = EXCLUDED.area,
+          orn          = EXCLUDED.orn,
+          add_field    = EXCLUDED.add_field,
+          o_date       = EXCLUDED.o_date,
+          is_cancelled = EXCLUDED.is_cancelled,
+          cancelled_on = EXCLUDED.cancelled_on,
+          raw_data     = EXCLUDED.raw_data,
+          updated_at   = NOW()
       `);
 
       written += chunk.length;
@@ -5097,6 +5220,17 @@ export class MargEdeService {
         voucher: String(posting.Voucher || '').trim() || null,
         date: parsedDate,
         code,
+        // Precision note: passing this as a string to Prisma would not
+        // recover any precision lost upstream. By the time `posting` reaches
+        // here, the JSON payload has already been parsed by JSON.parse
+        // which converts numeric tokens to IEEE-754 doubles. Any digits
+        // beyond ~15-16 significant figures were truncated at parse time,
+        // not at this Number() call. A true precision fix would require
+        // swapping JSON.parse for a streaming/string-preserving parser at
+        // the HTTP ingestion layer — a much larger change. In practice
+        // pharma ERP amounts sit well inside double precision (Marg
+        // invoices in this dataset top out around 10^7), so the doubles
+        // round-trip exactly through Prisma's Decimal(18, 4) column.
         amount: posting.Amount != null ? Number(posting.Amount) : 0,
         book,
         code1,
@@ -5413,7 +5547,11 @@ export class MargEdeService {
 
     if (prepared.length === 0) return 0;
 
-    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 15, 'syncOutstandings');
+    // 16 bind variables per row now that last_seen_sync_log_id is part of
+    // the bulk INSERT. progressSyncLogId is recorded on every row Marg
+    // emitted in this snapshot so the closure pass (closeUnseenMargOutstandings)
+    // can later flag any pre-existing row that did NOT show up.
+    const batchSize = this.computeSafeBatchSize(this.stagingBatchSize, 16, 'syncOutstandings');
     let written = 0;
     const startedAt = Date.now();
 
@@ -5435,6 +5573,7 @@ export class MargEdeService {
           ${r.voucher},
           ${r.sVoucher},
           ${r.addField},
+          ${progressSyncLogId ?? null}::uuid,
           ${JSON.stringify(r.rawData)}::jsonb,
           NOW(),
           NOW()
@@ -5446,23 +5585,29 @@ export class MargEdeService {
         INSERT INTO marg_outstandings (
           tenant_id, marg_id, company_id, ord, date, vcn, days,
           final_amt, balance, pd_less, group_code,
-          voucher, s_voucher, add_field, raw_data, created_at, updated_at
+          voucher, s_voucher, add_field, last_seen_sync_log_id,
+          raw_data, created_at, updated_at
         )
         VALUES ${values}
         ON CONFLICT (tenant_id, company_id, marg_id) DO UPDATE SET
-          ord        = EXCLUDED.ord,
-          date       = EXCLUDED.date,
-          vcn        = EXCLUDED.vcn,
-          days       = EXCLUDED.days,
-          final_amt  = EXCLUDED.final_amt,
-          balance    = EXCLUDED.balance,
-          pd_less    = EXCLUDED.pd_less,
-          group_code = EXCLUDED.group_code,
-          voucher    = EXCLUDED.voucher,
-          s_voucher  = EXCLUDED.s_voucher,
-          add_field  = EXCLUDED.add_field,
-          raw_data   = EXCLUDED.raw_data,
-          updated_at = NOW()
+          ord                   = EXCLUDED.ord,
+          date                  = EXCLUDED.date,
+          vcn                   = EXCLUDED.vcn,
+          days                  = EXCLUDED.days,
+          final_amt             = EXCLUDED.final_amt,
+          balance               = EXCLUDED.balance,
+          pd_less               = EXCLUDED.pd_less,
+          group_code            = EXCLUDED.group_code,
+          voucher               = EXCLUDED.voucher,
+          s_voucher             = EXCLUDED.s_voucher,
+          add_field             = EXCLUDED.add_field,
+          -- Resurrect a previously-closed row when Marg re-emits it (e.g.
+          -- a settled invoice gets re-opened). The presence of the row in
+          -- the current payload is itself the signal that it's live again.
+          source_deleted        = FALSE,
+          last_seen_sync_log_id = EXCLUDED.last_seen_sync_log_id,
+          raw_data              = EXCLUDED.raw_data,
+          updated_at            = NOW()
       `);
 
       written += chunk.length;
@@ -6252,10 +6397,14 @@ export class MargEdeService {
 
   /** Project purchase-facing Marg parties into explicit supplier crosswalk rows. */
   private async transformSuppliers(tenantId: string): Promise<number> {
+    // Cancelled purchase headers don't constitute evidence of a real
+    // supplier relationship — exclude them so a single cancelled invoice
+    // can't promote an unintended supplier in the crosswalk.
     const purchaseVouchers = await this.margPrisma.margVoucher.findMany({
       where: {
         tenantId,
         type: { in: ['P', 'X', 'B'] },
+        isCancelled: false,
         cid: { not: null },
       },
       select: {
@@ -6279,6 +6428,10 @@ export class MargEdeService {
       ? await this.margPrisma.margOutstanding.findMany({
         where: {
           tenantId,
+          // Supplier crosswalk doesn't need closed outstandings — a
+          // settled invoice is no evidence of an ongoing supplier
+          // relationship beyond what the live data already shows.
+          sourceDeleted: false,
           OR: [
             { voucher: { in: purchaseVoucherNumbers } },
             { sVoucher: { in: purchaseVoucherNumbers } },
@@ -6424,6 +6577,56 @@ export class MargEdeService {
     return `${companyId}|${String(voucher || '').trim()}`;
   }
 
+  /**
+   * Parse Marg's "soft delete" markers embedded at the tail of Dis.AddField
+   * or MDis.AddField. Marg formats them as:
+   *
+   *     ...;CANCELLED : 1; CANCELLEDON : dd-MM-yyyy HH:mm:ss
+   *
+   * (Non-cancelled rows carry `CANCELLED : 0` or omit the marker entirely.)
+   *
+   * Cancelled commercial documents must NOT contribute to actuals, inventory
+   * movement, inventory ledger, or open outstanding rows. The reversal of a
+   * previously-projected row happens through the existing "skipped row with
+   * prior actualId" sweep — returning `shouldProjectActual: false` from the
+   * decision is sufficient.
+   */
+  private parseMargCancellation(addField: string | null | undefined): {
+    isCancelled: boolean;
+    cancelledOn: Date | null;
+  } {
+    const normalized = String(addField || '').trim();
+    if (!normalized) return { isCancelled: false, cancelledOn: null };
+
+    const flagMatch = normalized.match(/CANCELLED\s*:\s*(\d+)/i);
+    if (!flagMatch || flagMatch[1] !== '1') {
+      return { isCancelled: false, cancelledOn: null };
+    }
+
+    const dateMatch = normalized.match(
+      /CANCELLEDON\s*:\s*(\d{2})-(\d{2})-(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/i,
+    );
+    if (!dateMatch) {
+      return { isCancelled: true, cancelledOn: null };
+    }
+
+    const [, dd, mm, yyyy, hh = '00', mi = '00', ss = '00'] = dateMatch;
+    const cancelledOn = new Date(Date.UTC(
+      Number(yyyy),
+      Number(mm) - 1,
+      Number(dd),
+      Number(hh),
+      Number(mi),
+      Number(ss),
+    ));
+
+    if (!Number.isFinite(cancelledOn.getTime())) {
+      return { isCancelled: true, cancelledOn: null };
+    }
+
+    return { isCancelled: true, cancelledOn };
+  }
+
   private extractMargAddFieldLeadToken(addField: string | null | undefined): string | null {
     const normalized = String(addField || '').trim();
     if (!normalized) return null;
@@ -6549,7 +6752,51 @@ export class MargEdeService {
       }
     }
 
-    return contexts[0];
+    // Multiple MDis headers exist for this (companyId, voucher) but none match
+    // the expected header type for the transaction's line type. Returning an
+    // arbitrary `contexts[0]` here would silently misclassify the document.
+    // Surface the ambiguity instead so the caller can apply the line-type
+    // fallback or skip projection — never pick a wrong header.
+    this.logger.warn(
+      `Ambiguous MDis header for Marg transaction: companyId=${transaction.companyId}, ` +
+      `voucher=${transaction.voucher}, lineType=${lineType || 'null'}, ` +
+      `vcnPrefix=${prefix || 'null'}, candidateTypes=[${contexts.map((c) => c.type || 'null').join(',')}]`,
+    );
+    return null;
+  }
+
+  /**
+   * Apply a per-decision update to a projection-diagnostics accumulator. Each
+   * pipeline (actuals / inventory transactions / inventory ledger /
+   * procurement) owns its own diagnostics object and calls this once per
+   * row. `wasPreviouslyProjected` lets a CANCELLED skip be reported as a
+   * reversal (we cleared a prior projection) rather than a fresh skip.
+   */
+  private accumulateMargProjectionDiagnostics(
+    decision: MargType2ProjectionDecision,
+    diag: MargProjectionDiagnostics,
+    options: { wasPreviouslyProjected: boolean; willProject: boolean },
+  ): void {
+    if (decision.skipReason === 'MISSING_MDIS_HEADER') {
+      diag.missingMdisHeaderCount += 1;
+    } else if (decision.skipReason === 'AMBIGUOUS_MDIS_HEADER') {
+      diag.ambiguousMdisHeaderCount += 1;
+    } else if (decision.skipReason === 'UNKNOWN_DOCUMENT_FAMILY') {
+      diag.unknownDocumentFamilyCount += 1;
+    } else if (decision.skipReason === 'LOW_CONFIDENCE_DOCUMENT_FAMILY') {
+      diag.lowConfidenceDocumentFamilyCount += 1;
+    }
+    if (decision.isCancelled) {
+      if (options.wasPreviouslyProjected) {
+        diag.cancelledRowsReversedCount += 1;
+      } else {
+        diag.cancelledRowsSkippedCount += 1;
+      }
+    }
+    if (options.willProject) {
+      const key = decision.family;
+      diag.projectedByFamily[key] = (diag.projectedByFamily[key] ?? 0) + 1;
+    }
   }
 
   private resolveMargType2ProjectionDecision(input: MargType2ProjectionInput): MargType2ProjectionDecision {
@@ -6567,62 +6814,119 @@ export class MargEdeService {
     const amount = numericAmount != null && Number.isFinite(numericAmount) ? numericAmount : null;
     const absAmount = amount != null ? Math.abs(amount) : null;
 
-    let family: MargType2DocumentFamily = 'UNKNOWN';
+    // Marg encodes "soft deletes" as `CANCELLED : 1` tokens at the end of
+    // either the line AddField or the voucher AddField. A cancellation on
+    // either side voids the document for downstream projection.
+    const headerCancellation = this.parseMargCancellation(input.voucherAddField);
+    const lineCancellation = this.parseMargCancellation(input.transactionAddField);
+    const isCancelled = headerCancellation.isCancelled || lineCancellation.isCancelled;
+    const cancelledOn = headerCancellation.cancelledOn ?? lineCancellation.cancelledOn ?? null;
 
-    if (headerType === 'S') {
+    // ===== Strict Type 2 classifier =====
+    //
+    // MDis (voucher header) is the SINGLE source of truth for document family.
+    // Dis.Type is a *line* attribute (line role within a multi-line voucher)
+    // and is NEVER consulted to decide the document type — a Dis.Type fallback
+    // would let an orphaned line get projected as a sale, purchase, PO, etc.
+    // simply because the corresponding header row hadn't been synced yet,
+    // which silently inflates reports and corrupts inventory state.
+    //
+    // If MDis is missing (`headerType == null`) or its (type, VCN prefix,
+    // AddField lead) shape doesn't match any known family, we return UNKNOWN
+    // with `skipReason` populated and every shouldProject* flag false. The
+    // caller's "skipped row with prior actualId" sweep reverses any previous
+    // projection idempotently. The diagnostics counter feeds a structured log
+    // line so an operator can spot a misconfigured MDis sync.
+    //
+    // Confidence ladder:
+    //   HIGH    : MDis header type + canonical VCN prefix + AddField lead all align
+    //             (e.g. S/STR/I, S/CHAL/C, P/P/I, R/CN/I, V/OS/C, X/PO-/C, D/AD/C, L/L/C)
+    //   MEDIUM  : MDis header type matches a known family but VCN/AddField is
+    //             non-canonical (e.g. B/DN/I where business validation is needed)
+    //   LOW     : SC price-adjustments (T/SC/I) — accounting-only documents
+    //             that QA confirmed must NOT post a commercial actual/inventory
+    //             row. Returned with the family preserved for audit but with
+    //             shouldProject* = false unless `enableLowConfidenceProjection`
+    //             is explicitly opted in by the caller (off by default).
+    let family: MargType2DocumentFamily = 'UNKNOWN';
+    let confidence: MargType2DocumentConfidence = 'LOW';
+    let skipReason: MargType2DocumentSkipReason | null = null;
+
+    if (!headerType) {
+      // No MDis header found for this Dis row. We refuse to guess — the
+      // legacy Dis.Type fallback used to project orphan rows as sales /
+      // purchases which silently double-counted once the matching header
+      // arrived. Today we surface the gap to diagnostics instead. The
+      // ambiguous-vs-missing distinction comes from the caller's hint so
+      // operators can tell whether the issue is a sync gap (no header at
+      // all) or a header-selection conflict (multiple headers, none match).
+      skipReason = input.voucherContextAmbiguous
+        ? 'AMBIGUOUS_MDIS_HEADER'
+        : 'MISSING_MDIS_HEADER';
+    } else if (headerType === 'S') {
+      if (addFieldTag === 'C' || this.matchesMargVcnPrefix(vcnPrefix, ['CHAL'])) {
+        family = 'SALES_CHALLAN';
+        confidence = 'HIGH';
+      } else if (this.matchesMargVcnPrefix(vcnPrefix, ['STR'])) {
+        family = 'SALES_INVOICE';
+        confidence = 'HIGH';
+      } else {
+        // S header but neither CHAL nor STR — Marg outside its documented
+        // shape. Could be a custom series; medium confidence as invoice but
+        // worth a diagnostic so an operator can verify.
+        family = 'SALES_INVOICE';
+        confidence = 'MEDIUM';
+      }
+      // Dis.Type='O' under an S header is a replacement-issue line within an
+      // invoice — the document is still SALES_INVOICE / SALES_CHALLAN; the
+      // line-level treatment (no sales actual, only inventory issue) is
+      // documented and handled downstream by REPLACEMENT_ISSUE.
       if (lineType === 'O') {
         family = 'REPLACEMENT_ISSUE';
-      } else if (addFieldTag === 'C' || this.matchesMargVcnPrefix(vcnPrefix, ['CHAL'])) {
-        family = 'SALES_CHALLAN';
-      } else {
-        family = 'SALES_INVOICE';
+        confidence = 'HIGH';
       }
     } else if (headerType === 'P') {
       family = 'PURCHASE_INVOICE';
+      // Marg purchase invoices use the supplier's invoice number (no canonical
+      // prefix), so we don't gate confidence on VCN shape here.
+      confidence = 'HIGH';
     } else if (headerType === 'R') {
       family = 'SALES_RETURN';
+      confidence = this.matchesMargVcnPrefix(vcnPrefix, ['CN']) ? 'HIGH' : 'MEDIUM';
     } else if (headerType === 'B') {
+      // B / DN documents are supplier debit notes that could be either a
+      // pure accounting credit OR a goods purchase-return. Without business
+      // validation per-tenant we cap confidence at MEDIUM and let the caller
+      // decide whether to project. Default behaviour matches the historical
+      // path (project as PURCHASE_RETURN) but it's now marked for audit.
       family = 'PURCHASE_RETURN';
+      confidence = this.matchesMargVcnPrefix(vcnPrefix, ['DN']) ? 'MEDIUM' : 'LOW';
     } else if (headerType === 'V') {
       family = 'SALES_ORDER';
+      confidence = this.matchesMargVcnPrefix(vcnPrefix, ['OS']) ? 'HIGH' : 'MEDIUM';
     } else if (headerType === 'X') {
       family = 'PURCHASE_ORDER';
+      confidence = this.matchesMargVcnPrefix(vcnPrefix, ['PO-']) ? 'HIGH' : 'MEDIUM';
     } else if (headerType === 'T') {
+      // SC (T/SC/I) price-difference credit notes: accounting-only per QA.
+      // Returned with the family preserved (so audit attributes can record
+      // it) but `skipReason = LOW_CONFIDENCE_DOCUMENT_FAMILY` so the no-op
+      // branch below zeroes every shouldProject* flag. The Book E credit
+      // posting (separate accounting projection) is unaffected and remains
+      // the document's only commercial effect.
       family = 'SALES_RETURN_ADJUSTMENT';
+      confidence = 'LOW';
+      skipReason = 'LOW_CONFIDENCE_DOCUMENT_FAMILY';
     } else if (headerType === 'D') {
       family = 'STOCK_RECEIVE';
+      confidence = this.matchesMargVcnPrefix(vcnPrefix, ['AD']) ? 'HIGH' : 'MEDIUM';
     } else if (headerType === 'L') {
       family = 'STOCK_ISSUE';
-    }
-
-    if (family === 'UNKNOWN') {
-      if (lineType === 'O') {
-        family = 'REPLACEMENT_ISSUE';
-      } else if (['G', 'S'].includes(lineType || '')) {
-        family = addFieldTag === 'C' || this.matchesMargVcnPrefix(vcnPrefix, ['CHAL'])
-          ? 'SALES_CHALLAN'
-          : 'SALES_INVOICE';
-      } else if (lineType === 'P') {
-        family = 'PURCHASE_INVOICE';
-      } else if (lineType === 'R') {
-        family = 'SALES_RETURN';
-      } else if (lineType === 'B') {
-        family = 'PURCHASE_RETURN';
-      } else if (lineType === 'V') {
-        family = 'SALES_ORDER';
-      } else if (lineType === 'D') {
-        family = 'STOCK_RECEIVE';
-      } else if (['L', 'W', 'Q'].includes(lineType || '')) {
-        family = 'STOCK_ISSUE';
-      } else if (lineType === 'X') {
-        if (this.matchesMargVcnPrefix(vcnPrefix, ['SC'])) {
-          family = 'SALES_RETURN_ADJUSTMENT';
-        } else if (this.matchesMargVcnPrefix(vcnPrefix, ['AD'])) {
-          family = 'STOCK_RECEIVE';
-        } else {
-          family = 'PURCHASE_ORDER';
-        }
-      }
+      confidence = 'HIGH';
+    } else {
+      // MDis header type that we don't have a mapping for. Surface as
+      // UNKNOWN_DOCUMENT_FAMILY for diagnostics instead of guessing.
+      skipReason = 'UNKNOWN_DOCUMENT_FAMILY';
     }
 
     const baseDecision = {
@@ -6633,7 +6937,76 @@ export class MargEdeService {
       vcnPrefix,
       customerFacing: false,
       supplierFacing: false,
+      isCancelled: false as boolean,
+      cancelledOn: null as Date | null,
+      confidence,
+      skipReason,
     };
+
+    // Strict skip: when classifier could not place the document into a known
+    // commercial family (no MDis header, unknown header type, or accounting-
+    // only family flagged as low-confidence), suppress every commercial /
+    // inventory projection. The existing "skipped row with prior actualId"
+    // sweep handles idempotent reversal of any earlier projection.
+    //
+    // We DO preserve customer/supplier-facing flags from the family even on
+    // skip — SC (SALES_RETURN_ADJUSTMENT) is still a customer-facing document
+    // for audit/reporting purposes, even though we don't project it as a
+    // commercial actual. Suppression is about projection side-effects, not
+    // about disclaiming the document's nature.
+    if (skipReason) {
+      const customerFacing = (
+        family === 'SALES_INVOICE'
+        || family === 'SALES_CHALLAN'
+        || family === 'SALES_ORDER'
+        || family === 'SALES_RETURN'
+        || family === 'SALES_RETURN_ADJUSTMENT'
+        || family === 'REPLACEMENT_ISSUE'
+      );
+      const supplierFacing = (
+        family === 'PURCHASE_INVOICE'
+        || family === 'PURCHASE_ORDER'
+        || family === 'PURCHASE_RETURN'
+      );
+      return {
+        ...baseDecision,
+        customerFacing,
+        supplierFacing,
+        shouldProjectActual: false,
+        actualType: null,
+        actualQuantity: null,
+        actualAmount: null,
+        shouldProjectInventory: false,
+        inventoryTransactionType: null,
+        inventoryQuantity: 0,
+        ledgerEntryType: null,
+        ledgerQuantity: 0,
+      };
+    }
+
+    // Cancelled commercial documents short-circuit to a no-op decision. The
+    // classified `family` is preserved on the returned decision so audit
+    // attributes (margDocumentFamily, margIsCancelled, margCancelledOn) carry
+    // the full provenance. Reversal of any prior projection is handled by the
+    // caller's existing "skipped row with prior actualId" sweep — no separate
+    // code path is needed.
+    if (isCancelled) {
+      return {
+        ...baseDecision,
+        isCancelled: true,
+        cancelledOn,
+        skipReason: 'CANCELLED_DOCUMENT',
+        shouldProjectActual: false,
+        actualType: null,
+        actualQuantity: null,
+        actualAmount: null,
+        shouldProjectInventory: false,
+        inventoryTransactionType: null,
+        inventoryQuantity: 0,
+        ledgerEntryType: null,
+        ledgerQuantity: 0,
+      };
+    }
 
     switch (family) {
       case 'SALES_INVOICE':
@@ -6712,7 +7085,6 @@ export class MargEdeService {
           supplierFacing: true,
         };
       case 'SALES_RETURN':
-      case 'SALES_RETURN_ADJUSTMENT':
         return {
           ...baseDecision,
           shouldProjectActual: true,
@@ -6724,6 +7096,35 @@ export class MargEdeService {
           inventoryQuantity: absQty,
           ledgerEntryType: absQty > 0 ? LedgerEntryType.LEDGER_RETURN : null,
           ledgerQuantity: absQty > 0 ? absQty : 0,
+          customerFacing: true,
+          supplierFacing: false,
+        };
+      case 'SALES_RETURN_ADJUSTMENT':
+        // SC (MDis.Type=T, VCN=SC*) is a price-difference credit note: it
+        // moves money on the ledger but no goods change hands. Per business
+        // rules confirmed with QA the SC family must:
+        //   - NOT create a commercial sales Actual (it's not a sale or a
+        //     return-of-goods — including it double-counts against gross sales)
+        //   - NOT create an inventory transaction or ledger entry (no stock
+        //     movement)
+        //   - Be represented ONLY through the accounting projection's Book E
+        //     credit row (that path lives in transformAccountPostingsToJournalEntries
+        //     and is unaffected by the commercial decision returned here).
+        // The classified `family` is still surfaced on the decision for audit
+        // attributes / diagnostics. Any prior commercial projection of an SC
+        // voucher is reversed by the existing "skipped row with prior actualId"
+        // sweep.
+        return {
+          ...baseDecision,
+          shouldProjectActual: false,
+          actualType: null,
+          actualQuantity: null,
+          actualAmount: null,
+          shouldProjectInventory: false,
+          inventoryTransactionType: null,
+          inventoryQuantity: 0,
+          ledgerEntryType: null,
+          ledgerQuantity: 0,
           customerFacing: true,
           supplierFacing: false,
         };
@@ -6933,10 +7334,14 @@ export class MargEdeService {
     const dateWhere = this.buildDateWhere(dateWindow);
     if (!dateWhere) return;
 
+    // Reset path: only collect goods-receipt numbers for LIVE invoices —
+    // we don't need to delete receipts for cancelled vouchers (those were
+    // never projected once cancellation arrived).
     const stagedPurchaseInvoices = await this.margPrisma.margVoucher.findMany({
       where: {
         tenantId,
         type: 'P',
+        isCancelled: false,
         date: dateWhere,
       },
       select: {
@@ -7105,10 +7510,16 @@ export class MargEdeService {
 
     let purchaseOrderCursor: string | null = null;
     while (true) {
+      // Cancelled POs are excluded at the source query so we never bother
+      // resolving suppliers / locations / lines for a document Marg has
+      // already disclaimed. If a PO that was previously projected now turns
+      // up cancelled, resetMargProcurementProjectionWindow + the next sync's
+      // re-projection sweep are the idempotent cleanup path.
       const stagedPurchaseOrders = await this.margPrisma.margVoucher.findMany({
         where: {
           tenantId,
           type: 'X',
+          isCancelled: false,
           ...(dateWindow ? { date: this.buildDateWhere(dateWindow)! } : {}),
           ...(purchaseOrderCursor ? { id: { gt: purchaseOrderCursor } } : {}),
         },
@@ -7206,10 +7617,13 @@ export class MargEdeService {
 
     let purchaseInvoiceCursor: string | null = null;
     while (true) {
+      // Same as the PO loop above — cancelled purchase invoices contribute
+      // neither a goods receipt nor an actual, so skip at source.
       const stagedPurchaseInvoices = await this.margPrisma.margVoucher.findMany({
         where: {
           tenantId,
           type: 'P',
+          isCancelled: false,
           ...(dateWindow ? { date: this.buildDateWhere(dateWindow)! } : {}),
           ...(purchaseInvoiceCursor ? { id: { gt: purchaseInvoiceCursor } } : {}),
         },
@@ -7820,6 +8234,12 @@ export class MargEdeService {
     const rows = await this.margPrisma.margTransaction.findMany({
       where: {
         tenantId,
+        // Skip cancelled lines for procurement projection: a cancelled line
+        // contributes neither to a purchase order's ordered quantity nor to
+        // a goods receipt. Cancelled headers are already filtered upstream
+        // (transformMargProcurementDocuments) so this catches the rarer
+        // line-only cancellation case.
+        isCancelled: false,
         OR: vouchers.map((voucher) => ({
           companyId: voucher.companyId,
           voucher: voucher.voucher,
@@ -8284,6 +8704,7 @@ export class MargEdeService {
     let totalInserted = 0;
     let totalCleared = 0;
     let totalSkippedNoProduct = 0;
+    const projectionDiag = buildMargProjectionDiagnostics();
 
     while (true) {
       const staged = await this.margPrisma.margTransaction.findMany({
@@ -8344,10 +8765,14 @@ export class MargEdeService {
 
       for (const mt of staged as any[]) {
         const effectiveQty = this.resolveMargEffectiveQuantity(mt.qty, mt.free);
-        const voucherContext = this.selectMargVoucherContextForTransaction(
-          mt,
-          voucherContexts.get(this.buildMargVoucherLookupKey(mt.companyId, mt.voucher)),
-        );
+        const candidateContexts = voucherContexts.get(this.buildMargVoucherLookupKey(mt.companyId, mt.voucher));
+        const voucherContext = this.selectMargVoucherContextForTransaction(mt, candidateContexts);
+        // Voucher-context ambiguity hint: multiple MDis headers exist for this
+        // (companyId, voucher) but none matched our line-type preference, so
+        // the selector returned null. Distinguishing this from "no MDis row
+        // at all" lets the diagnostics counter pinpoint sync-vs-classifier
+        // gaps separately.
+        const voucherContextAmbiguous = !voucherContext && (candidateContexts?.length ?? 0) > 1;
         // Marg's MDis.Final (voucher total) reconciles to Σ(Dis.Amount + Dis.GSTAmount).
         // Project the post-tax line value so report aggregates match the invoice totals
         // the user sees in Marg. Inventory/cost paths still use the raw pre-tax amount.
@@ -8359,11 +8784,22 @@ export class MargEdeService {
           voucherType: voucherContext?.type ?? null,
           voucherVcn: voucherContext?.vcn ?? null,
           voucherAddField: voucherContext?.addField ?? null,
+          voucherContextAmbiguous,
           effectiveQty,
           amount: taxInclusiveAmount,
         });
 
-        if (!decision.shouldProjectActual || decision.actualType == null || decision.actualAmount == null || decision.actualAmount === 0) {
+        const wasPreviouslyProjected = mt.actualId != null;
+        const willProject = decision.shouldProjectActual
+          && decision.actualType != null
+          && decision.actualAmount != null
+          && decision.actualAmount !== 0;
+        this.accumulateMargProjectionDiagnostics(decision, projectionDiag, {
+          wasPreviouslyProjected,
+          willProject,
+        });
+
+        if (!willProject) {
           decisions.push({ mt, shouldProject: false });
           continue;
         }
@@ -8556,6 +8992,7 @@ export class MargEdeService {
     this.syncLog.info(
       `transformTransactionsToActuals done: inserted=${totalInserted} ` +
       `cleared=${totalCleared} skippedNoProduct=${totalSkippedNoProduct} ` +
+      `${summarizeMargProjectionDiagnostics(projectionDiag)} ` +
       `elapsedMs=${Date.now() - startedAt}`,
     );
 
@@ -8593,10 +9030,16 @@ export class MargEdeService {
     let totalCleared = 0;
 
     while (true) {
+      // Skip cancelled vouchers so a cancelled invoice can't project a
+      // residual round-off / freight actual that would persist forever
+      // (the per-voucher adjustment projection is the rounding bridge
+      // between MDis.Final and Σ(Dis.Amount); cancelled vouchers have no
+      // basis to bridge against).
       const vouchers = await this.margPrisma.margVoucher.findMany({
         where: {
           tenantId,
           finalAmt: { not: null },
+          isCancelled: false,
           ...(dateWindow ? { date: this.buildDateWhere(dateWindow)! } : {}),
           ...(cursor ? { id: { gt: cursor } } : {}),
         },
@@ -9384,6 +9827,7 @@ export class MargEdeService {
     const pageSize = Math.max(200, this.transformBatchSize);
     let totalInserted = 0;
     let totalCleared = 0;
+    const projectionDiag = buildMargProjectionDiagnostics();
     const startedAt = Date.now();
 
     while (true) {
@@ -9455,10 +9899,9 @@ export class MargEdeService {
 
       for (const mt of staged) {
         const effectiveQty = this.resolveMargEffectiveQuantity(mt.qty, mt.free);
-        const voucherContext = this.selectMargVoucherContextForTransaction(
-          mt,
-          voucherContexts.get(this.buildMargVoucherLookupKey(mt.companyId, mt.voucher)),
-        );
+        const candidateContexts = voucherContexts.get(this.buildMargVoucherLookupKey(mt.companyId, mt.voucher));
+        const voucherContext = this.selectMargVoucherContextForTransaction(mt, candidateContexts);
+        const voucherContextAmbiguous = !voucherContext && (candidateContexts?.length ?? 0) > 1;
         const decision = this.resolveMargType2ProjectionDecision({
           transactionType: mt.type,
           transactionVcn: mt.vcn,
@@ -9466,11 +9909,28 @@ export class MargEdeService {
           voucherType: voucherContext?.type ?? null,
           voucherVcn: voucherContext?.vcn ?? null,
           voucherAddField: voucherContext?.addField ?? null,
+          voucherContextAmbiguous,
           effectiveQty,
           amount: mt.amount,
         });
         const idempotencyKey = this.buildMargInventoryTransactionIdempotencyKey(mt.sourceKey);
         const referenceNumber = this.buildMargReferenceNumber(mt.sourceKey);
+
+        const willProject = !!mt.pid
+          && decision.shouldProjectInventory
+          && decision.inventoryTransactionType != null
+          && decision.inventoryQuantity !== 0;
+        // We can't tell from MargTransaction alone whether an inventory row
+        // was previously projected (no foreign-key back-link analogous to
+        // MargTransaction.actualId). We conservatively treat every cancelled
+        // skip as a "potential reversal" because the downstream delete sweep
+        // (idempotencyKeysToDelete below) will clear any prior row for this
+        // sourceKey idempotency key. Diagnostics bucket as reversal in that
+        // case so the counter approximates real-world reversals.
+        this.accumulateMargProjectionDiagnostics(decision, projectionDiag, {
+          wasPreviouslyProjected: decision.isCancelled,
+          willProject,
+        });
 
         if (!mt.pid) {
           decisions.push({ mt, idempotencyKey, referenceNumber, shouldInsert: false });
@@ -9599,7 +10059,8 @@ export class MargEdeService {
     const elapsedMs = Date.now() - startedAt;
     this.logger.log(
       `transformTransactionsToInventoryTransactions done: inserted=${totalInserted} ` +
-      `cleared=${totalCleared} elapsedMs=${elapsedMs}`,
+      `cleared=${totalCleared} ${summarizeMargProjectionDiagnostics(projectionDiag)} ` +
+      `elapsedMs=${elapsedMs}`,
     );
   }
 
@@ -9638,6 +10099,7 @@ export class MargEdeService {
 
     let totalInserted = 0;
     let totalCleared = 0;
+    const projectionDiag = buildMargProjectionDiagnostics();
     const startedAt = Date.now();
 
     while (true) {
@@ -9713,10 +10175,9 @@ export class MargEdeService {
 
       for (const mt of staged) {
         const effectiveQty = this.resolveMargEffectiveQuantity(mt.qty, mt.free);
-        const voucherContext = this.selectMargVoucherContextForTransaction(
-          mt,
-          voucherContexts.get(this.buildMargVoucherLookupKey(mt.companyId, mt.voucher)),
-        );
+        const candidateContexts = voucherContexts.get(this.buildMargVoucherLookupKey(mt.companyId, mt.voucher));
+        const voucherContext = this.selectMargVoucherContextForTransaction(mt, candidateContexts);
+        const voucherContextAmbiguous = !voucherContext && (candidateContexts?.length ?? 0) > 1;
         const decision = this.resolveMargType2ProjectionDecision({
           transactionType: mt.type,
           transactionVcn: mt.vcn,
@@ -9724,11 +10185,21 @@ export class MargEdeService {
           voucherType: voucherContext?.type ?? null,
           voucherVcn: voucherContext?.vcn ?? null,
           voucherAddField: voucherContext?.addField ?? null,
+          voucherContextAmbiguous,
           effectiveQty,
           amount: mt.amount,
         });
         const idempotencyKey = this.buildMargInventoryLedgerIdempotencyKey(mt.sourceKey);
         const referenceNumber = this.buildMargReferenceNumber(mt.sourceKey);
+
+        const willProject = !!mt.pid
+          && decision.shouldProjectInventory
+          && decision.ledgerEntryType != null
+          && decision.ledgerQuantity !== 0;
+        this.accumulateMargProjectionDiagnostics(decision, projectionDiag, {
+          wasPreviouslyProjected: decision.isCancelled,
+          willProject,
+        });
 
         if (!mt.pid) {
           decisions.push({ mt, idempotencyKey, referenceNumber, shouldInsert: false });
@@ -9871,6 +10342,7 @@ export class MargEdeService {
     this.logger.log(
       `transformTransactionsToInventoryLedger done: inserted=${totalInserted} ` +
       `cleared=${totalCleared} affectedScopes=${affectedInventoryScopes.size} ` +
+      `${summarizeMargProjectionDiagnostics(projectionDiag)} ` +
       `elapsedMs=${elapsedMs}`,
     );
 
@@ -9913,7 +10385,18 @@ export class MargEdeService {
     }
 
     const postingUserId = await this.resolveJournalPostingUserId(tenantId, triggeredBy);
-    const postingRows = await this.margPrisma.margAccountPosting.findMany({
+
+    // Step 1 — discover which (companyId, date, book, voucher) groups have any
+    // changed row in this sync run. We only need the group-key fields here; the
+    // full row payload is loaded in Step 2.
+    //
+    // The historical bug this guards against: Marg can emit partial updates for
+    // a multi-line voucher — only some rows of a balanced N-line journal touch
+    // updatedAt. Projecting straight from the changed-rows query would build an
+    // unbalanced journal from a partial group. We mitigate by treating the
+    // changed-rows result as a *list of touched groups* and reloading the full
+    // group from the staging table before projection.
+    const touchedRows = await this.margPrisma.margAccountPosting.findMany({
       where: {
         tenantId,
         ...this.buildMargChangedSinceWhere(syncRun),
@@ -9925,22 +10408,10 @@ export class MargEdeService {
         voucher: true,
         date: true,
         book: true,
-        amount: true,
-        code: true,
-        code1: true,
-        gCode: true,
-        remark: true,
       },
-      orderBy: [
-        { date: 'asc' },
-        { companyId: 'asc' },
-        { book: 'asc' },
-        { voucher: 'asc' },
-        { margId: 'asc' },
-      ],
     });
 
-    if (postingRows.length === 0) {
+    if (touchedRows.length === 0) {
       return {
         journalEntriesSynced: 0,
         skippedGroups: [],
@@ -9952,18 +10423,60 @@ export class MargEdeService {
       };
     }
 
-    const groups = new Map<string, { group: MargAccountPostingGroup; rows: MargAccountPostingProjectionRow[] }>();
-    for (const row of postingRows as MargAccountPostingProjectionRow[]) {
+    // Step 2 — collapse touched rows to unique group descriptors, then reload
+    // every row in each group so the journal is built from the full balanced
+    // set rather than a partial slice.
+    const uniqueGroups = new Map<string, MargAccountPostingGroup>();
+    for (const row of touchedRows) {
       const groupKey = this.buildMargAccountJournalGroupKey(row);
-      const existingGroup = groups.get(groupKey);
-      if (existingGroup) {
-        existingGroup.rows.push(row);
-      } else {
-        groups.set(groupKey, {
-          group: this.buildMargAccountPostingGroup(row),
-          rows: [row],
-        });
+      if (!uniqueGroups.has(groupKey)) {
+        uniqueGroups.set(groupKey, this.buildMargAccountPostingGroup(row));
       }
+    }
+
+    const groups = new Map<string, { group: MargAccountPostingGroup; rows: MargAccountPostingProjectionRow[] }>();
+    const emptyGroups: MargAccountingProjectionIssue[] = [];
+    for (const [groupKey, group] of uniqueGroups) {
+      const fullRows = await this.margPrisma.margAccountPosting.findMany({
+        where: this.buildMargAccountPostingGroupWhere(tenantId, group),
+        select: {
+          margId: true,
+          companyId: true,
+          voucher: true,
+          date: true,
+          book: true,
+          amount: true,
+          code: true,
+          code1: true,
+          gCode: true,
+          remark: true,
+        },
+        orderBy: [
+          { date: 'asc' },
+          { companyId: 'asc' },
+          { book: 'asc' },
+          { voucher: 'asc' },
+          { margId: 'asc' },
+        ],
+      });
+
+      // Defensive: a touched row implies its group should still exist. Empty
+      // here indicates concurrent deletion between Step 1 and Step 2 — we
+      // surface the group as a skipped/empty diagnostic rather than silently
+      // dropping it.
+      if (fullRows.length === 0) {
+        emptyGroups.push({
+          groupKey,
+          companyId: group.companyId,
+          voucher: group.voucher,
+          bookCode: group.book,
+          entryDate: group.date.toISOString().slice(0, 10),
+          reason: 'Account posting group disappeared between touched-row discovery and full-group reload',
+        });
+        continue;
+      }
+
+      groups.set(groupKey, { group, rows: fullRows as MargAccountPostingProjectionRow[] });
     }
 
     let journalEntriesSynced = 0;
@@ -9971,6 +10484,11 @@ export class MargEdeService {
     const skippedByReason: Record<string, number> = {};
     let duplicateFingerprintCount = 0;
     let duplicateRowCount = 0;
+
+    for (const issue of emptyGroups) {
+      skippedGroups.push(issue);
+      this.incrementReasonCount(skippedByReason, issue.reason);
+    }
 
     for (const [groupKey, groupedRows] of groups) {
       const group = groupedRows.group;
@@ -10387,6 +10905,10 @@ export class MargEdeService {
       this.margPrisma.margOutstanding.findMany({
         where: {
           tenantId,
+          // Closed/settled rows must not appear in reconciliation discovery —
+          // they're no longer part of the open AR/AP picture even if Marg
+          // re-emitted them historically.
+          sourceDeleted: false,
           ...this.buildMargChangedSinceWhere(syncRun),
         },
         select: {
@@ -10437,6 +10959,9 @@ export class MargEdeService {
         where: {
           tenantId,
           companyId,
+          // Open-aging totals exclude closed rows. A row Marg's authoritative
+          // snapshot dropped no longer represents an open obligation.
+          sourceDeleted: false,
           ord: partyCode,
         },
         select: {
@@ -11670,6 +12195,57 @@ export class MargEdeService {
     });
   }
 
+  /**
+   * Soft-close any outstanding row that an authoritative APIType=1 snapshot
+   * did NOT re-emit. The "did not re-emit" signal is `last_seen_sync_log_id`
+   * being either NULL (row was staged before this column existed) or any
+   * value other than the current sync log's id (row was staged by an
+   * earlier sync and this snapshot didn't include it = settled at source).
+   *
+   * Soft-delete (set `source_deleted = TRUE`) preserves the audit trail —
+   * an operator investigating "why did AR drop ₹50k?" can still query the
+   * row and see when it was closed. Reports filter `WHERE NOT source_deleted`
+   * to exclude closed outstandings from open aging views.
+   *
+   * MUST only be called when the caller has confirmed the snapshot is
+   * authoritative (full payload, clean cursor, no date window). Calling on
+   * a partial / incremental snapshot would silently zero legitimate open
+   * outstandings that Marg simply didn't re-emit in this slice.
+   *
+   * Reports an integer count of rows newly closed by this pass so the sync
+   * log can publish a `closedOutstandingsCount` diagnostic.
+   */
+  private async closeUnseenMargOutstandings(tenantId: string, syncLogId: string): Promise<number> {
+    // Defensive: tests and bootstrap paths sometimes inject a partial Prisma
+    // mock that omits the margOutstanding delegate. Mirror the defensive
+    // shape used by ensureMargAccountingBootstrap so the closure pass is
+    // safe to call unconditionally from the sync orchestrator without
+    // forcing every test fixture to mock this exact delegate.
+    const delegate = this.margPrisma?.margOutstanding;
+    if (!delegate?.updateMany) {
+      return 0;
+    }
+
+    const result = await delegate.updateMany({
+      where: {
+        tenantId,
+        sourceDeleted: false,
+        OR: [
+          { lastSeenSyncLogId: null },
+          { lastSeenSyncLogId: { not: syncLogId } },
+        ],
+      },
+      data: { sourceDeleted: true },
+    });
+    const count: number = result?.count ?? 0;
+    if (count > 0) {
+      this.syncLog.info(
+        `closeUnseenMargOutstandings: tenant=${tenantId} syncLogId=${syncLogId} closed=${count}`,
+      );
+    }
+    return count;
+  }
+
   private async zeroOutMissingMargInventoryLevels(tenantId: string, activeInventoryKeys: Set<string>): Promise<void> {
     const historicalScopes = await this.margPrisma.margStock.findMany({
       where: { tenantId },
@@ -12771,7 +13347,15 @@ export class MargEdeService {
       mappingRuleDelegate.count({ where: { tenantId, isActive: true } }),
     ]);
 
-    if (glAccountCount > 0 || activeRuleCount > 0) {
+    // Only the presence of active Marg mapping rules should suppress bootstrap.
+    // Tenants that already have a chart of accounts (e.g. seeded manually or by
+    // another integration) must still get Marg-prefixed GL accounts + fallback
+    // mapping rules so accounting projection has something to map to. The
+    // auto-created accounts use the `MARG-{companyId}-{aid}` numbering scheme
+    // (see buildAutoMargGlAccountNumber) which cannot collide with
+    // user-curated accounts, and the upsert keyed on (tenantId, accountNumber)
+    // guarantees idempotency.
+    if (activeRuleCount > 0) {
       return;
     }
 
@@ -13817,7 +14401,10 @@ export class MargEdeService {
       this.margPrisma.margAccountPosting.count({ where: { tenantId } }),
       this.margPrisma.margAccountGroupBalance.count({ where: { tenantId } }),
       this.margPrisma.margPartyBalance.count({ where: { tenantId } }),
-      this.margPrisma.margOutstanding.count({ where: { tenantId } }),
+      // Live outstandings only — closed rows (source_deleted = TRUE) are
+      // not part of the open AR/AP picture and would mislead the sync
+      // overview headline by inflating the apparent open obligation count.
+      this.margPrisma.margOutstanding.count({ where: { tenantId, sourceDeleted: false } }),
       this.prisma.actual.count({
         where: {
           tenantId,

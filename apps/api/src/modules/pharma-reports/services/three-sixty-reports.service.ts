@@ -2,6 +2,11 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/database/prisma.service';
 import { MargEdeService } from '../../marg-ede/marg-ede.service';
+import {
+  margPurchaseAmountSignSql,
+  margSalesAmountSignSql,
+  margVoucherFamilySql,
+} from '../../marg-ede/marg-voucher-family.sql';
 import { InventoryReportsService } from './inventory-reports.service';
 import { ProcurementReportsService } from './procurement-reports.service';
 
@@ -84,36 +89,41 @@ export class ThreeSixtyReportsService {
         this.inventoryReports.getStockAgeing(tenantId, { ...inventoryFilter, bucketDays: [30, 60, 90] } as any),
       ]);
 
+    // Movements CTE is family-aware: sales-side lines are signed via
+    // margSalesAmountSignSql ({SALES_INVOICE: +1, SALES_RETURN: -1, others: 0})
+    // and purchase-side via margPurchaseAmountSignSql, so a CN return nets
+    // against an invoice, and challan / SC contribute 0. Aggregations below
+    // SUM the signed values directly — no further ABS or filter is needed.
     const [kpi] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH movements AS (
         SELECT
           mv.date,
           'SALES'::text AS kind,
-          ABS(COALESCE(mt.qty, 0))::float8 AS quantity,
-          ABS(COALESCE(mt.amount, 0))::float8 AS amount
+          (ABS(COALESCE(mt.qty, 0)) * ${margSalesAmountSignSql('mv')})::float8 AS quantity,
+          (ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')})::float8 AS amount
         FROM marg_vouchers mv
         JOIN marg_transactions mt
           ON mt.tenant_id = mv.tenant_id
           AND mt.company_id = mv.company_id
           AND mt.voucher = mv.voucher
           AND ${this.compatibleSalesLineSql('mv', 'mt')}
-        WHERE mv.tenant_id = ${tenantId}::uuid
-          AND mv.type IN ('S', 'R', 'T')
+        WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
+          AND mv.type IN ('S', 'R')
           AND ${margProductFilter}
           ${margVoucherLocationFilter}
         UNION ALL
         SELECT
           mv.date,
           'PURCHASES'::text AS kind,
-          ABS(COALESCE(mt.qty, 0))::float8 AS quantity,
-          ABS(COALESCE(mt.amount, 0))::float8 AS amount
+          (ABS(COALESCE(mt.qty, 0)) * ${margPurchaseAmountSignSql('mv')})::float8 AS quantity,
+          (ABS(COALESCE(mt.amount, 0)) * ${margPurchaseAmountSignSql('mv')})::float8 AS amount
         FROM marg_vouchers mv
         JOIN marg_transactions mt
           ON mt.tenant_id = mv.tenant_id
           AND mt.company_id = mv.company_id
           AND mt.voucher = mv.voucher
           AND ${this.compatiblePurchaseLineSql('mv', 'mt')}
-        WHERE mv.tenant_id = ${tenantId}::uuid
+        WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
           AND mv.type IN ('P', 'B')
           AND ${margProductFilter}
           ${margVoucherLocationFilter}
@@ -169,9 +179,13 @@ export class ThreeSixtyReportsService {
         ${poLocationFilter}
     `);
 
+    // Sales returns count ONLY CN (mt.type='R'). The earlier `IN ('R','T')`
+    // incorrectly bundled SC price-difference adjustments into the return
+    // total — SC has no inventory return and must not appear as a sales
+    // return per QA's business rules.
     const [margReturns] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
-        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))) FILTER (WHERE mt.type IN ('R', 'T')), 0)::float8 AS sales_return_value,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))) FILTER (WHERE mt.type = 'R'), 0)::float8 AS sales_return_value,
         COALESCE(SUM(ABS(COALESCE(mt.amount, 0))) FILTER (WHERE mt.type = 'B'), 0)::float8 AS purchase_return_value
       FROM marg_transactions mt
       WHERE mt.tenant_id = ${tenantId}::uuid
@@ -180,11 +194,20 @@ export class ThreeSixtyReportsService {
         AND ${margProductFilter}
     `);
 
+    // Margin is computed only over SALES_INVOICE lines (challan/SC contribute
+    // zero, sales returns net out). The prior `mt.type = 'S'` filter was a
+    // narrow Dis-line-type match that excluded the dominant 'G' lines under
+    // S headers; joining to mv and filtering by family is the correct lens.
     const [itemMargin] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
-        COALESCE(SUM(COALESCE(mt.amount, 0)), 0)::float8 AS sales_value,
-        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, 0)), 0)::float8 AS cost_value
+        COALESCE(SUM(COALESCE(mt.amount, 0) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS sales_value,
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, 0) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS cost_value
       FROM marg_transactions mt
+      JOIN marg_vouchers mv
+        ON mv.tenant_id = mt.tenant_id
+        AND mv.company_id = mt.company_id
+        AND mv.voucher = mt.voucher
+        AND ${this.compatibleSalesLineSql('mv', 'mt')}
       LEFT JOIN LATERAL (
         SELECT p_rate, lp_rate
         FROM marg_stocks ms
@@ -193,7 +216,7 @@ export class ThreeSixtyReportsService {
         LIMIT 1
       ) ms ON TRUE
       WHERE mt.tenant_id = ${tenantId}::uuid
-        AND mt.type = 'S'
+        AND mv.type IN ('S', 'R')
         AND mt.date >= ${ctx.fiscalStart}::date
         AND mt.date <= ${ctx.asOf}::date
         AND ${margProductFilter}
@@ -204,20 +227,20 @@ export class ThreeSixtyReportsService {
         SELECT
           date_trunc('month', mv.date) AS month_bucket,
           'SALES'::text AS kind,
-          ABS(COALESCE(mt.qty, 0))::float8 AS quantity,
-          ABS(COALESCE(mt.amount, 0))::float8 AS amount
+          (ABS(COALESCE(mt.qty, 0)) * ${margSalesAmountSignSql('mv')})::float8 AS quantity,
+          (ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')})::float8 AS amount
         FROM marg_vouchers mv
         JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
-        WHERE mv.tenant_id = ${tenantId}::uuid AND mv.type IN ('S', 'R', 'T') AND ${margProductFilter} ${margVoucherLocationFilter}
+        WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R') AND ${margProductFilter} ${margVoucherLocationFilter}
         UNION ALL
         SELECT
           date_trunc('month', mv.date) AS month_bucket,
           'PURCHASES'::text AS kind,
-          ABS(COALESCE(mt.qty, 0))::float8 AS quantity,
-          ABS(COALESCE(mt.amount, 0))::float8 AS amount
+          (ABS(COALESCE(mt.qty, 0)) * ${margPurchaseAmountSignSql('mv')})::float8 AS quantity,
+          (ABS(COALESCE(mt.amount, 0)) * ${margPurchaseAmountSignSql('mv')})::float8 AS amount
         FROM marg_vouchers mv
         JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatiblePurchaseLineSql('mv', 'mt')}
-        WHERE mv.tenant_id = ${tenantId}::uuid AND mv.type IN ('P', 'B') AND ${margProductFilter} ${margVoucherLocationFilter}
+        WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('P', 'B') AND ${margProductFilter} ${margVoucherLocationFilter}
       )
       SELECT
         to_char(buckets.month_bucket, 'Mon YYYY') AS month,
@@ -232,16 +255,16 @@ export class ThreeSixtyReportsService {
 
     const topBuyers = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
-        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0))) DESC)::int AS rank,
+        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}) DESC)::int AS rank,
         COALESCE(c.name, mp.par_name, 'Unmapped Customer') AS name,
-        COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS quantity,
-        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS value
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS quantity,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS value
       FROM marg_vouchers mv
       JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
       LEFT JOIN marg_parties mp ON mp.tenant_id = mv.tenant_id AND mp.company_id = mv.company_id AND mp.cid = mv.cid
       LEFT JOIN customers c ON c.id = mp.customer_id
-      WHERE mv.tenant_id = ${tenantId}::uuid
-        AND mv.type IN ('S', 'R', 'T')
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
+        AND mv.type IN ('S', 'R')
         AND ${margProductFilter}
         ${margVoucherLocationFilter}
         AND mv.date >= ${ctx.monthStart}::date
@@ -254,13 +277,13 @@ export class ThreeSixtyReportsService {
     const locationSales = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(l.code, l.name, mb.name, mb.branch, 'Unmapped') AS location,
-        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS sales_value
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS sales_value
       FROM marg_vouchers mv
       JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
       LEFT JOIN marg_branches mb ON mb.tenant_id = mv.tenant_id AND mb.company_id = mv.company_id
       LEFT JOIN locations l ON l.id = mb.location_id
-      WHERE mv.tenant_id = ${tenantId}::uuid
-        AND mv.type IN ('S', 'R', 'T')
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
+        AND mv.type IN ('S', 'R')
         AND ${margProductFilter}
         ${margVoucherLocationFilter}
         AND mv.date >= ${ctx.fiscalStart}::date
@@ -642,16 +665,21 @@ export class ThreeSixtyReportsService {
       : customer.cid
       ? Prisma.sql`mo.company_id = ${customer.company_id} AND mo.ord = ${customer.cid}`
       : Prisma.sql`FALSE`;
+    // Customer sales totals must exclude S/CHAL challans (no A/C impact) and
+    // subtract R/CN returns. Per-row sign = margSalesAmountSignSql: invoice +1,
+    // return -1, challan/SC/other 0. The header filter loads both S and R so
+    // returns can contribute their negative contra; CHAL vouchers stay loaded
+    // (sign = 0) so invoice_count remains stable for callers that consume it.
     const [voucherSales] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
-        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_sales,
-        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_sales,
-        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date), 0)::float8 AS current_year_sales,
-        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.priorFiscalStart}::date AND mv.date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS last_year_sales,
-        COUNT(DISTINCT mv.voucher) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date)::int AS invoice_count,
-        MAX(mv.date) AS last_invoice_date
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date), 0)::float8 AS current_year_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.priorFiscalStart}::date AND mv.date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS last_year_sales,
+        COUNT(DISTINCT mv.voucher) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'SALES_INVOICE' AND mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date)::int AS invoice_count,
+        MAX(mv.date) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'SALES_INVOICE') AS last_invoice_date
       FROM marg_vouchers mv
-      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.type = 'S' AND ${margCustomerFilter}
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R') AND ${margCustomerFilter}
     `);
 
     const salesBase = voucherSales;
@@ -660,11 +688,11 @@ export class ThreeSixtyReportsService {
     const monthlyTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         to_char(month_bucket, 'Mon YYYY') AS month,
-        COALESCE(SUM(mv.final_amt), 0)::float8 AS sales_value
+        COALESCE(SUM(mv.final_amt * ${margSalesAmountSignSql('mv')}), 0)::float8 AS sales_value
       FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') month_bucket
       LEFT JOIN marg_vouchers mv
-        ON mv.tenant_id = ${tenantId}::uuid
-        AND mv.type = 'S'
+        ON mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
+        AND mv.type IN ('S', 'R')
         AND ${margCustomerFilter}
         AND date_trunc('month', mv.date) = month_bucket
       GROUP BY month_bucket
@@ -673,7 +701,7 @@ export class ThreeSixtyReportsService {
 
     const topItems = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
-        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0))) DESC)::int AS rank,
+        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}) DESC)::int AS rank,
         COALESCE(p.name, mprod.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference') AS name,
         COALESCE(p.code, mprod.code, mt.pid) AS code,
         CASE WHEN NULLIF(TRIM(COALESCE(p.product_company, mprod.g_code)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.product_company, mprod.g_code)) || ' - ' || COALESCE(pc.name, 'Unknown company (' || TRIM(COALESCE(p.product_company, mprod.g_code)) || ')') END AS company,
@@ -682,8 +710,8 @@ export class ThreeSixtyReportsService {
         mprod.g_code6 AS "hsnCode",
         CASE WHEN p.id IS NOT NULL THEN 'MAPPED' WHEN mprod.id IS NOT NULL THEN 'STAGED_PRODUCT_NOT_PROJECTED' ELSE 'MISSING_MARG_PRODUCT_MASTER' END AS "mappingStatus",
         NULL::text AS "missingReason",
-        COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS quantity,
-        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS value
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS quantity,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS value
       FROM marg_vouchers mv
       JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
       LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
@@ -691,8 +719,8 @@ export class ThreeSixtyReportsService {
       LEFT JOIN product_companies pc ON pc.tenant_id = mt.tenant_id AND pc.code = NULLIF(TRIM(COALESCE(p.product_company, mprod.g_code)), '')
       LEFT JOIN product_salts ps ON ps.tenant_id = mt.tenant_id AND ps.code = NULLIF(TRIM(COALESCE(p.salt, mprod.g_code3)), '')
       LEFT JOIN product_categories pg ON pg.tenant_id = mt.tenant_id AND pg.code = NULLIF(TRIM(COALESCE(p.product_group, mprod.g_code5)), '')
-      WHERE mv.tenant_id = ${tenantId}::uuid
-        AND mv.type IN ('S', 'R', 'T')
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
+        AND mv.type IN ('S', 'R')
         AND ${margCustomerFilter}
         AND mv.date >= ${ctx.fiscalStart}::date
         AND mv.date <= ${ctx.asOf}::date
@@ -711,6 +739,7 @@ export class ThreeSixtyReportsService {
       FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') month_bucket
       LEFT JOIN marg_outstandings mo
         ON mo.tenant_id = ${tenantId}::uuid
+        AND mo.source_deleted = FALSE
         AND ${outstandingFilter}
         AND COALESCE(mo.balance, 0) <> 0
         AND COALESCE(mo.group_code, '') LIKE 'C%'
@@ -719,6 +748,9 @@ export class ThreeSixtyReportsService {
       ORDER BY month_bucket
     `);
 
+    // returnInsight reports only true SALES_RETURN (R/CN). SC (T) is a
+    // price-difference accounting credit, not a goods return, so it must
+    // not contribute to return_value / return_qty / return_count.
     const [returnInsight] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS return_value,
@@ -726,17 +758,21 @@ export class ThreeSixtyReportsService {
         COUNT(DISTINCT mv.company_id || ':' || mv.voucher)::int AS return_count
       FROM marg_vouchers mv
       JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
-      WHERE mv.tenant_id = ${tenantId}::uuid
-        AND mv.type IN ('R', 'T')
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
+        AND ${margVoucherFamilySql('mv')} = 'SALES_RETURN'
         AND ${margCustomerFilter}
         AND mv.date >= ${ctx.fiscalStart}::date
         AND mv.date <= ${ctx.asOf}::date
     `);
 
+    // Profitability over the customer's true sales activity: invoices add,
+    // returns subtract, challan / SC contribute zero. Filtering by
+    // family='SALES_INVOICE' alone would ignore returns; this signed sum is
+    // consistent with the headline sales_value the customer sees.
     const [profitability] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
-        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS sales_value,
-        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0)), 0)::float8 AS estimated_cost
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS sales_value,
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS estimated_cost
       FROM marg_vouchers mv
       JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
       LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
@@ -746,8 +782,8 @@ export class ThreeSixtyReportsService {
         WHERE ms.tenant_id = mt.tenant_id AND ms.company_id = mt.company_id AND ms.pid = mt.pid
         ORDER BY ms.updated_at DESC LIMIT 1
       ) ms ON TRUE
-      WHERE mv.tenant_id = ${tenantId}::uuid
-        AND mv.type = 'S'
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
+        AND mv.type IN ('S', 'R')
         AND ${margCustomerFilter}
         AND mv.date >= ${ctx.fiscalStart}::date
         AND mv.date <= ${ctx.asOf}::date
@@ -851,16 +887,21 @@ export class ThreeSixtyReportsService {
       : Prisma.sql`FALSE`;
     const poLocationFilter = locationId ? Prisma.sql`AND po.location_id = ${locationId}::uuid` : Prisma.empty;
 
+    // Family-signed purchase totals: PURCHASE_INVOICE +1, PURCHASE_RETURN -1,
+    // everything else 0. The header filter widens from 'P' to ('P','B') so
+    // DN purchase returns can subtract from the supplier's net purchases;
+    // the sign helper takes care of the directionality. Mirrors the
+    // sales-side family-aware aggregation introduced for customer 360.
     const [purchase] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
-        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_purchase,
-        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_purchase,
-        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date), 0)::float8 AS current_year_purchase,
-        COALESCE(SUM(COALESCE(mv.final_amt, 0)) FILTER (WHERE mv.date >= ${ctx.priorFiscalStart}::date AND mv.date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS last_year_purchase,
-        COUNT(DISTINCT mv.voucher) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date)::int AS purchase_invoice_count,
-        MAX(mv.date) AS last_purchase_date
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margPurchaseAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_purchase,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margPurchaseAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_purchase,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margPurchaseAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date), 0)::float8 AS current_year_purchase,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margPurchaseAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.priorFiscalStart}::date AND mv.date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS last_year_purchase,
+        COUNT(DISTINCT mv.voucher) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'PURCHASE_INVOICE' AND mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date)::int AS purchase_invoice_count,
+        MAX(mv.date) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'PURCHASE_INVOICE') AS last_purchase_date
       FROM marg_vouchers mv
-      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.type = 'P' AND ${margSupplierFilter}
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('P', 'B') AND ${margSupplierFilter}
     `);
 
     const payable = await this.getOutstandingSnapshot(tenantId, supplier.cid, supplier.company_id, 'SUPPLIER');
@@ -927,9 +968,14 @@ export class ThreeSixtyReportsService {
       CROSS JOIN quality_rollup qr
     `);
 
+    // Supplier topItems uses purchase-side family signing so DN purchase
+    // returns net out against the prior P invoice for the same item. Loads
+    // both P and B header types and the corresponding line types via
+    // compatiblePurchaseLineSql; mt.is_cancelled = FALSE keeps cancelled
+    // lines out of the rollup.
     const topItems = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
-        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0))) DESC)::int AS rank,
+        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0)) * ${margPurchaseAmountSignSql('mv')}) DESC)::int AS rank,
         COALESCE(p.name, mp.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference') AS name,
         COALESCE(p.code, mp.code, mt.pid) AS code,
         CASE WHEN NULLIF(TRIM(COALESCE(p.product_company, mp.g_code)), '') IS NULL THEN NULL ELSE TRIM(COALESCE(p.product_company, mp.g_code)) || ' - ' || COALESCE(pc.name, 'Unknown company (' || TRIM(COALESCE(p.product_company, mp.g_code)) || ')') END AS company,
@@ -942,8 +988,8 @@ export class ThreeSixtyReportsService {
           WHEN mt.pid IS NOT NULL THEN 'MISSING_MARG_PRODUCT_MASTER'
           ELSE 'ACTUAL_MISSING_PRODUCT_ID'
         END AS "mappingStatus",
-        COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS quantity,
-        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS value
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * ${margPurchaseAmountSignSql('mv')}), 0)::float8 AS quantity,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margPurchaseAmountSignSql('mv')}), 0)::float8 AS value
       FROM marg_transactions mt
       LEFT JOIN marg_products mp ON mp.tenant_id = mt.tenant_id AND mp.company_id = mt.company_id AND mp.pid = mt.pid
       LEFT JOIN products p ON p.id = mp.product_id
@@ -954,9 +1000,11 @@ export class ThreeSixtyReportsService {
         ON mv.tenant_id = mt.tenant_id
         AND mv.company_id = mt.company_id
         AND mv.voucher = mt.voucher
+        AND mv.is_cancelled = FALSE
         AND ${this.compatiblePurchaseLineSql('mv', 'mt')}
       WHERE mt.tenant_id = ${tenantId}::uuid
-        AND mt.type = 'P'
+        AND mt.is_cancelled = FALSE
+        AND mt.type IN ('P', 'B')
         AND ${margSupplierFilter}
         AND mt.date >= ${ctx.fiscalStart}::date
         AND mt.date <= ${ctx.asOf}::date
@@ -980,14 +1028,17 @@ export class ThreeSixtyReportsService {
       LIMIT 5
     `);
 
+    // Family-signed monthly purchase trend: P invoices add, B/DN returns
+    // subtract, everything else 0. Headers widen to ('P','B') so returns are
+    // visible to the sign multiplier.
     const monthlyTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         to_char(month_bucket, 'Mon YYYY') AS month,
-        COALESCE(SUM(mv.final_amt), 0)::float8 AS purchase_value
+        COALESCE(SUM(mv.final_amt * ${margPurchaseAmountSignSql('mv')}), 0)::float8 AS purchase_value
       FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') month_bucket
       LEFT JOIN marg_vouchers mv
-        ON mv.tenant_id = ${tenantId}::uuid
-        AND mv.type = 'P'
+        ON mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
+        AND mv.type IN ('P', 'B')
         AND ${margSupplierFilter}
         AND date_trunc('month', mv.date) = month_bucket
       GROUP BY month_bucket
