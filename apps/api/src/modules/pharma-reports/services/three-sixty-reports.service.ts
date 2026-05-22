@@ -108,7 +108,7 @@ export class ThreeSixtyReportsService {
           AND mt.voucher = mv.voucher
           AND ${this.compatibleSalesLineSql('mv', 'mt')}
         WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
-          AND mv.type IN ('S', 'R')
+          AND UPPER(mv.type) IN ('S', 'R', 'W')
           AND ${margProductFilter}
           ${margVoucherLocationFilter}
         UNION ALL
@@ -124,7 +124,7 @@ export class ThreeSixtyReportsService {
           AND mt.voucher = mv.voucher
           AND ${this.compatiblePurchaseLineSql('mv', 'mt')}
         WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
-          AND mv.type IN ('P', 'B')
+          AND UPPER(mv.type) IN ('P', 'B', 'Q')
           AND ${margProductFilter}
           ${margVoucherLocationFilter}
       )
@@ -179,18 +179,30 @@ export class ThreeSixtyReportsService {
         ${poLocationFilter}
     `);
 
-    // Sales returns count ONLY CN (mt.type='R'). The earlier `IN ('R','T')`
-    // incorrectly bundled SC price-difference adjustments into the return
-    // total — SC has no inventory return and must not appear as a sales
-    // return per QA's business rules.
+    // Returns by FAMILY (classifier-aligned), joined to the voucher so we can
+    // exclude cancelled documents — matching the Sales/Purchase Analysis
+    // dashboard scope=return. Sales returns = SALES_RETURN (CN) +
+    // SALES_BRK_EXP_RECEIVE (breakage/expiry CN); purchase returns =
+    // PURCHASE_RETURN (DN) + PURCHASE_BRK_EXP_RETURN. SC price-difference
+    // adjustments (SALES_RETURN_ADJUSTMENT) and challans are NOT returns and
+    // are excluded by the family lists. The earlier version filtered on raw
+    // line type ('R'/'B'), missed breakage/expiry, and counted cancelled rows.
     const [margReturns] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
-        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))) FILTER (WHERE mt.type = 'R'), 0)::float8 AS sales_return_value,
-        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))) FILTER (WHERE mt.type = 'B'), 0)::float8 AS purchase_return_value
-      FROM marg_transactions mt
-      WHERE mt.tenant_id = ${tenantId}::uuid
-        AND mt.date >= ${ctx.fiscalStart}::date
-        AND mt.date <= ${ctx.asOf}::date
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))) FILTER (
+          WHERE mv.family IN ('SALES_RETURN', 'SALES_BRK_EXP_RECEIVE')), 0)::float8 AS sales_return_value,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0))) FILTER (
+          WHERE mv.family IN ('PURCHASE_RETURN', 'PURCHASE_BRK_EXP_RETURN')), 0)::float8 AS purchase_return_value
+      FROM marg_vouchers mv
+      JOIN marg_transactions mt
+        ON mt.tenant_id = mv.tenant_id
+        AND mt.company_id = mv.company_id
+        AND mt.voucher = mv.voucher
+        AND (${this.compatibleSalesLineSql('mv', 'mt')} OR ${this.compatiblePurchaseLineSql('mv', 'mt')})
+      WHERE mv.tenant_id = ${tenantId}::uuid
+        AND mv.is_cancelled = FALSE
+        AND mv.date >= ${ctx.fiscalStart}::date
+        AND mv.date <= ${ctx.asOf}::date
         AND ${margProductFilter}
     `);
 
@@ -1242,19 +1254,28 @@ export class ThreeSixtyReportsService {
   private compatibleSalesLineSql(voucherAlias: string, transactionAlias: string): Prisma.Sql {
     const mv = Prisma.raw(voucherAlias);
     const mt = Prisma.raw(transactionAlias);
+    // UPPER-normalised + includes W (BRK/EXP receive — Credit Note flow) so
+    // 360 sales movements net breakage/expiry returns the same way the
+    // Sales Analysis dashboard does. SALES_BRK_EXP_RECEIVE is signed -1 by
+    // margSalesAmountSignSql, so it correctly subtracts.
     return Prisma.sql`(
-      (${mv}.type = 'S' AND ${mt}.type IN ('G', 'S', 'O'))
-      OR (${mv}.type = 'R' AND ${mt}.type = 'R')
-      OR (${mv}.type = 'T' AND ${mt}.type IN ('X', 'T'))
+      (UPPER(${mv}.type) = 'S' AND ${mt}.type IN ('G', 'S', 'O'))
+      OR (UPPER(${mv}.type) = 'R' AND ${mt}.type IN ('R', 'W'))
+      OR (UPPER(${mv}.type) = 'T' AND ${mt}.type IN ('X', 'T'))
+      OR (UPPER(${mv}.type) = 'W' AND ${mt}.type IN ('W', 'R'))
     )`;
   }
 
   private compatiblePurchaseLineSql(voucherAlias: string, transactionAlias: string): Prisma.Sql {
     const mv = Prisma.raw(voucherAlias);
     const mt = Prisma.raw(transactionAlias);
+    // UPPER-normalised + includes Q (BRK/EXP return — Debit Note flow) so
+    // 360 purchase movements net breakage/expiry returns. PURCHASE_BRK_EXP_RETURN
+    // is signed -1 by margPurchaseAmountSignSql.
     return Prisma.sql`(
-      (${mv}.type = 'P' AND ${mt}.type = 'P')
-      OR (${mv}.type = 'B' AND ${mt}.type = 'B')
+      (UPPER(${mv}.type) = 'P' AND ${mt}.type IN ('P', 'Q'))
+      OR (UPPER(${mv}.type) = 'B' AND ${mt}.type = 'B')
+      OR (UPPER(${mv}.type) = 'Q' AND ${mt}.type IN ('Q', 'B'))
     )`;
   }
 

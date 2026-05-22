@@ -6262,11 +6262,27 @@ export class MargEdeService {
         });
       }
 
-      if (rows.length > 0) {
+      // Dedupe by the upsert conflict key (code) BEFORE building the
+      // INSERT. Two staged Marg products can resolve to the same `code`
+      // — either a genuine duplicate Marg Code, or a collision after the
+      // 50-char truncation of `MARG-{code}`. Postgres rejects an
+      // INSERT ... ON CONFLICT whose VALUES contain the same constrained
+      // key twice ("ON CONFLICT DO UPDATE command cannot affect row a
+      // second time", SQLSTATE 21000). Keeping the LAST occurrence (staged
+      // is ordered by id asc, so this is the most-recently-staged row) is
+      // the correct idempotent choice. The marg_products back-link UPDATE
+      // below matches by `code`, not by the specific staged row, so every
+      // marg_product sharing this code is still linked even though only one
+      // row is inserted.
+      const dedupedRows = Array.from(
+        rows.reduce((m, r) => m.set(r.code, r), new Map<string, ProductRow>()).values(),
+      );
+
+      if (dedupedRows.length > 0) {
         // 12 bind variables per row.
         const insertBatchSize = this.computeSafeBatchSize(this.stagingBatchSize, 12, 'transformProducts:insert');
-        for (let i = 0; i < rows.length; i += insertBatchSize) {
-          const chunk = rows.slice(i, i + insertBatchSize);
+        for (let i = 0; i < dedupedRows.length; i += insertBatchSize) {
+          const chunk = dedupedRows.slice(i, i + insertBatchSize);
           const values = Prisma.join(
             chunk.map((r) => Prisma.sql`(
               ${tenantId}::uuid,
@@ -6471,11 +6487,23 @@ export class MargEdeService {
         }
       }
 
-      if (rows.length > 0) {
+      // Dedupe by the upsert conflict key (code) before the INSERT. Two
+      // staged parties can resolve to the same customers.code — most
+      // commonly a multi-company tenant reusing the same cid across
+      // companies (code = MARG-{cid}), or a 50-char truncation collision.
+      // Postgres rejects an INSERT ... ON CONFLICT whose VALUES repeat a
+      // constrained key (SQLSTATE 21000). Last occurrence wins; the
+      // marg_parties back-link UPDATE below matches by code, so every
+      // party sharing the code is still linked.
+      const dedupedRows = Array.from(
+        rows.reduce((m, r) => m.set(r.code, r), new Map<string, PartyRow>()).values(),
+      );
+
+      if (dedupedRows.length > 0) {
         // 10 bind variables per row.
         const insertBatchSize = this.computeSafeBatchSize(this.stagingBatchSize, 10, 'transformParties:insert');
-        for (let i = 0; i < rows.length; i += insertBatchSize) {
-          const chunk = rows.slice(i, i + insertBatchSize);
+        for (let i = 0; i < dedupedRows.length; i += insertBatchSize) {
+          const chunk = dedupedRows.slice(i, i + insertBatchSize);
           const values = Prisma.join(
             chunk.map((r) => Prisma.sql`(
               ${tenantId}::uuid,

@@ -57,7 +57,9 @@
       "Bash(docker exec pg_p2 psql -U postgres -d p2 -t -c ' *)",
       "Bash(node .catalog-v13.js)",
       "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('./ai-reporting/semantic-catalog.json','utf8'\\)\\); console.log\\('parses'\\)\")",
-      "Bash(echo \"web_tsc=$?\")"
+      "Bash(echo \"web_tsc=$?\")",
+      "Bash(docker exec pg_v psql -U postgres -d v -c ' *)",
+      "Bash(docker exec pg_v psql -U postgres -d v -t -c ' *)"
     ]
   }
 }
