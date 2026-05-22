@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTenantConfig } from '../../hooks/useTenantConfig';
 import type { Column } from '../../components/ui';
-import { Badge, Card, CardHeader, DataTable, Modal, QueryErrorBanner } from '../../components/ui';
+import { Card, CardHeader, DataTable, Modal, QueryErrorBanner } from '../../components/ui';
 import { DetailPopupActions } from '../../components/reports/DetailPopupActions';
 import { LineChart, PieChart } from '../../components/charts';
 import { usePharmaGrid } from '../../hooks/usePharmaGrid';
@@ -162,7 +162,9 @@ export default function SalesPurchaseAnalysisPage() {
     cols.push(
       { key: 'quantity', header: 'Qty', accessor: (row) => fmt(row.quantity, 2), align: 'right', sortable: true, filterType: 'number', filterField: 'quantity' },
       { key: 'item_count', header: 'Items', accessor: (row) => fmt(row.item_count), align: 'right', sortable: true, filterType: 'number', filterField: 'item_count' },
-      { key: 'status', header: 'Status', accessor: (row) => <Badge variant={row.status === 'RETURN' ? 'warning' : 'success'} size="sm">{row.status}</Badge>, filterType: 'select', filterField: 'status', filterOptions: [{ value: 'POSTED', label: 'Posted' }, { value: 'RETURN', label: 'Return' }] },
+      // Status column removed: under pure-invoice-only mode every loaded
+      // row is POSTED, so the column was always a single value with a
+      // dropdown filter that produced empty results for 'RETURN'.
     );
     return cols;
   }, [kind]);

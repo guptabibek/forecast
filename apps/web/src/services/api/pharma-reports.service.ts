@@ -392,7 +392,6 @@ export interface SalesPurchaseOverviewResponse {
     cost?: number;
     grossProfit?: number;
     marginPct?: number | null;
-    returnImpact: number;
   };
   trend: Array<{ period: string; bills: number; amount: number; quantity: number }>;
   topParties: Array<{ rank: number; party_code: string; name: string; bills: number; value: number; share: number }>;

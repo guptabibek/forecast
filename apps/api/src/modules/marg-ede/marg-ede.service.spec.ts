@@ -2229,16 +2229,17 @@ describe('MargEdeService helpers', () => {
   });
 
   // Regression test: a tenant whose invoice numbering does NOT start with
-  // STR (e.g. INV-, BILL-, a customised series) must still be classified as
-  // SALES_INVOICE. An earlier version of the SQL GENERATED column gated
-  // SALES_INVOICE on `vcn LIKE 'STR%'`, which silently misclassified every
-  // non-11093 tenant's S-type vouchers as UNKNOWN. Reports then showed
-  // NEGATIVE sales (returns counted with sign -1, invoices counted with
-  // sign 0). The TS classifier always defaulted by `headerType` regardless
-  // of VCN — this test pins that behaviour so the bug can't return.
-  it('strict classifier: S-type voucher with non-canonical (non-STR, non-CHAL) VCN still classifies as SALES_INVOICE', () => {
+  // STR (e.g. INV-, BILL-, AE-, custom series) must still be classified
+  // as SALES_INVOICE. The classifier looks only at (UPPER(type),
+  // add_field[0]) and ignores VCN entirely — see the
+  // 20260521100000_marg_voucher_family_addfield_classifier migration
+  // and the comment block in marg-voucher-family.sql.ts for the full
+  // history of why VCN-based heuristics were removed. Confidence is HIGH
+  // for these rows because both classifier signals (type=S, add_field='I')
+  // are present and aligned.
+  it('strict classifier: S + add_field=I classifies as SALES_INVOICE regardless of VCN series', () => {
     const helper = service as any;
-    for (const vcn of ['INV-001', 'BILL/2026/0042', 'SI26-90001', 'CUSTOM-SERIES-7']) {
+    for (const vcn of ['INV-001', 'BILL/2026/0042', 'SI26-90001', 'AE-013598', 'CUSTOM-SERIES-7']) {
       const decision = helper.resolveMargType2ProjectionDecision({
         transactionType: 'G',
         transactionVcn: vcn,
@@ -2251,15 +2252,307 @@ describe('MargEdeService helpers', () => {
       });
       expect(decision).toEqual(expect.objectContaining({
         family: 'SALES_INVOICE',
-        // Confidence is MEDIUM rather than HIGH because the VCN doesn't
-        // match the canonical STR series, but the document is still
-        // unambiguously a sales invoice and must project as one.
-        confidence: 'MEDIUM',
+        confidence: 'HIGH',
         skipReason: null,
         shouldProjectActual: true,
         actualType: ActualType.SALES,
       }));
     }
+  });
+
+  // Universal challan rule: S + add_field='C' classifies as SALES_CHALLAN
+  // regardless of VCN series. Catches the production pharma tenant's `CA*`,
+  // `L*`, `SN*` challan series the previous VCN heuristic (`LIKE 'CHAL%'`)
+  // missed — sales were inflating by ~₹22.6 lakh on a 14k-voucher dataset.
+  it('strict classifier: S + add_field=C classifies as SALES_CHALLAN regardless of VCN series', () => {
+    const helper = service as any;
+    for (const vcn of ['CHAL032585', 'CA000007', 'L002678', 'SN00000108']) {
+      const decision = helper.resolveMargType2ProjectionDecision({
+        transactionType: 'G',
+        transactionVcn: vcn,
+        transactionAddField: 'C; ;;00;0',
+        voucherType: 'S',
+        voucherVcn: vcn,
+        voucherAddField: 'C;0.00',
+        effectiveQty: 5,
+        amount: 200,
+      });
+      expect(decision).toEqual(expect.objectContaining({
+        family: 'SALES_CHALLAN',
+        confidence: 'HIGH',
+        skipReason: null,
+        shouldProjectActual: false,
+        shouldProjectInventory: true,
+        inventoryTransactionType: InventoryTransactionType.ISSUE,
+      }));
+    }
+  });
+
+  // S + missing/unrecognised add_field → diagnostic family. The classifier
+  // refuses to guess at I vs C from VCN alone; the operator-facing
+  // diagnostic surfaces these so data-quality issues are visible rather
+  // than silently inflating reports.
+  it('strict classifier: S header with no add_field → UNKNOWN_S_NO_AF + no projection', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'G',
+      transactionVcn: 'AE-013598',
+      transactionAddField: null,
+      voucherType: 'S',
+      voucherVcn: 'AE-013598',
+      voucherAddField: null,
+      effectiveQty: 12,
+      amount: 18040,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'UNKNOWN_S_NO_AF',
+      confidence: 'LOW',
+      skipReason: 'UNKNOWN_DOCUMENT_FAMILY',
+      shouldProjectActual: false,
+      shouldProjectInventory: false,
+    }));
+  });
+
+  // R + add_field='C' is a CHALLAN return, not a Credit Note. Inventory
+  // comes back but A/R is unaffected. Catches the production pharma
+  // tenant's `CCN*` / `CCNB*` series that previously subtracted ~₹3.3
+  // lakh from sales returns incorrectly.
+  it('strict classifier: R + add_field=C classifies as SALES_CHALLAN_RETURN (inventory only, no A/R)', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'R',
+      transactionVcn: 'CCN00328',
+      transactionAddField: 'C; ;;00;0',
+      voucherType: 'R',
+      voucherVcn: 'CCN00328',
+      voucherAddField: 'C;0.00',
+      effectiveQty: 2,
+      amount: 140,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'SALES_CHALLAN_RETURN',
+      confidence: 'HIGH',
+      skipReason: null,
+      shouldProjectActual: false,
+      shouldProjectInventory: true,
+      inventoryTransactionType: InventoryTransactionType.RETURN,
+      customerFacing: true,
+      supplierFacing: false,
+    }));
+  });
+
+  // W + add_field='I' (BRK/EXP Receive, Credit Note flow per Marg's
+  // official mapping). Stock comes back + A/R reduced — commercial impact
+  // identical to SALES_RETURN. Kept as a separate family so shrinkage
+  // analytics can break out breakage / expiry returns specifically.
+  it('strict classifier: W + add_field=I classifies as SALES_BRK_EXP_RECEIVE (negative sales + inventory in)', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'W',
+      transactionVcn: 'CNB00001',
+      transactionAddField: 'I;12.75;;;;;;;0.00;;;',
+      voucherType: 'W',
+      voucherVcn: 'CNB00001',
+      voucherAddField: 'I;12.75;;;;;;;0.00;;;',
+      voucherCid: 'C10238',
+      effectiveQty: 5,
+      amount: 321,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'SALES_BRK_EXP_RECEIVE',
+      confidence: 'HIGH',
+      skipReason: null,
+      shouldProjectActual: true,
+      actualType: ActualType.SALES,
+      actualQuantity: -5,
+      actualAmount: -321,
+      shouldProjectInventory: true,
+      inventoryTransactionType: InventoryTransactionType.RETURN,
+      ledgerEntryType: LedgerEntryType.LEDGER_RETURN,
+      customerFacing: true,
+      supplierFacing: false,
+    }));
+  });
+
+  // W + add_field='C' (BRK/EXP receive on a challan). Inventory in,
+  // no A/R impact.
+  it('strict classifier: W + add_field=C classifies as SALES_BRK_EXP_RECEIVE_CHALLAN (inventory only)', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'W',
+      transactionVcn: 'CCNB01420',
+      transactionAddField: 'C;210.68;;;;;;;0.00;;;',
+      voucherType: 'W',
+      voucherVcn: 'CCNB01420',
+      voucherAddField: 'C;210.68;;;;;;;0.00;;;',
+      voucherCid: 'C9385',
+      effectiveQty: 3,
+      amount: 5813,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'SALES_BRK_EXP_RECEIVE_CHALLAN',
+      confidence: 'HIGH',
+      skipReason: null,
+      shouldProjectActual: false,
+      shouldProjectInventory: true,
+      inventoryTransactionType: InventoryTransactionType.RETURN,
+      customerFacing: true,
+      supplierFacing: false,
+    }));
+  });
+
+  // Q + add_field='I' (BRK/EXP Return — Debit Note to supplier).
+  // Inventory out + A/P reduced. Commercial impact identical to
+  // PURCHASE_RETURN but kept separate for breakage analytics.
+  it('strict classifier: Q + add_field=I classifies as PURCHASE_BRK_EXP_RETURN (negative purchase + inventory out)', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'Q',
+      transactionVcn: '..CNB00001',
+      transactionAddField: 'I;0.00;;;;;;;0.00;;;',
+      voucherType: 'Q',
+      voucherVcn: '..CNB00001',
+      voucherAddField: 'I;0.00;;;;;;;0.00;;;',
+      voucherCid: 'S11502',
+      effectiveQty: 50,
+      amount: 10445,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'PURCHASE_BRK_EXP_RETURN',
+      confidence: 'HIGH',
+      skipReason: null,
+      shouldProjectActual: true,
+      actualType: ActualType.PURCHASES,
+      actualQuantity: -50,
+      actualAmount: -10445,
+      shouldProjectInventory: true,
+      inventoryTransactionType: InventoryTransactionType.ADJUSTMENT_OUT,
+      ledgerEntryType: LedgerEntryType.LEDGER_RETURN,
+      customerFacing: false,
+      supplierFacing: true,
+    }));
+  });
+
+  // Q + add_field='C' (BRK/EXP return on a challan). Inventory out,
+  // no A/P impact.
+  it('strict classifier: Q + add_field=C classifies as PURCHASE_BRK_EXP_RETURN_CHALLAN (inventory only)', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'Q',
+      transactionVcn: 'CDN00002',
+      transactionAddField: 'C;0.00;;;;;;;0.00;;;',
+      voucherType: 'Q',
+      voucherVcn: 'CDN00002',
+      voucherAddField: 'C;0.00;;;;;;;0.00;;;',
+      voucherCid: 'S11070',
+      effectiveQty: 10,
+      amount: 2016,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'PURCHASE_BRK_EXP_RETURN_CHALLAN',
+      confidence: 'HIGH',
+      skipReason: null,
+      shouldProjectActual: false,
+      shouldProjectInventory: true,
+      inventoryTransactionType: InventoryTransactionType.ADJUSTMENT_OUT,
+      customerFacing: false,
+      supplierFacing: true,
+    }));
+  });
+
+  // U + supplier cid (the expected shape per Marg's mapping). Accounting-
+  // only adjustment — mirror of T (SALES_RETURN_ADJUSTMENT) on the
+  // purchase side. No commercial / inventory projection.
+  it('strict classifier: U + supplier cid classifies as PURCHASE_PRICE_DIFF_ADJUSTMENT (LOW, skipped)', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'X',
+      transactionVcn: '4256061953',
+      transactionAddField: 'I;0.00;;;;;;3412293812;19413.00;;;',
+      voucherType: 'u',
+      voucherVcn: '4256061953',
+      voucherAddField: 'I;0.00;;;;;;3412293812;19413.00;;;',
+      voucherCid: 'S11290',
+      effectiveQty: 10,
+      amount: 19413,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'PURCHASE_PRICE_DIFF_ADJUSTMENT',
+      confidence: 'LOW',
+      skipReason: 'LOW_CONFIDENCE_DOCUMENT_FAMILY',
+      shouldProjectActual: false,
+      shouldProjectInventory: false,
+      customerFacing: false,
+      supplierFacing: true,
+    }));
+  });
+
+  // U + customer cid is the direction-mismatch case per Marg's mapping
+  // (U should always be supplier-side). Surface as diagnostic family
+  // instead of silently classifying as a sales-side adjustment.
+  it('strict classifier: U + customer cid → UNKNOWN_U_UNEXPECTED_CID (diagnostic, no projection)', () => {
+    const helper = service as any;
+    const decision = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'X',
+      transactionVcn: '4256061953',
+      transactionAddField: 'I;0.00;;;;;;3412293812;19413.00;;;',
+      voucherType: 'U',
+      voucherVcn: '4256061953',
+      voucherAddField: 'I;0.00;;;;;;3412293812;19413.00;;;',
+      voucherCid: 'C9385',
+      effectiveQty: 10,
+      amount: 19413,
+    });
+    expect(decision).toEqual(expect.objectContaining({
+      family: 'UNKNOWN_U_UNEXPECTED_CID',
+      confidence: 'LOW',
+      skipReason: 'UNKNOWN_DOCUMENT_FAMILY',
+      shouldProjectActual: false,
+      shouldProjectInventory: false,
+    }));
+  });
+
+  // Lowercase header types must classify identically to their uppercase
+  // counterparts (`v` → SALES_ORDER, `u` → PURCHASE_PRICE_DIFF_ADJUSTMENT).
+  // The previous classifier was case-sensitive and silently dropped 82
+  // type-`v` AE invoices (₹34 lakh) into UNKNOWN. UPPER normalisation
+  // recovers them.
+  it('strict classifier: lowercase header type normalises to uppercase classification', () => {
+    const helper = service as any;
+    const v = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'X',
+      transactionVcn: 'AE-000610',
+      transactionAddField: 'I;0.00',
+      voucherType: 'v',
+      voucherVcn: 'AE-000610',
+      voucherAddField: 'I;0.00',
+      voucherCid: 'C1234',
+      effectiveQty: 1,
+      amount: 100,
+    });
+    expect(v).toEqual(expect.objectContaining({
+      family: 'SALES_ORDER',
+      headerType: 'V',
+      confidence: 'HIGH',
+    }));
+
+    const u = helper.resolveMargType2ProjectionDecision({
+      transactionType: 'X',
+      transactionVcn: '4256061959',
+      transactionAddField: 'I;0.00;;;;;;;0.00;;;',
+      voucherType: 'u',
+      voucherVcn: '4256061959',
+      voucherAddField: 'I;0.00;;;;;;;0.00;;;',
+      voucherCid: 'S11290',
+      effectiveQty: 1,
+      amount: 5641,
+    });
+    expect(u).toEqual(expect.objectContaining({
+      family: 'PURCHASE_PRICE_DIFF_ADJUSTMENT',
+      headerType: 'U',
+      confidence: 'LOW',
+      skipReason: 'LOW_CONFIDENCE_DOCUMENT_FAMILY',
+    }));
   });
 
   it('strict classifier happy path: S/CHAL/C with Dis.Type=G projects challan inventory but NO sales actual', () => {
@@ -2571,5 +2864,47 @@ describe('MargEdeService helpers', () => {
     // Verify the DELETE call landed before $executeRaw inside the tx.
     expect(deleteMany.mock.invocationCallOrder[0]).toBeLessThan(executeRaw.mock.invocationCallOrder[0]);
     expect(inserted).toBe(42);
+  });
+
+  it('getMargFamilyClassificationDiagnostic: flags needsAttention when any diagnostic UNKNOWN_* family is non-empty', async () => {
+    const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([
+        { family: 'SALES_INVOICE', vouchers: BigInt(13599), sum_final_amt: 64740872, min_date: new Date('2026-04-01'), max_date: new Date('2026-04-30'), sample_vcns: ['AE-013598', 'AE-013597'] },
+        { family: 'SALES_CHALLAN', vouchers: BigInt(192), sum_final_amt: 2141292, min_date: new Date('2026-04-01'), max_date: new Date('2026-04-30'), sample_vcns: ['L002678'] },
+        { family: 'UNKNOWN_S_NO_AF', vouchers: BigInt(3), sum_final_amt: 1200, min_date: new Date('2026-04-10'), max_date: new Date('2026-04-12'), sample_vcns: ['AE-099999'] },
+        { family: 'UNKNOWN', vouchers: BigInt(0), sum_final_amt: 0, min_date: null, max_date: null, sample_vcns: null },
+      ]),
+    };
+    service = new MargEdeService(prisma as any, {} as any, {} as any);
+
+    const result = await (service as any).getMargFamilyClassificationDiagnostic('tenant-1');
+
+    expect(result.totalVouchers).toBe(13599 + 192 + 3 + 0);
+    // UNKNOWN_S_NO_AF has 3 rows → attention required.
+    expect(result.needsAttention).toBe(true);
+    const invoice = result.families.find((f: any) => f.family === 'SALES_INVOICE');
+    expect(invoice.isDiagnostic).toBe(false);
+    const noAf = result.families.find((f: any) => f.family === 'UNKNOWN_S_NO_AF');
+    expect(noAf.isDiagnostic).toBe(true);
+    expect(noAf.vouchers).toBe(3);
+    expect(noAf.sampleVcns).toEqual(['AE-099999']);
+  });
+
+  it('getMargFamilyClassificationDiagnostic: needsAttention is false when only healthy families have rows', async () => {
+    const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([
+        { family: 'SALES_INVOICE', vouchers: BigInt(100), sum_final_amt: 5000, min_date: new Date('2026-04-01'), max_date: new Date('2026-04-30'), sample_vcns: ['AE-1'] },
+        { family: 'PURCHASE_INVOICE', vouchers: BigInt(20), sum_final_amt: 9000, min_date: new Date('2026-04-01'), max_date: new Date('2026-04-30'), sample_vcns: ['P-1'] },
+        // A diagnostic family present in the result set but with zero rows
+        // must NOT trip needsAttention.
+        { family: 'UNKNOWN_W_NO_AF', vouchers: BigInt(0), sum_final_amt: 0, min_date: null, max_date: null, sample_vcns: null },
+      ]),
+    };
+    service = new MargEdeService(prisma as any, {} as any, {} as any);
+
+    const result = await (service as any).getMargFamilyClassificationDiagnostic('tenant-1');
+
+    expect(result.needsAttention).toBe(false);
+    expect(result.totalVouchers).toBe(120);
   });
 });

@@ -16,26 +16,43 @@ import {
 
 type AnalysisKind = 'sales' | 'purchase';
 
-// Header MDis.Type filters that load vouchers into the rollup. Note:
-//  - 'T' (SC price-diff) is DELIBERATELY excluded from SALES_TYPES because
-//    SC is accounting-only per business rules (Book E credit) and must not
-//    surface in commercial sales reports at all.
-//  - 'S' includes BOTH STR invoices AND CHAL challans. Challans are filtered
-//    OUT of sales monetary totals by `margSalesAmountSignSql` returning 0
-//    for them — but they remain in the rollup so that customer/product
-//    drilldowns can still display challan activity. The family classifier
-//    (see marg-voucher-family.sql.ts) is the single source of truth for
-//    distinguishing invoice vs challan from raw MDis columns.
+// ─────────────────────────────────────────────────────────────────────────
+// PURE-INVOICE-ONLY MODE (post-2026-05-21 product decision)
+// ─────────────────────────────────────────────────────────────────────────
+// Sales/purchase analysis reports show ONLY pure commercial invoices —
+// no returns, no challans, no challan-returns, no BRK/EXP CN/DN, no
+// accounting-only adjustments (T/U). Two filters enforce this contract,
+// and both must be satisfied for a row to appear in any sales/purchase
+// analysis output:
+//
+//   1. Header type filter (mv.type IN ...) — narrows the LOAD set to
+//      'S' for sales / 'P' for purchase. Cheap because the
+//      (tenant_id, type) index covers it.
+//   2. Family filter (mv.family = ...) — further narrows to the pure
+//      invoice family within that type. Catches the case where a tenant
+//      has type=S vouchers that are actually challans (SALES_CHALLAN) —
+//      those must NOT contribute to commercial sales totals.
+//
+// Returns / challans / adjustments are still synced into marg_vouchers
+// and projected as commercial Actuals + inventory + ledger entries via
+// the classifier (so accounting reports, AR/AP outstandings, and
+// inventory analytics are unaffected). They simply aren't queried by
+// sales/purchase analysis.
+//
+// If a future product decision wants returns BACK in sales analysis,
+// the change is two lines: extend documentTypes() and PURE_*_FAMILY
+// to include the return-flavoured families. The classifier and sign
+// helpers already know how to sign them.
 const SALES_TYPES = ['S'];
 const PURCHASE_TYPES = ['P'];
-// Header types that contribute net-NEGATIVE rows in commercial reports.
-// `R` (CN) is a true sales return — included as a contra in sales totals.
-// `T` (SC) is intentionally NOT here: it's accounting-only and excluded from
-// `documentTypes('sales')` entirely.
-const SALES_RETURN_TYPES = ['R'];
-const PURCHASE_RETURN_TYPES = ['B'];
-const SALES_LINE_TYPES = ['G', 'S', 'O', 'R', 'X'];
-const PURCHASE_LINE_TYPES = ['P', 'B'];
+const PURE_SALES_FAMILY = 'SALES_INVOICE';
+const PURE_PURCHASE_FAMILY = 'PURCHASE_INVOICE';
+// Line types accepted under pure-invoice headers. Restricted to the
+// line types that actually appear under invoice-family vouchers per the
+// production V2 audit — challan / return line types ('R', 'W', 'Q')
+// are NOT included because they only appear under non-invoice headers.
+const SALES_LINE_TYPES = ['G', 'S', 'O', 'X'];
+const PURCHASE_LINE_TYPES = ['P'];
 
 const DIMENSION_COLUMNS: AllowedSqlColumns = {
   label: { expression: 'dim_label', type: 'string' },
@@ -77,8 +94,6 @@ export class SalesPurchaseAnalysisService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getOverview(tenantId: string, kind: AnalysisKind, filters: SalesPurchaseAnalysisFilterDto) {
-    const documentTypes = this.documentTypes(kind);
-    const returnTypes = kind === 'sales' ? SALES_RETURN_TYPES : PURCHASE_RETURN_TYPES;
     const useRollup = !this.requiresLineLevelDrill(filters);
 
     // FAST PATH: read pre-aggregated bill rollup. One row per bill (~tens of
@@ -88,8 +103,8 @@ export class SalesPurchaseAnalysisService {
     // transaction lines. Only safe when no filter requires drilling into
     // per-line data (see requiresLineLevelDrill).
     const summary = useRollup
-      ? await this.getOverviewSummaryFromRollup(tenantId, kind, filters, returnTypes)
-      : await this.getOverviewSummaryFromLive(tenantId, kind, filters, returnTypes);
+      ? await this.getOverviewSummaryFromRollup(tenantId, kind, filters)
+      : await this.getOverviewSummaryFromLive(tenantId, kind, filters);
 
     const [trend, topParties, topItems, taxSummary, paymentModeSummary] = await Promise.all([
       this.trend(tenantId, kind, filters),
@@ -103,6 +118,11 @@ export class SalesPurchaseAnalysisService {
     const totalBills = Number(summary?.total_bills ?? 0);
     const totalQuantity = Number(summary?.total_quantity ?? 0);
 
+    // returnImpact was removed when sales/purchase analysis moved to
+    // pure-invoice-only mode. Every loaded row is now an invoice; there
+    // are no returns to summarise. Callers that need a returns view
+    // should call a dedicated returns endpoint (not yet implemented —
+    // tracked separately).
     return {
       kind,
       summary: {
@@ -117,7 +137,6 @@ export class SalesPurchaseAnalysisService {
         cost: Number(summary?.cost_amount ?? 0),
         grossProfit: kind === 'sales' ? Number(summary?.gross_profit ?? 0) : undefined,
         marginPct: kind === 'sales' ? summary?.margin_pct : undefined,
-        returnImpact: Number(summary?.return_amount ?? 0),
       },
       trend,
       topParties,
@@ -140,12 +159,17 @@ export class SalesPurchaseAnalysisService {
     tenantId: string,
     kind: AnalysisKind,
     filters: SalesPurchaseAnalysisFilterDto,
-    returnTypes: string[],
   ): Promise<any> {
     const where = this.buildRollupWhere(tenantId, kind, filters);
     const signedAmount = this.signedAmountColumn(kind);
     const signedQuantity = this.signedQuantityColumn(kind);
     const amountSign = this.amountSignColumn(kind);
+    // Under pure-invoice-only mode, buildRollupWhere restricts to
+    // family='SALES_INVOICE' or 'PURCHASE_INVOICE'. The signed_* columns
+    // therefore always carry a +1 multiplier for every loaded row, but
+    // we keep the SUM-with-sign expressions so the same SQL works
+    // unchanged if a future product decision opens this back up to
+    // signed return families.
     const [row] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(b.${signedAmount}), 0)::float8 AS total_amount,
@@ -159,11 +183,7 @@ export class SalesPurchaseAnalysisService {
         CASE WHEN COALESCE(SUM(b.${signedAmount}), 0) > 0
           THEN (COALESCE(SUM(b.${signedAmount} - b.cost_amount * b.${amountSign}), 0) / COALESCE(SUM(b.${signedAmount}), 0) * 100)::float8
           ELSE NULL
-        END AS margin_pct,
-        -- Informational: absolute magnitude of returns (positive). Already
-        -- baked into total_amount as a negative contribution; this is just
-        -- the breakdown so callers can display "returns: X".
-        COALESCE(SUM(COALESCE(b.final_amt, b.gross_amount)) FILTER (WHERE b.type = ANY(${returnTypes}::text[])), 0)::float8 AS return_amount
+        END AS margin_pct
       FROM marg_bill_rollup b
       WHERE ${where}
     `);
@@ -179,9 +199,7 @@ export class SalesPurchaseAnalysisService {
     tenantId: string,
     kind: AnalysisKind,
     filters: SalesPurchaseAnalysisFilterDto,
-    returnTypes: string[],
   ): Promise<any> {
-    void kind; // unused — buildHeaderWhere derives types from kind via documentTypes
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
     const signExpr = this.familyAwareAmountSignSql(kind, 'mv');
     const [row] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
@@ -279,18 +297,14 @@ export class SalesPurchaseAnalysisService {
         GROUP BY company_id, voucher, type
       )
       SELECT
-        -- Headline total uses the family-signed amount so:
-        --   Sales: invoices add, R/CN returns subtract, S/CHAL & T/SC contribute zero.
-        --   Purchase: P invoices add, B/DN returns subtract, other families zero.
+        -- Under pure-invoice-only mode buildHeaderWhere restricts the WITH
+        -- to family = SALES_INVOICE / PURCHASE_INVOICE; signed_net_amount
+        -- always carries +1, signed_quantity always carries +1. Kept as
+        -- SUM(signed_*) for shape-stability with the rollup path and so
+        -- future "include returns" changes need a single one-line edit.
         COALESCE(SUM(signed_net_amount), 0)::float8 AS total_amount,
-        -- Bill counts and party counts still respect every loaded header (so
-        -- challan activity remains visible to callers who consume total_bills
-        -- as an activity metric). If a strict invoices-only count is needed
-        -- downstream, filter by family.
         COUNT(*)::int AS total_bills,
         COUNT(DISTINCT cid)::int AS total_parties,
-        -- total_quantity uses signed_quantity so a return's quantity nets out
-        -- against an invoice's quantity (consistent with total_amount semantics).
         COALESCE(SUM(signed_quantity), 0)::float8 AS total_quantity,
         COUNT(DISTINCT company_id || ':' || COALESCE(NULLIF(voucher, ''), vcn, ''))::int AS voucher_count,
         COALESCE(SUM(item_count), 0)::int AS item_count,
@@ -299,12 +313,7 @@ export class SalesPurchaseAnalysisService {
         CASE WHEN COALESCE(SUM(signed_net_amount), 0) > 0
           THEN (COALESCE(SUM(signed_net_amount - cost_amount * amount_sign), 0) / COALESCE(SUM(signed_net_amount), 0) * 100)::float8
           ELSE NULL
-        END AS margin_pct,
-        -- return_amount is the absolute magnitude of returns (positive number),
-        -- shown alongside total_amount as an informational breakdown. It is NOT
-        -- subtracted again — the subtraction is already baked into total_amount
-        -- via the negative sign on SALES_RETURN.
-        COALESCE(SUM(COALESCE(final_amt, gross_amount)) FILTER (WHERE type = ANY(${returnTypes}::text[])), 0)::float8 AS return_amount
+        END AS margin_pct
       FROM bill_rollup
     `);
     return row;
@@ -521,23 +530,25 @@ export class SalesPurchaseAnalysisService {
     const stockItemFilter = itemKey.startsWith('product:')
       ? Prisma.sql`mprod.product_id = ${itemKey.slice('product:'.length)}::uuid`
       : Prisma.sql`ms.pid = ${itemKey}`;
+    // `kind` is intentionally NOT used to gate the family filter here.
+    // The item drilldown is a single dual-sided card: it shows an item's
+    // pure sales AND pure purchase activity together (sold X / bought Y /
+    // margin) regardless of which report the user drilled from. So we load
+    // BOTH pure invoice families and let the per-side FILTER clauses in
+    // the SELECT partition them. Returns / challans / adjustments stay
+    // out of scope per the pure-invoice-only product decision.
+    void kind;
     const scopedFilters = { ...filters, item: undefined, productIds: undefined };
-    const where = this.buildHeaderWhere(tenantId, kind, scopedFilters, 'mv', 'mt', 'mp', 'mprod');
-    // Item drilldown deliberately loads the full mixed type set (S/P/R/T/B)
-    // and partitions by FAMILY rather than raw mv.type so SC adjustments
-    // and challans cannot inflate the commercial sales/purchase totals.
-    // `is_cancelled = FALSE` excludes Marg-cancelled vouchers from item
-    // analytics — mirrors the same suppression the centralised
-    // `buildHeaderWhere` applies for the other drilldowns.
-    const allTypeConds: Prisma.Sql[] = [
+    const itemTypeConds: Prisma.Sql[] = [
       Prisma.sql`mv.tenant_id = ${tenantId}::uuid`,
       Prisma.sql`mv.is_cancelled = FALSE`,
-      Prisma.sql`mv.type IN ('S', 'P', 'R', 'T', 'B')`,
+      Prisma.sql`UPPER(mv.type) IN ('S', 'P')`,
+      Prisma.sql`mv.family IN (${PURE_SALES_FAMILY}, ${PURE_PURCHASE_FAMILY})`,
     ];
-    if (scopedFilters.startDate) allTypeConds.push(Prisma.sql`mv.date >= ${scopedFilters.startDate}::date`);
-    if (scopedFilters.endDate) allTypeConds.push(Prisma.sql`mv.date <= ${scopedFilters.endDate}::date`);
-    if (scopedFilters.companyId !== undefined && scopedFilters.companyId !== null) allTypeConds.push(Prisma.sql`mv.company_id = ${Number(scopedFilters.companyId)}`);
-    const allTypesWhere = Prisma.sql`${Prisma.join(allTypeConds, ' AND ')}`;
+    if (scopedFilters.startDate) itemTypeConds.push(Prisma.sql`mv.date >= ${scopedFilters.startDate}::date`);
+    if (scopedFilters.endDate) itemTypeConds.push(Prisma.sql`mv.date <= ${scopedFilters.endDate}::date`);
+    if (scopedFilters.companyId !== undefined && scopedFilters.companyId !== null) itemTypeConds.push(Prisma.sql`mv.company_id = ${Number(scopedFilters.companyId)}`);
+    const allTypesWhere = Prisma.sql`${Prisma.join(itemTypeConds, ' AND ')}`;
     const familyExpr = margVoucherFamilySql('mv');
 
     const [metrics] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
@@ -562,25 +573,20 @@ export class SalesPurchaseAnalysisService {
         WHERE ${allTypesWhere} AND ${transactionItemFilter}
       )
       SELECT
-        -- Sales-side metrics: invoices add, CN returns subtract. Challans and
-        -- SC contribute nothing (their families are excluded from the filters).
-        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'SALES_INVOICE'), 0)::float8
-          - COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'SALES_RETURN'), 0)::float8
-          AS sales_quantity,
-        COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'SALES_INVOICE'), 0)::float8
-          - COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'SALES_RETURN'), 0)::float8
-          AS sales_amount,
+        -- Pure-invoice-only mode: the CTE loads ONLY SALES_INVOICE +
+        -- PURCHASE_INVOICE rows for this item, so each column below is a
+        -- plain sum with no return/challan subtraction. Both sides are
+        -- populated (an item can be both bought and sold). The
+        -- _return_quantity columns are retained at 0 for response-shape
+        -- backward compatibility.
+        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'SALES_INVOICE'), 0)::float8 AS sales_quantity,
+        COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'SALES_INVOICE'), 0)::float8 AS sales_amount,
         AVG(rate) FILTER (WHERE family = 'SALES_INVOICE' AND rate IS NOT NULL AND rate > 0)::float8 AS average_sale_rate,
-        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'SALES_RETURN'), 0)::float8 AS sales_return_quantity,
-        -- Purchase-side metrics: purchase invoices add, DN returns subtract.
-        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'PURCHASE_INVOICE'), 0)::float8
-          - COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'PURCHASE_RETURN'), 0)::float8
-          AS purchase_quantity,
-        COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'PURCHASE_INVOICE'), 0)::float8
-          - COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'PURCHASE_RETURN'), 0)::float8
-          AS purchase_amount,
+        0::float8 AS sales_return_quantity,
+        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'PURCHASE_INVOICE'), 0)::float8 AS purchase_quantity,
+        COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'PURCHASE_INVOICE'), 0)::float8 AS purchase_amount,
         AVG(rate) FILTER (WHERE family = 'PURCHASE_INVOICE' AND rate IS NOT NULL AND rate > 0)::float8 AS average_purchase_rate,
-        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'PURCHASE_RETURN'), 0)::float8 AS purchase_return_quantity,
+        0::float8 AS purchase_return_quantity,
         AVG(cost_rate)::float8 AS cost_rate
       FROM item_lines
     `);
@@ -917,9 +923,14 @@ export class SalesPurchaseAnalysisService {
     filters: SalesPurchaseAnalysisFilterDto,
   ): Prisma.Sql {
     const types = this.documentTypes(kind);
+    const pureFamily = this.pureInvoiceFamily(kind);
+    // Two-gate pure-invoice filter: type narrows to S/P, family narrows
+    // further to SALES_INVOICE / PURCHASE_INVOICE so type=S challan
+    // vouchers (family=SALES_CHALLAN) are excluded.
     const conds: Prisma.Sql[] = [
       Prisma.sql`b.tenant_id = ${tenantId}::uuid`,
       Prisma.sql`b.type = ANY(${types}::text[])`,
+      Prisma.sql`b.family = ${pureFamily}`,
     ];
 
     if (filters.startDate) conds.push(Prisma.sql`b.date >= ${filters.startDate}::date`);
@@ -952,9 +963,14 @@ export class SalesPurchaseAnalysisService {
       if (filters.paymentMode === 'CREDIT') conds.push(Prisma.sql`COALESCE(b.cash, 0) = 0`);
       if (filters.paymentMode === 'MIXED') conds.push(Prisma.sql`COALESCE(b.cash, 0) > 0 AND COALESCE(b.others, 0) > 0`);
     }
-    if (filters.status) {
-      if (filters.status === 'RETURN') conds.push(Prisma.sql`b.type IN ('R', 'T', 'B')`);
-      if (filters.status === 'POSTED') conds.push(Prisma.sql`b.type NOT IN ('R', 'T', 'B')`);
+    // The legacy 'status' filter (POSTED vs RETURN) is a no-op under
+    // pure-invoice-only mode: every row in the result set has type IN
+    // ('S', 'P'), so status is always 'POSTED'. We preserve the filter
+    // accept-and-ignore semantics for API backward compatibility — a
+    // client passing status='RETURN' will get an empty result rather
+    // than an error.
+    if (filters.status === 'RETURN') {
+      conds.push(Prisma.sql`FALSE`);
     }
     if (filters.minAmount !== undefined) conds.push(Prisma.sql`COALESCE(b.final_amt, 0) >= ${filters.minAmount}`);
     if (filters.maxAmount !== undefined) conds.push(Prisma.sql`COALESCE(b.final_amt, 0) <= ${filters.maxAmount}`);
@@ -1079,15 +1095,21 @@ export class SalesPurchaseAnalysisService {
     const mp = Prisma.raw(partyAlias);
     const mprod = Prisma.raw(productAlias);
     const types = this.documentTypes(kind);
+    const pureFamily = this.pureInvoiceFamily(kind);
     // Cancelled vouchers are NEVER part of commercial sales / purchase
     // aggregates regardless of which downstream query consumes this where
     // clause. Filtering here keeps the contract in one place — every callsite
     // that uses buildHeaderWhere automatically inherits cancellation
     // suppression without having to remember to add it.
+    //
+    // Family filter mirrors buildRollupWhere: pure SALES_INVOICE /
+    // PURCHASE_INVOICE only. Returns, challans, adjustments do not
+    // appear in any sales/purchase analysis output by construction.
     const conds: Prisma.Sql[] = [
       Prisma.sql`${mv}.tenant_id = ${tenantId}::uuid`,
       Prisma.sql`${mv}.is_cancelled = FALSE`,
       Prisma.sql`${mv}.type = ANY(${types}::text[])`,
+      Prisma.sql`${mv}.family = ${pureFamily}`,
     ];
 
     if (filters.startDate) conds.push(Prisma.sql`${mv}.date >= ${filters.startDate}::date`);
@@ -1130,9 +1152,11 @@ export class SalesPurchaseAnalysisService {
       if (filters.paymentMode === 'CREDIT') conds.push(Prisma.sql`COALESCE(${mv}.cash, 0) = 0`);
       if (filters.paymentMode === 'MIXED') conds.push(Prisma.sql`COALESCE(${mv}.cash, 0) > 0 AND COALESCE(${mv}.others, 0) > 0`);
     }
-    if (filters.status) {
-      if (filters.status === 'RETURN') conds.push(Prisma.sql`${mv}.type IN ('R', 'T', 'B')`);
-      if (filters.status === 'POSTED') conds.push(Prisma.sql`${mv}.type NOT IN ('R', 'T', 'B')`);
+    // Legacy 'status' filter accepted-and-ignored under pure-invoice-only
+    // mode: every loaded row has type S/P (POSTED). A client passing
+    // status='RETURN' would expect zero results, which `FALSE` produces.
+    if (filters.status === 'RETURN') {
+      conds.push(Prisma.sql`FALSE`);
     }
     if (filters.minAmount !== undefined) conds.push(Prisma.sql`COALESCE(${mv}.final_amt, 0) >= ${filters.minAmount}`);
     if (filters.maxAmount !== undefined) conds.push(Prisma.sql`COALESCE(${mv}.final_amt, 0) <= ${filters.maxAmount}`);
@@ -1143,8 +1167,24 @@ export class SalesPurchaseAnalysisService {
   }
 
   private documentTypes(kind: AnalysisKind): string[] {
-    if (kind === 'sales') return [...SALES_TYPES, ...SALES_RETURN_TYPES];
-    if (kind === 'purchase') return [...PURCHASE_TYPES, ...PURCHASE_RETURN_TYPES];
+    // Pure-invoice-only mode: returns / challans / adjustments are NOT
+    // loaded by sales/purchase analysis. The family filter applied in
+    // buildRollupWhere / buildHeaderWhere is the second gate (catches
+    // type=S vouchers whose add_field marks them as challan, etc.).
+    if (kind === 'sales') return [...SALES_TYPES];
+    if (kind === 'purchase') return [...PURCHASE_TYPES];
+    throw new BadRequestException('Invalid analysis kind');
+  }
+
+  /**
+   * The single canonical "family" value a row must carry to appear in
+   * sales/purchase analysis. Used as the second gate after documentTypes()
+   * — together they guarantee only pure SALES_INVOICE / PURCHASE_INVOICE
+   * rows ever reach the report SQL.
+   */
+  private pureInvoiceFamily(kind: AnalysisKind): string {
+    if (kind === 'sales') return PURE_SALES_FAMILY;
+    if (kind === 'purchase') return PURE_PURCHASE_FAMILY;
     throw new BadRequestException('Invalid analysis kind');
   }
 
@@ -1161,6 +1201,20 @@ export class SalesPurchaseAnalysisService {
         return ['P'];
       case 'B':
         return ['B'];
+      // Q (BRK/EXP Return) — Q-lines dominate (92,768 rows in production
+      // audit), with rare P-line cross-pairs (25 rows) kept for safety.
+      case 'Q':
+        return ['Q', 'P'];
+      // W (BRK/EXP Receive) — W-lines dominate (61,370 rows), with rare
+      // R-line cross-pairs (1 row) kept for safety. L-line pairs (726 rows
+      // under L header) are handled separately by header L.
+      case 'W':
+        return ['W', 'R'];
+      // U (price-diff DN) — U-line type rare; production audit shows X-lines.
+      // Included for header-drilldown completeness even though U is excluded
+      // from commercial document loads.
+      case 'U':
+        return ['X', 'U'];
       default:
         return [...SALES_LINE_TYPES, ...PURCHASE_LINE_TYPES];
     }
@@ -1169,12 +1223,25 @@ export class SalesPurchaseAnalysisService {
   private compatibleLineTypeSql(voucherAlias: string, transactionAlias: string): Prisma.Sql {
     const mv = Prisma.raw(voucherAlias);
     const mt = Prisma.raw(transactionAlias);
+    // Header→line type compatibility. UPPER on mv.type so lowercase header
+    // rows (Marg auto-generated 'v' / 'u' variants) match their uppercase
+    // counterpart classifier — keeps this join expression aligned with the
+    // GENERATED `family` column which already UPPER-normalises type.
+    //
+    // Pairings sourced from the V2 audit on production data (`SELECT
+    // mv.type, mt.type, COUNT(*) FROM marg_vouchers mv JOIN
+    // marg_transactions mt ...`). Each branch is the dominant pair plus
+    // the rare cross-pair (≤25 rows) kept defensively so edge-case
+    // vouchers don't get their lines dropped.
     return Prisma.sql`(
-      (${mv}.type = 'S' AND ${mt}.type IN ('G', 'S', 'O'))
-      OR (${mv}.type = 'R' AND ${mt}.type = 'R')
-      OR (${mv}.type = 'T' AND ${mt}.type IN ('X', 'T'))
-      OR (${mv}.type = 'P' AND ${mt}.type = 'P')
-      OR (${mv}.type = 'B' AND ${mt}.type = 'B')
+      (UPPER(${mv}.type) = 'S' AND ${mt}.type IN ('G', 'S', 'O'))
+      OR (UPPER(${mv}.type) = 'R' AND ${mt}.type IN ('R', 'W'))
+      OR (UPPER(${mv}.type) = 'T' AND ${mt}.type IN ('X', 'T'))
+      OR (UPPER(${mv}.type) = 'P' AND ${mt}.type IN ('P', 'Q'))
+      OR (UPPER(${mv}.type) = 'B' AND ${mt}.type = 'B')
+      OR (UPPER(${mv}.type) = 'Q' AND ${mt}.type IN ('Q', 'B'))
+      OR (UPPER(${mv}.type) = 'W' AND ${mt}.type IN ('W', 'R'))
+      OR (UPPER(${mv}.type) = 'U' AND ${mt}.type IN ('X', 'U'))
     )`;
   }
 

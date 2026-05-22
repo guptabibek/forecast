@@ -26,7 +26,24 @@
       "Bash(grep -n \"^}\\);$\\\\|^  }\\);$\" \"d:/RabbitTech/forecast-saas/apps/api/src/modules/marg-ede/marg-ede.service.spec.ts\")",
       "Bash(awk -F',' 'NR>1 {prefix=$1; gsub\\(/[0-9].*/, \"\", prefix\\); print prefix}' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")",
       "Bash(awk -F',' 'NR>1 {prefix=$1; gsub\\(/[0-9].*/, \"\", prefix\\); count[prefix]++} END {for \\(p in count\\) print p, count[p]}' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")",
-      "Bash(awk -F',' 'NR==1 || /^W/' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")"
+      "Bash(awk -F',' 'NR==1 || /^W/' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")",
+      "Bash(awk -F',' 'NR>1 {sub\\(/-.*/, \"\", $1\\); print $1}' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")",
+      "Bash(awk -F',' 'NR>1 {match\\($1, /^[A-Za-z]+/\\); if \\(RSTART>0\\) print substr\\($1, RSTART, RLENGTH\\)}' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")",
+      "Bash(awk -F',' 'NR==1 {print $0; next} $1 ~ /^W/ {print}' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")",
+      "Bash(awk -F, 'NR>1 { *)",
+      "Bash(awk -F, 'NR>1 && $NF~/POSTED/ && $1!~/^AE-/ {print $1, $2, $3, \"net=\"$14}' d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv)",
+      "Bash(awk -F, 'NR>1 && $NF~/RETURN/ && $1!~/^CN[0-9]/ {print $1, $2, $3, \"net=\"$14}' d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv)",
+      "Bash(awk -F',' 'NR>1 && $1 == \"\" {print NR\": \"$0}' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")",
+      "Bash(awk -F',' 'NR>1 {match\\($1, /^[A-Za-z]+/\\); if \\(RSTART==0\\) print $1, $14}' \"d:/RabbitTech/forecast-saas/sales-analysis-bills_2026-05-21.csv\")",
+      "Bash(git -C \"d:/RabbitTech/forecast-saas\" diff --stat HEAD -- apps/api)",
+      "Bash(git -C \"d:/RabbitTech/forecast-saas\" status --short)",
+      "Bash(sed -i 's#/b\\\\\\\\.family\\\\\\\\s\\\\*=\\\\\\\\s\\\\*\\\\\\\\\\\\$/#/b\\\\\\\\.family\\\\\\\\s*=\\\\\\\\s*\\\\\\\\?/#g; s#/mv\\\\\\\\.family\\\\\\\\s\\\\*=\\\\\\\\s\\\\*\\\\\\\\\\\\$/#/mv\\\\\\\\.family\\\\\\\\s*=\\\\\\\\s*\\\\\\\\?/#g' src/modules/pharma-reports/services/sales-purchase-analysis.service.spec.ts)",
+      "Bash(grep -n \"family\\\\\\\\\\\\\\\\s\" src/modules/pharma-reports/services/sales-purchase-analysis.service.spec.ts)",
+      "Bash(echo \"tsc_exit=$?\")",
+      "Bash(npx eslint *)",
+      "Bash(echo \"eslint_exit=$?\")",
+      "Bash(ls -la .eslintrc* eslint.config*)",
+      "Bash(ls -la \"d:/RabbitTech/forecast-saas/\".eslintrc* \"d:/RabbitTech/forecast-saas/\"eslint.config*)"
     ]
   }
 }

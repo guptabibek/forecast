@@ -215,13 +215,33 @@ type MargType2DocumentFamily =
   | 'SALES_CHALLAN'
   | 'SALES_ORDER'
   | 'PURCHASE_INVOICE'
+  | 'PURCHASE_CHALLAN'
   | 'PURCHASE_ORDER'
   | 'SALES_RETURN'
+  | 'SALES_CHALLAN_RETURN'
   | 'SALES_RETURN_ADJUSTMENT'
+  | 'SALES_BRK_EXP_RECEIVE'
+  | 'SALES_BRK_EXP_RECEIVE_CHALLAN'
   | 'PURCHASE_RETURN'
+  | 'PURCHASE_CHALLAN_RETURN'
+  | 'PURCHASE_BRK_EXP_RETURN'
+  | 'PURCHASE_BRK_EXP_RETURN_CHALLAN'
+  | 'PURCHASE_PRICE_DIFF_ADJUSTMENT'
   | 'STOCK_RECEIVE'
   | 'STOCK_ISSUE'
   | 'REPLACEMENT_ISSUE'
+  // Header type recognised, add_field missing / unexpected first char.
+  // Diagnostic buckets so operators can filter on the specific shape.
+  | 'UNKNOWN_S_NO_AF'
+  | 'UNKNOWN_R_NO_AF'
+  | 'UNKNOWN_P_NO_AF'
+  | 'UNKNOWN_B_NO_AF'
+  | 'UNKNOWN_Q_NO_AF'
+  | 'UNKNOWN_W_NO_AF'
+  // Type U is documented as always supplier-side. A customer-cid U row
+  // is a data shape we haven't seen; surface as diagnostic rather than
+  // silently classify.
+  | 'UNKNOWN_U_UNEXPECTED_CID'
   | 'UNKNOWN';
 
 interface MargVoucherContext {
@@ -230,6 +250,11 @@ interface MargVoucherContext {
   type: string | null;
   vcn: string | null;
   addField: string | null;
+  // MDis.CID — required by the type-U direction guard in the classifier.
+  // Populated from the same SELECT that loads the voucher; null when the
+  // header row exists but has a blank CID (uncommon but possible for
+  // accounting-only adjustments).
+  cid: string | null;
 }
 
 interface MargType2ProjectionInput {
@@ -239,6 +264,13 @@ interface MargType2ProjectionInput {
   voucherType?: string | null | undefined;
   voucherVcn?: string | null | undefined;
   voucherAddField?: string | null | undefined;
+  // MDis.CID. Used by the type-U direction guard (per Marg, U vouchers
+  // should always carry a supplier CID; a customer CID triggers the
+  // UNKNOWN_U_UNEXPECTED_CID diagnostic family). Other classifications
+  // are direction-fixed by header type and don't consult cid. Optional
+  // for backward compatibility — callers that don't pass it can never
+  // produce a type-U row anyway because the SQL load filter excludes U.
+  voucherCid?: string | null | undefined;
   effectiveQty: number;
   amount: Prisma.Decimal | number | null | undefined;
   // Hint from the caller: when true, `voucherType` is null because we found
@@ -2099,6 +2131,99 @@ export class MargEdeService {
    * state, the aggregated totals our InventoryLevel projection would produce,
    * and the live InventoryLevel.onHandQty for cross-check.
    */
+  /**
+   * Operator diagnostic: voucher-family classification health for a tenant.
+   *
+   * Groups every staged marg_voucher by its GENERATED `family` column and
+   * returns counts + amount sums + date ranges. The response separates
+   * "healthy" commercial/inventory families from the diagnostic buckets
+   * the classifier emits when it can't confidently place a row:
+   *
+   *   - UNKNOWN_S_NO_AF / R / P / B / Q / W : header type recognised but
+   *     add_field is missing or has an unexpected first character. These
+   *     contribute 0 to every report — silently, unless surfaced here.
+   *   - UNKNOWN_U_UNEXPECTED_CID            : a type-U (price-diff DN) row
+   *     carried a customer cid, which contradicts Marg's documented
+   *     supplier-only shape for U.
+   *   - UNKNOWN                             : a header type the classifier
+   *     has no mapping for (a Marg add-on / module document type we
+   *     haven't seen). Worth investigating + extending the classifier.
+   *
+   * `needsAttention` is true when ANY diagnostic-bucket family has a
+   * non-zero count, so a caller (admin UI / scheduled alert) can show a
+   * single boolean badge without re-deriving the rule.
+   */
+  async getMargFamilyClassificationDiagnostic(tenantId: string): Promise<{
+    needsAttention: boolean;
+    totalVouchers: number;
+    families: Array<{
+      family: string;
+      isDiagnostic: boolean;
+      vouchers: number;
+      sumFinalAmt: number;
+      minDate: Date | null;
+      maxDate: Date | null;
+      sampleVcns: string[];
+    }>;
+  }> {
+    // Families that mean "the classifier could not confidently place this
+    // row". Mirrors the UNKNOWN_* arm of the classifier in
+    // resolveMargType2ProjectionDecision and the GENERATED column.
+    const DIAGNOSTIC_FAMILIES = new Set<string>([
+      'UNKNOWN',
+      'UNKNOWN_S_NO_AF',
+      'UNKNOWN_R_NO_AF',
+      'UNKNOWN_P_NO_AF',
+      'UNKNOWN_B_NO_AF',
+      'UNKNOWN_Q_NO_AF',
+      'UNKNOWN_W_NO_AF',
+      'UNKNOWN_U_UNEXPECTED_CID',
+    ]);
+
+    const rows = await this.prisma.$queryRaw<Array<{
+      family: string | null;
+      vouchers: bigint;
+      sum_final_amt: number | null;
+      min_date: Date | null;
+      max_date: Date | null;
+      sample_vcns: string[] | null;
+    }>>(Prisma.sql`
+      SELECT
+        mv.family AS family,
+        COUNT(*)::bigint AS vouchers,
+        COALESCE(SUM(mv.final_amt), 0)::float8 AS sum_final_amt,
+        MIN(mv.date) AS min_date,
+        MAX(mv.date) AS max_date,
+        (ARRAY_AGG(mv.vcn ORDER BY mv.date DESC) FILTER (WHERE mv.vcn IS NOT NULL))[1:5] AS sample_vcns
+      FROM marg_vouchers mv
+      WHERE mv.tenant_id = ${tenantId}::uuid
+        AND mv.is_cancelled = FALSE
+      GROUP BY mv.family
+      ORDER BY COUNT(*) DESC
+    `);
+
+    let totalVouchers = 0;
+    let needsAttention = false;
+    const families = rows.map((r) => {
+      const family = r.family ?? 'UNKNOWN';
+      const vouchers = Number(r.vouchers ?? 0);
+      totalVouchers += vouchers;
+      const isDiagnostic = DIAGNOSTIC_FAMILIES.has(family);
+      if (isDiagnostic && vouchers > 0) needsAttention = true;
+      return {
+        family,
+        isDiagnostic,
+        vouchers,
+        sumFinalAmt: Number(r.sum_final_amt ?? 0),
+        minDate: r.min_date,
+        maxDate: r.max_date,
+        sampleVcns: (r.sample_vcns ?? []).map((v) => String(v).trim()).filter(Boolean),
+      };
+    });
+
+    return { needsAttention, totalVouchers, families };
+  }
+
   async getStockProjectionDiagnostic(
     tenantId: string,
     options: { productCode?: string; productName?: string; pid?: string; limit?: number } = {},
@@ -6706,6 +6831,7 @@ export class MargEdeService {
         type: true,
         vcn: true,
         addField: true,
+        cid: true,
       },
     });
 
@@ -6718,6 +6844,7 @@ export class MargEdeService {
         type: voucher.type,
         vcn: voucher.vcn,
         addField: voucher.addField,
+        cid: voucher.cid,
       });
       contextMap.set(key, existing);
     }
@@ -6748,7 +6875,17 @@ export class MargEdeService {
       preferredTypes.push('V');
     } else if (lineType === 'D') {
       preferredTypes.push('D');
-    } else if (['L', 'W', 'Q'].includes(lineType)) {
+    } else if (lineType === 'W') {
+      // Per the V2 header-line pair audit on production data, W lines
+      // overwhelmingly pair with W headers (BRK/EXP receive — 61k rows);
+      // L (stock issue, 726 rows) is the historical fallback for older
+      // ingests; R is a 1-row edge case kept for safety.
+      preferredTypes.push('W', 'L', 'R');
+    } else if (lineType === 'Q') {
+      // Q lines pair with Q headers (BRK/EXP return — 93k rows) almost
+      // exclusively; P (25 rows) is a rare cross-pair we accept.
+      preferredTypes.push('Q', 'P');
+    } else if (lineType === 'L') {
       preferredTypes.push('L');
     } else if (lineType === 'X') {
       if (this.matchesMargVcnPrefix(prefix, ['SC'])) {
@@ -6758,7 +6895,13 @@ export class MargEdeService {
       } else if (this.matchesMargVcnPrefix(prefix, ['PO-'])) {
         preferredTypes.push('X');
       }
-      preferredTypes.push('T', 'D', 'X');
+      // Per V2 audit: X-lines pair with T (SC, existing), D (stock recv,
+      // existing), X (PO, existing), V (sales order — 215 rows, header
+      // 'v' uppercased), and U (price-diff DN — 23 rows, header 'u'
+      // uppercased). The fallback order keeps existing-tenant behaviour
+      // unchanged and only matters when a (company, voucher) has multiple
+      // header rows of these types (rare).
+      preferredTypes.push('T', 'D', 'X', 'V', 'U');
     }
 
     for (const preferredType of preferredTypes) {
@@ -6838,7 +6981,7 @@ export class MargEdeService {
     const isCancelled = headerCancellation.isCancelled || lineCancellation.isCancelled;
     const cancelledOn = headerCancellation.cancelledOn ?? lineCancellation.cancelledOn ?? null;
 
-    // ===== Strict Type 2 classifier =====
+    // ===== Universal Type 2 classifier =====
     //
     // MDis (voucher header) is the SINGLE source of truth for document family.
     // Dis.Type is a *line* attribute (line role within a multi-line voucher)
@@ -6847,26 +6990,51 @@ export class MargEdeService {
     // simply because the corresponding header row hadn't been synced yet,
     // which silently inflates reports and corrupts inventory state.
     //
-    // If MDis is missing (`headerType == null`) or its (type, VCN prefix,
-    // AddField lead) shape doesn't match any known family, we return UNKNOWN
-    // with `skipReason` populated and every shouldProject* flag false. The
-    // caller's "skipped row with prior actualId" sweep reverses any previous
-    // projection idempotently. The diagnostics counter feeds a structured log
-    // line so an operator can spot a misconfigured MDis sync.
+    // CLASSIFIER CONTRACT
+    // -------------------
+    // Inputs are limited to columns Marg emits identically across every
+    // tenant install:
+    //   - headerType        : UPPER'd MDis.Type (S/R/P/B/T/V/X/D/L/Q/W/U/...)
+    //   - addFieldLeadChar  : first char of MDis.AddField — 'I' for invoice
+    //                         / commercial actual, 'C' for challan / inventory-only
+    //   - cidLeadChar       : first char of MDis.CID — 'C' for customer-side,
+    //                         'S' for supplier-side. Used ONLY to guard
+    //                         direction-sensitive accounting adjustments (type U).
+    //
+    // VCN is NOT consulted. VCN prefixes are tenant-specific (one tenant's
+    // 'STR' is another tenant's 'AE-' / 'INV' / 'BILL' / custom series) and
+    // two prior incidents in migration history (20260520130000, 20260521080000)
+    // were caused by VCN-based heuristics silently misclassifying tenants
+    // whose VCN series didn't match the test-fixture series.
+    //
+    // The classifier mirrors the SQL GENERATED `family` column exactly —
+    // see the latest classifier migration. Both must stay aligned.
     //
     // Confidence ladder:
-    //   HIGH    : MDis header type + canonical VCN prefix + AddField lead all align
-    //             (e.g. S/STR/I, S/CHAL/C, P/P/I, R/CN/I, V/OS/C, X/PO-/C, D/AD/C, L/L/C)
-    //   MEDIUM  : MDis header type matches a known family but VCN/AddField is
-    //             non-canonical (e.g. B/DN/I where business validation is needed)
-    //   LOW     : SC price-adjustments (T/SC/I) — accounting-only documents
-    //             that QA confirmed must NOT post a commercial actual/inventory
-    //             row. Returned with the family preserved for audit but with
-    //             shouldProject* = false unless `enableLowConfidenceProjection`
-    //             is explicitly opted in by the caller (off by default).
+    //   HIGH    : headerType + addFieldLeadChar both present and unambiguous
+    //             (e.g. S/I, S/C, P/I, R/C, W/I, Q/C)
+    //   MEDIUM  : header type matches a known family but ancillary signal
+    //             (line-type O under S → REPLACEMENT_ISSUE) overrides it
+    //   LOW     : accounting-only documents (T = SALES_RETURN_ADJUSTMENT,
+    //             U = PURCHASE_PRICE_DIFF_ADJUSTMENT) where commercial /
+    //             inventory projection is intentionally suppressed via
+    //             skipReason = LOW_CONFIDENCE_DOCUMENT_FAMILY
     let family: MargType2DocumentFamily = 'UNKNOWN';
     let confidence: MargType2DocumentConfidence = 'LOW';
     let skipReason: MargType2DocumentSkipReason | null = null;
+
+    // First character of add_field (after trim). Matches SQL classifier's
+    // LEFT(TRIM(COALESCE(add_field, '')), 1). 'I' = invoice / commercial,
+    // 'C' = challan / inventory-only, null/anything else = missing or
+    // unrecognised (routed to UNKNOWN_<type>_NO_AF diagnostic).
+    const addFieldLeadChar = addFieldTag ? addFieldTag.charAt(0) : null;
+    const isInvoiceAf = addFieldLeadChar === 'I';
+    const isChallanAf = addFieldLeadChar === 'C';
+    // First character of cid (after trim). Marg's standard convention:
+    // 'C' = customer party, 'S' = supplier party. Used by the type-U
+    // direction guard; other classifications don't need it because their
+    // direction is fixed by header type.
+    const cidLeadChar = String(input.voucherCid ?? '').trim().charAt(0).toUpperCase() || null;
 
     if (!headerType) {
       // No MDis header found for this Dis row. We refuse to guess — the
@@ -6880,62 +7048,131 @@ export class MargEdeService {
         ? 'AMBIGUOUS_MDIS_HEADER'
         : 'MISSING_MDIS_HEADER';
     } else if (headerType === 'S') {
-      if (addFieldTag === 'C' || this.matchesMargVcnPrefix(vcnPrefix, ['CHAL'])) {
+      if (isInvoiceAf) {
+        family = 'SALES_INVOICE';
+        confidence = 'HIGH';
+      } else if (isChallanAf) {
         family = 'SALES_CHALLAN';
         confidence = 'HIGH';
-      } else if (this.matchesMargVcnPrefix(vcnPrefix, ['STR'])) {
-        family = 'SALES_INVOICE';
-        confidence = 'HIGH';
       } else {
-        // S header but neither CHAL nor STR — Marg outside its documented
-        // shape. Could be a custom series; medium confidence as invoice but
-        // worth a diagnostic so an operator can verify.
-        family = 'SALES_INVOICE';
-        confidence = 'MEDIUM';
+        family = 'UNKNOWN_S_NO_AF';
+        confidence = 'LOW';
+        skipReason = 'UNKNOWN_DOCUMENT_FAMILY';
       }
       // Dis.Type='O' under an S header is a replacement-issue line within an
       // invoice — the document is still SALES_INVOICE / SALES_CHALLAN; the
       // line-level treatment (no sales actual, only inventory issue) is
-      // documented and handled downstream by REPLACEMENT_ISSUE.
+      // documented and handled downstream by REPLACEMENT_ISSUE. The override
+      // clears any UNKNOWN_S_NO_AF skipReason: a replacement-issue line is
+      // a valid commercial inventory event regardless of header add_field.
       if (lineType === 'O') {
         family = 'REPLACEMENT_ISSUE';
         confidence = 'HIGH';
+        skipReason = null;
       }
-    } else if (headerType === 'P') {
-      family = 'PURCHASE_INVOICE';
-      // Marg purchase invoices use the supplier's invoice number (no canonical
-      // prefix), so we don't gate confidence on VCN shape here.
-      confidence = 'HIGH';
     } else if (headerType === 'R') {
-      family = 'SALES_RETURN';
-      confidence = this.matchesMargVcnPrefix(vcnPrefix, ['CN']) ? 'HIGH' : 'MEDIUM';
-    } else if (headerType === 'B') {
-      // B / DN documents are supplier debit notes that could be either a
-      // pure accounting credit OR a goods purchase-return. Without business
-      // validation per-tenant we cap confidence at MEDIUM and let the caller
-      // decide whether to project. Default behaviour matches the historical
-      // path (project as PURCHASE_RETURN) but it's now marked for audit.
-      family = 'PURCHASE_RETURN';
-      confidence = this.matchesMargVcnPrefix(vcnPrefix, ['DN']) ? 'MEDIUM' : 'LOW';
-    } else if (headerType === 'V') {
-      family = 'SALES_ORDER';
-      confidence = this.matchesMargVcnPrefix(vcnPrefix, ['OS']) ? 'HIGH' : 'MEDIUM';
-    } else if (headerType === 'X') {
-      family = 'PURCHASE_ORDER';
-      confidence = this.matchesMargVcnPrefix(vcnPrefix, ['PO-']) ? 'HIGH' : 'MEDIUM';
+      if (isInvoiceAf) {
+        family = 'SALES_RETURN';
+        confidence = 'HIGH';
+      } else if (isChallanAf) {
+        family = 'SALES_CHALLAN_RETURN';
+        confidence = 'HIGH';
+      } else {
+        family = 'UNKNOWN_R_NO_AF';
+        confidence = 'LOW';
+        skipReason = 'UNKNOWN_DOCUMENT_FAMILY';
+      }
     } else if (headerType === 'T') {
-      // SC (T/SC/I) price-difference credit notes: accounting-only per QA.
-      // Returned with the family preserved (so audit attributes can record
-      // it) but `skipReason = LOW_CONFIDENCE_DOCUMENT_FAMILY` so the no-op
-      // branch below zeroes every shouldProject* flag. The Book E credit
-      // posting (separate accounting projection) is unaffected and remains
-      // the document's only commercial effect.
+      // SC (T) price-difference credit notes: accounting-only per QA.
+      // No add_field branching — T is always an accounting adjustment.
+      // The classified family is preserved for audit; skipReason zeroes
+      // every shouldProject* flag below. The Book E credit posting
+      // (separate accounting projection) is unaffected and remains the
+      // document's only commercial effect.
       family = 'SALES_RETURN_ADJUSTMENT';
       confidence = 'LOW';
       skipReason = 'LOW_CONFIDENCE_DOCUMENT_FAMILY';
+    } else if (headerType === 'W') {
+      // BRK/EXP Receive — Credit Note flow per Marg's official mapping.
+      // Customer returns broken/expired stock to us. Invoice variant
+      // reduces A/R + receives inventory; challan variant receives
+      // inventory only.
+      if (isInvoiceAf) {
+        family = 'SALES_BRK_EXP_RECEIVE';
+        confidence = 'HIGH';
+      } else if (isChallanAf) {
+        family = 'SALES_BRK_EXP_RECEIVE_CHALLAN';
+        confidence = 'HIGH';
+      } else {
+        family = 'UNKNOWN_W_NO_AF';
+        confidence = 'LOW';
+        skipReason = 'UNKNOWN_DOCUMENT_FAMILY';
+      }
+    } else if (headerType === 'P') {
+      if (isInvoiceAf) {
+        family = 'PURCHASE_INVOICE';
+        confidence = 'HIGH';
+      } else if (isChallanAf) {
+        family = 'PURCHASE_CHALLAN';
+        confidence = 'HIGH';
+      } else {
+        // Marg purchase invoices typically carry add_field='I' — a missing
+        // tag is unusual enough to flag as diagnostic.
+        family = 'UNKNOWN_P_NO_AF';
+        confidence = 'LOW';
+        skipReason = 'UNKNOWN_DOCUMENT_FAMILY';
+      }
+    } else if (headerType === 'B') {
+      if (isInvoiceAf) {
+        family = 'PURCHASE_RETURN';
+        confidence = 'HIGH';
+      } else if (isChallanAf) {
+        family = 'PURCHASE_CHALLAN_RETURN';
+        confidence = 'HIGH';
+      } else {
+        family = 'UNKNOWN_B_NO_AF';
+        confidence = 'LOW';
+        skipReason = 'UNKNOWN_DOCUMENT_FAMILY';
+      }
+    } else if (headerType === 'Q') {
+      // BRK/EXP Return — Debit Note flow per Marg's official mapping.
+      // We return broken/expired stock to supplier. Invoice variant
+      // reduces A/P + issues inventory; challan variant issues inventory only.
+      if (isInvoiceAf) {
+        family = 'PURCHASE_BRK_EXP_RETURN';
+        confidence = 'HIGH';
+      } else if (isChallanAf) {
+        family = 'PURCHASE_BRK_EXP_RETURN_CHALLAN';
+        confidence = 'HIGH';
+      } else {
+        family = 'UNKNOWN_Q_NO_AF';
+        confidence = 'LOW';
+        skipReason = 'UNKNOWN_DOCUMENT_FAMILY';
+      }
+    } else if (headerType === 'U') {
+      // Price-Difference Debit Note — accounting-only per Marg's official
+      // mapping, mirror of SALES_RETURN_ADJUSTMENT (T) on the purchase side.
+      // Should always be supplier-side; a customer-cid U row is a shape
+      // we haven't seen and is surfaced as a diagnostic family rather than
+      // silently treated as a sales adjustment.
+      if (cidLeadChar === 'C') {
+        family = 'UNKNOWN_U_UNEXPECTED_CID';
+        confidence = 'LOW';
+        skipReason = 'UNKNOWN_DOCUMENT_FAMILY';
+      } else {
+        family = 'PURCHASE_PRICE_DIFF_ADJUSTMENT';
+        confidence = 'LOW';
+        skipReason = 'LOW_CONFIDENCE_DOCUMENT_FAMILY';
+      }
+    } else if (headerType === 'V') {
+      family = 'SALES_ORDER';
+      confidence = 'HIGH';
+    } else if (headerType === 'X') {
+      family = 'PURCHASE_ORDER';
+      confidence = 'HIGH';
     } else if (headerType === 'D') {
       family = 'STOCK_RECEIVE';
-      confidence = this.matchesMargVcnPrefix(vcnPrefix, ['AD']) ? 'HIGH' : 'MEDIUM';
+      confidence = 'HIGH';
     } else if (headerType === 'L') {
       family = 'STOCK_ISSUE';
       confidence = 'HIGH';
@@ -6976,13 +7213,21 @@ export class MargEdeService {
         || family === 'SALES_CHALLAN'
         || family === 'SALES_ORDER'
         || family === 'SALES_RETURN'
+        || family === 'SALES_CHALLAN_RETURN'
         || family === 'SALES_RETURN_ADJUSTMENT'
+        || family === 'SALES_BRK_EXP_RECEIVE'
+        || family === 'SALES_BRK_EXP_RECEIVE_CHALLAN'
         || family === 'REPLACEMENT_ISSUE'
       );
       const supplierFacing = (
         family === 'PURCHASE_INVOICE'
+        || family === 'PURCHASE_CHALLAN'
         || family === 'PURCHASE_ORDER'
         || family === 'PURCHASE_RETURN'
+        || family === 'PURCHASE_CHALLAN_RETURN'
+        || family === 'PURCHASE_BRK_EXP_RETURN'
+        || family === 'PURCHASE_BRK_EXP_RETURN_CHALLAN'
+        || family === 'PURCHASE_PRICE_DIFF_ADJUSTMENT'
       );
       return {
         ...baseDecision,
@@ -7115,8 +7360,27 @@ export class MargEdeService {
           customerFacing: true,
           supplierFacing: false,
         };
+      case 'SALES_CHALLAN_RETURN':
+        // Marg's R-with-add_field='C' family: a customer returns stock
+        // tied to an earlier challan (not an invoice). Inventory comes
+        // back to us, but there is no A/R impact because no money ever
+        // changed hands. Mirror of SALES_CHALLAN on the reverse direction.
+        return {
+          ...baseDecision,
+          shouldProjectActual: false,
+          actualType: null,
+          actualQuantity: null,
+          actualAmount: null,
+          shouldProjectInventory: absQty > 0,
+          inventoryTransactionType: absQty > 0 ? InventoryTransactionType.RETURN : null,
+          inventoryQuantity: absQty,
+          ledgerEntryType: absQty > 0 ? LedgerEntryType.LEDGER_RETURN : null,
+          ledgerQuantity: absQty > 0 ? absQty : 0,
+          customerFacing: true,
+          supplierFacing: false,
+        };
       case 'SALES_RETURN_ADJUSTMENT':
-        // SC (MDis.Type=T, VCN=SC*) is a price-difference credit note: it
+        // SC (MDis.Type=T) is a price-difference credit note: it
         // moves money on the ledger but no goods change hands. Per business
         // rules confirmed with QA the SC family must:
         //   - NOT create a commercial sales Actual (it's not a sale or a
@@ -7144,6 +7408,63 @@ export class MargEdeService {
           customerFacing: true,
           supplierFacing: false,
         };
+      case 'SALES_BRK_EXP_RECEIVE':
+        // Marg's W + add_field='I' family: customer returns broken/expired
+        // stock under a Credit Note. Commercial impact is identical to a
+        // normal SALES_RETURN — negative sales actual, A/R reduced,
+        // inventory received back. The family is kept separate from
+        // SALES_RETURN so shrinkage / wastage analytics can break out
+        // breakage/expiry returns specifically.
+        return {
+          ...baseDecision,
+          shouldProjectActual: true,
+          actualType: ActualType.SALES,
+          actualQuantity: absQty > 0 ? -absQty : null,
+          actualAmount: absAmount != null ? -absAmount : null,
+          shouldProjectInventory: absQty > 0,
+          inventoryTransactionType: absQty > 0 ? InventoryTransactionType.RETURN : null,
+          inventoryQuantity: absQty,
+          ledgerEntryType: absQty > 0 ? LedgerEntryType.LEDGER_RETURN : null,
+          ledgerQuantity: absQty > 0 ? absQty : 0,
+          customerFacing: true,
+          supplierFacing: false,
+        };
+      case 'SALES_BRK_EXP_RECEIVE_CHALLAN':
+        // Marg's W + add_field='C' family: BRK/EXP receive on a challan
+        // (no Credit Note). Inventory comes back, no A/R impact.
+        return {
+          ...baseDecision,
+          shouldProjectActual: false,
+          actualType: null,
+          actualQuantity: null,
+          actualAmount: null,
+          shouldProjectInventory: absQty > 0,
+          inventoryTransactionType: absQty > 0 ? InventoryTransactionType.RETURN : null,
+          inventoryQuantity: absQty,
+          ledgerEntryType: absQty > 0 ? LedgerEntryType.LEDGER_RETURN : null,
+          ledgerQuantity: absQty > 0 ? absQty : 0,
+          customerFacing: true,
+          supplierFacing: false,
+        };
+      case 'PURCHASE_CHALLAN':
+        // Marg's P + add_field='C' family: supplier delivered stock under
+        // a challan (no Purchase Invoice yet). Inventory received, but
+        // no A/P impact until the invoice arrives. Mirror of SALES_CHALLAN
+        // on the supplier side.
+        return {
+          ...baseDecision,
+          shouldProjectActual: false,
+          actualType: null,
+          actualQuantity: null,
+          actualAmount: null,
+          shouldProjectInventory: absQty > 0,
+          inventoryTransactionType: absQty > 0 ? InventoryTransactionType.RECEIPT : null,
+          inventoryQuantity: absQty,
+          ledgerEntryType: absQty > 0 ? LedgerEntryType.LEDGER_RECEIPT : null,
+          ledgerQuantity: absQty > 0 ? absQty : 0,
+          customerFacing: false,
+          supplierFacing: true,
+        };
       case 'PURCHASE_RETURN':
         return {
           ...baseDecision,
@@ -7156,6 +7477,84 @@ export class MargEdeService {
           inventoryQuantity: absQty,
           ledgerEntryType: absQty > 0 ? LedgerEntryType.LEDGER_RETURN : null,
           ledgerQuantity: absQty > 0 ? -absQty : 0,
+          customerFacing: false,
+          supplierFacing: true,
+        };
+      case 'PURCHASE_CHALLAN_RETURN':
+        // Marg's B + add_field='C' family: returning stock to supplier
+        // against a challan (no Debit Note). Inventory leaves us, no
+        // A/P impact. Mirror of SALES_CHALLAN_RETURN on the supplier side.
+        return {
+          ...baseDecision,
+          shouldProjectActual: false,
+          actualType: null,
+          actualQuantity: null,
+          actualAmount: null,
+          shouldProjectInventory: absQty > 0,
+          inventoryTransactionType: absQty > 0 ? InventoryTransactionType.ADJUSTMENT_OUT : null,
+          inventoryQuantity: absQty,
+          ledgerEntryType: absQty > 0 ? LedgerEntryType.LEDGER_RETURN : null,
+          ledgerQuantity: absQty > 0 ? -absQty : 0,
+          customerFacing: false,
+          supplierFacing: true,
+        };
+      case 'PURCHASE_BRK_EXP_RETURN':
+        // Marg's Q + add_field='I' family: we return broken/expired stock
+        // to supplier under a Debit Note. Commercial impact is identical
+        // to a normal PURCHASE_RETURN — negative purchase actual, A/P
+        // reduced, inventory issued. Kept separate so shrinkage analytics
+        // can break out breakage/expiry returns.
+        return {
+          ...baseDecision,
+          shouldProjectActual: true,
+          actualType: ActualType.PURCHASES,
+          actualQuantity: absQty > 0 ? -absQty : null,
+          actualAmount: absAmount != null ? -absAmount : null,
+          shouldProjectInventory: absQty > 0,
+          inventoryTransactionType: absQty > 0 ? InventoryTransactionType.ADJUSTMENT_OUT : null,
+          inventoryQuantity: absQty,
+          ledgerEntryType: absQty > 0 ? LedgerEntryType.LEDGER_RETURN : null,
+          ledgerQuantity: absQty > 0 ? -absQty : 0,
+          customerFacing: false,
+          supplierFacing: true,
+        };
+      case 'PURCHASE_BRK_EXP_RETURN_CHALLAN':
+        // Marg's Q + add_field='C' family: BRK/EXP return on a challan
+        // (no Debit Note). Inventory leaves us, no A/P impact.
+        return {
+          ...baseDecision,
+          shouldProjectActual: false,
+          actualType: null,
+          actualQuantity: null,
+          actualAmount: null,
+          shouldProjectInventory: absQty > 0,
+          inventoryTransactionType: absQty > 0 ? InventoryTransactionType.ADJUSTMENT_OUT : null,
+          inventoryQuantity: absQty,
+          ledgerEntryType: absQty > 0 ? LedgerEntryType.LEDGER_RETURN : null,
+          ledgerQuantity: absQty > 0 ? -absQty : 0,
+          customerFacing: false,
+          supplierFacing: true,
+        };
+      case 'PURCHASE_PRICE_DIFF_ADJUSTMENT':
+        // Marg's type U: price-difference Debit Note. Accounting-only,
+        // mirror of SALES_RETURN_ADJUSTMENT on the purchase side. The
+        // skipReason set in the classifier zeroes the projection flags
+        // before we reach the switch, but this case is here for
+        // exhaustiveness in case future callers project the family
+        // directly. Behaviour identical: no actual, no inventory, no
+        // ledger entry from the commercial path. Accounting impact (A/P
+        // adjustment) flows through the separate journal-entry pipeline.
+        return {
+          ...baseDecision,
+          shouldProjectActual: false,
+          actualType: null,
+          actualQuantity: null,
+          actualAmount: null,
+          shouldProjectInventory: false,
+          inventoryTransactionType: null,
+          inventoryQuantity: 0,
+          ledgerEntryType: null,
+          ledgerQuantity: 0,
           customerFacing: false,
           supplierFacing: true,
         };
@@ -8800,6 +9199,7 @@ export class MargEdeService {
           voucherType: voucherContext?.type ?? null,
           voucherVcn: voucherContext?.vcn ?? null,
           voucherAddField: voucherContext?.addField ?? null,
+          voucherCid: voucherContext?.cid ?? null,
           voucherContextAmbiguous,
           effectiveQty,
           amount: taxInclusiveAmount,
@@ -9925,6 +10325,7 @@ export class MargEdeService {
           voucherType: voucherContext?.type ?? null,
           voucherVcn: voucherContext?.vcn ?? null,
           voucherAddField: voucherContext?.addField ?? null,
+          voucherCid: voucherContext?.cid ?? null,
           voucherContextAmbiguous,
           effectiveQty,
           amount: mt.amount,
@@ -10201,6 +10602,7 @@ export class MargEdeService {
           voucherType: voucherContext?.type ?? null,
           voucherVcn: voucherContext?.vcn ?? null,
           voucherAddField: voucherContext?.addField ?? null,
+          voucherCid: voucherContext?.cid ?? null,
           voucherContextAmbiguous,
           effectiveQty,
           amount: mt.amount,
@@ -12337,8 +12739,8 @@ export class MargEdeService {
           mv.route,
           mv.area,
           mv.final_amt,
-          (CASE mv.family WHEN 'SALES_INVOICE' THEN 1 WHEN 'SALES_RETURN'  THEN -1 ELSE 0 END)::smallint AS sales_amount_sign,
-          (CASE mv.family WHEN 'PURCHASE_INVOICE' THEN 1 WHEN 'PURCHASE_RETURN'  THEN -1 ELSE 0 END)::smallint AS purchase_amount_sign,
+          (CASE mv.family WHEN 'SALES_INVOICE' THEN 1 WHEN 'SALES_RETURN' THEN -1 WHEN 'SALES_BRK_EXP_RECEIVE' THEN -1 ELSE 0 END)::smallint AS sales_amount_sign,
+          (CASE mv.family WHEN 'PURCHASE_INVOICE' THEN 1 WHEN 'PURCHASE_RETURN' THEN -1 WHEN 'PURCHASE_BRK_EXP_RETURN' THEN -1 ELSE 0 END)::smallint AS purchase_amount_sign,
           COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS quantity,
           COUNT(DISTINCT mt.pid) FILTER (WHERE mt.pid IS NOT NULL)::int AS item_count,
           COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(mt.rate, 0)), 0)::float8 AS gross_amount,
@@ -12347,13 +12749,13 @@ export class MargEdeService {
           COALESCE(MAX(mv.final_amt)::float8, SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))), 0)::float8 AS net_amount,
           COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, 0)), 0)::float8 AS cost_amount,
           (COALESCE(MAX(mv.final_amt)::float8, SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))), 0)
-            * (CASE mv.family WHEN 'SALES_INVOICE' THEN 1 WHEN 'SALES_RETURN'  THEN -1 ELSE 0 END))::float8 AS signed_sales_amount,
+            * (CASE mv.family WHEN 'SALES_INVOICE' THEN 1 WHEN 'SALES_RETURN' THEN -1 WHEN 'SALES_BRK_EXP_RECEIVE' THEN -1 ELSE 0 END))::float8 AS signed_sales_amount,
           (COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)
-            * (CASE mv.family WHEN 'SALES_INVOICE' THEN 1 WHEN 'SALES_RETURN'  THEN -1 ELSE 0 END))::float8 AS signed_sales_quantity,
+            * (CASE mv.family WHEN 'SALES_INVOICE' THEN 1 WHEN 'SALES_RETURN' THEN -1 WHEN 'SALES_BRK_EXP_RECEIVE' THEN -1 ELSE 0 END))::float8 AS signed_sales_quantity,
           (COALESCE(MAX(mv.final_amt)::float8, SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))), 0)
-            * (CASE mv.family WHEN 'PURCHASE_INVOICE' THEN 1 WHEN 'PURCHASE_RETURN'  THEN -1 ELSE 0 END))::float8 AS signed_purchase_amount,
+            * (CASE mv.family WHEN 'PURCHASE_INVOICE' THEN 1 WHEN 'PURCHASE_RETURN' THEN -1 WHEN 'PURCHASE_BRK_EXP_RETURN' THEN -1 ELSE 0 END))::float8 AS signed_purchase_amount,
           (COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)
-            * (CASE mv.family WHEN 'PURCHASE_INVOICE' THEN 1 WHEN 'PURCHASE_RETURN'  THEN -1 ELSE 0 END))::float8 AS signed_purchase_quantity,
+            * (CASE mv.family WHEN 'PURCHASE_INVOICE' THEN 1 WHEN 'PURCHASE_RETURN' THEN -1 WHEN 'PURCHASE_BRK_EXP_RETURN' THEN -1 ELSE 0 END))::float8 AS signed_purchase_quantity,
           NOW() AS refreshed_at
         FROM marg_vouchers mv
         LEFT JOIN marg_transactions mt

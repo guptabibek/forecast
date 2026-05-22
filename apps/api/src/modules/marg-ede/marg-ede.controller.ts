@@ -600,6 +600,17 @@ export class MargEdeController {
     });
   }
 
+  @Get('family-diagnostic')
+  @Roles('ADMIN', 'PLANNER')
+  @ApiOperation({
+    summary: 'Voucher-family classification health (surfaces silently-dropped rows)',
+    description:
+      'Groups every staged Marg voucher by its classified family and returns counts, final-amount sums, date ranges, and up to 5 sample VCNs per family. Separates healthy commercial / inventory families from the diagnostic buckets the classifier emits when it cannot confidently place a row (UNKNOWN_*_NO_AF when add_field is missing, UNKNOWN_U_UNEXPECTED_CID when a price-diff DN carries a customer cid, and raw UNKNOWN for Marg add-on document types we have not mapped). needsAttention=true when any diagnostic bucket is non-empty — an operator should then extend the classifier or fix the upstream Marg data. These rows contribute zero to every report, so without this endpoint they are invisible.',
+  })
+  async getFamilyDiagnostic(@CurrentUser() user: any) {
+    return this.margEdeService.getMargFamilyClassificationDiagnostic(user.tenantId);
+  }
+
   // ==================== DATA VIEW ENDPOINTS ====================
 
   @Get('overview')
