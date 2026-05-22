@@ -16,6 +16,27 @@ import {
 
 type AnalysisKind = 'sales' | 'purchase';
 
+// Report scope (Part 2 — returns + net):
+//   'invoice' (default) → pure commercial invoices only (Part 1 behaviour).
+//   'return'            → returns / CN / DN / BRK-EXP, shown as POSITIVE
+//                         magnitudes (a returns report counts up).
+//   'net'               → invoices MINUS returns (net-of-returns), via the
+//                         family-signed columns already stored on the rollup.
+// Default is 'invoice' so every existing caller and the Part 1 contract are
+// byte-for-byte unchanged.
+type ReportScope = 'invoice' | 'return' | 'net';
+
+// Families that make up the "return" side of each kind. Sales returns are
+// the Credit-Note family (R) plus the breakage/expiry receive family (W);
+// purchase returns are the Debit-Note family (B) plus breakage/expiry
+// return (Q). These mirror the sign helpers in marg-voucher-family.sql.ts
+// (each carries -1 there), which is why 'net' sums correctly.
+// Exported so the NLQ returns views and their contract test can assert they
+// filter on the IDENTICAL return families — keeping NLQ returns numbers equal
+// to the dashboard scope=return totals.
+export const SALES_RETURN_FAMILIES = ['SALES_RETURN', 'SALES_BRK_EXP_RECEIVE'];
+export const PURCHASE_RETURN_FAMILIES = ['PURCHASE_RETURN', 'PURCHASE_BRK_EXP_RETURN'];
+
 // ─────────────────────────────────────────────────────────────────────────
 // PURE-INVOICE-ONLY MODE (post-2026-05-21 product decision)
 // ─────────────────────────────────────────────────────────────────────────
@@ -45,8 +66,12 @@ type AnalysisKind = 'sales' | 'purchase';
 // helpers already know how to sign them.
 const SALES_TYPES = ['S'];
 const PURCHASE_TYPES = ['P'];
-const PURE_SALES_FAMILY = 'SALES_INVOICE';
-const PURE_PURCHASE_FAMILY = 'PURCHASE_INVOICE';
+// Exported so cross-surface consumers (e.g. the AI/NLQ reporting views and
+// their contract test) can assert they filter on the IDENTICAL family value.
+// If these ever change, the NLQ views must change in lockstep — the
+// `ai-views-pure-invoice.contract.spec.ts` test enforces that.
+export const PURE_SALES_FAMILY = 'SALES_INVOICE';
+export const PURE_PURCHASE_FAMILY = 'PURCHASE_INVOICE';
 // Line types accepted under pure-invoice headers. Restricted to the
 // line types that actually appear under invoice-family vouchers per the
 // production V2 audit — challan / return line types ('R', 'W', 'Q')
@@ -160,28 +185,26 @@ export class SalesPurchaseAnalysisService {
     kind: AnalysisKind,
     filters: SalesPurchaseAnalysisFilterDto,
   ): Promise<any> {
+    const scope = this.resolveScope(filters);
     const where = this.buildRollupWhere(tenantId, kind, filters);
-    const signedAmount = this.signedAmountColumn(kind);
-    const signedQuantity = this.signedQuantityColumn(kind);
-    const amountSign = this.amountSignColumn(kind);
-    // Under pure-invoice-only mode, buildRollupWhere restricts to
-    // family='SALES_INVOICE' or 'PURCHASE_INVOICE'. The signed_* columns
-    // therefore always carry a +1 multiplier for every loaded row, but
-    // we keep the SUM-with-sign expressions so the same SQL works
-    // unchanged if a future product decision opens this back up to
-    // signed return families.
+    // Scope-aware columns:
+    //   invoice/net → signed_* columns (stored family sign; net subtracts returns)
+    //   return      → unsigned net_amount / quantity (returns counted positive)
+    const amount = this.scopeRollupAmountColumn(kind, scope);
+    const quantity = this.scopeRollupQuantityColumn(kind, scope);
+    const cost = this.scopeRollupCostExpr(kind, scope);
     const [row] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
-        COALESCE(SUM(b.${signedAmount}), 0)::float8 AS total_amount,
+        COALESCE(SUM(b.${amount}), 0)::float8 AS total_amount,
         COUNT(*)::int AS total_bills,
         COUNT(DISTINCT b.cid)::int AS total_parties,
-        COALESCE(SUM(b.${signedQuantity}), 0)::float8 AS total_quantity,
+        COALESCE(SUM(b.${quantity}), 0)::float8 AS total_quantity,
         COUNT(DISTINCT b.company_id || ':' || COALESCE(NULLIF(b.voucher, ''), b.vcn, ''))::int AS voucher_count,
         COALESCE(SUM(b.item_count), 0)::int AS item_count,
-        COALESCE(SUM(b.cost_amount * b.${amountSign}), 0)::float8 AS cost_amount,
-        COALESCE(SUM(b.${signedAmount} - b.cost_amount * b.${amountSign}), 0)::float8 AS gross_profit,
-        CASE WHEN COALESCE(SUM(b.${signedAmount}), 0) > 0
-          THEN (COALESCE(SUM(b.${signedAmount} - b.cost_amount * b.${amountSign}), 0) / COALESCE(SUM(b.${signedAmount}), 0) * 100)::float8
+        COALESCE(SUM(${cost}), 0)::float8 AS cost_amount,
+        COALESCE(SUM(b.${amount} - (${cost})), 0)::float8 AS gross_profit,
+        CASE WHEN COALESCE(SUM(b.${amount}), 0) > 0
+          THEN (COALESCE(SUM(b.${amount} - (${cost})), 0) / COALESCE(SUM(b.${amount}), 0) * 100)::float8
           ELSE NULL
         END AS margin_pct
       FROM marg_bill_rollup b
@@ -201,7 +224,7 @@ export class SalesPurchaseAnalysisService {
     filters: SalesPurchaseAnalysisFilterDto,
   ): Promise<any> {
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
-    const signExpr = this.familyAwareAmountSignSql(kind, 'mv');
+    const signExpr = this.scopeAmountSignSql(kind, this.resolveScope(filters), 'mv');
     const [row] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH filtered_lines AS (
         SELECT
@@ -335,7 +358,7 @@ export class SalesPurchaseAnalysisService {
     );
 
     const query = Prisma.sql`
-      WITH b AS (${this.billRollupSql(tenantId, kind, baseWhere)})
+      WITH b AS (${this.billRollupSql(tenantId, kind, baseWhere, this.resolveScope(filters))})
       SELECT *
       FROM b
       ${projectedWhere}
@@ -530,20 +553,39 @@ export class SalesPurchaseAnalysisService {
     const stockItemFilter = itemKey.startsWith('product:')
       ? Prisma.sql`mprod.product_id = ${itemKey.slice('product:'.length)}::uuid`
       : Prisma.sql`ms.pid = ${itemKey}`;
-    // `kind` is intentionally NOT used to gate the family filter here.
-    // The item drilldown is a single dual-sided card: it shows an item's
-    // pure sales AND pure purchase activity together (sold X / bought Y /
-    // margin) regardless of which report the user drilled from. So we load
-    // BOTH pure invoice families and let the per-side FILTER clauses in
-    // the SELECT partition them. Returns / challans / adjustments stay
-    // out of scope per the pure-invoice-only product decision.
+    // `kind` is intentionally NOT used to gate the family filter — the item
+    // drilldown is a dual-sided card showing an item's sales AND purchase
+    // activity together (sold X / bought Y / margin), so it loads both sides.
+    // `scope` selects WHICH families per side:
+    //   invoice → SALES_INVOICE / PURCHASE_INVOICE (positive)
+    //   return  → the return families (positive magnitudes)
+    //   net     → invoice + return families, family-signed (invoice − return)
     void kind;
+    const scope = this.resolveScope(filters);
+    const salesFams = this.scopeFamilies('sales', scope);
+    const purchaseFams = this.scopeFamilies('purchase', scope);
+    const loadFams = [...salesFams, ...purchaseFams];
+    const loadTypes = [
+      ...this.documentTypes('sales', scope),
+      ...this.documentTypes('purchase', scope),
+    ];
+    // Per-row sign: net signs invoices +1 / returns -1; invoice & return
+    // scopes use +1 (the family FILTER already restricts to one direction,
+    // so magnitudes stay positive).
+    const salesSign = scope === 'net'
+      ? Prisma.sql`(CASE family WHEN 'SALES_INVOICE' THEN 1 WHEN 'SALES_RETURN' THEN -1 WHEN 'SALES_BRK_EXP_RECEIVE' THEN -1 ELSE 0 END)`
+      : Prisma.sql`1`;
+    const purchaseSign = scope === 'net'
+      ? Prisma.sql`(CASE family WHEN 'PURCHASE_INVOICE' THEN 1 WHEN 'PURCHASE_RETURN' THEN -1 WHEN 'PURCHASE_BRK_EXP_RETURN' THEN -1 ELSE 0 END)`
+      : Prisma.sql`1`;
+    const salesFamFilter = Prisma.sql`family = ANY(${salesFams}::text[])`;
+    const purchaseFamFilter = Prisma.sql`family = ANY(${purchaseFams}::text[])`;
     const scopedFilters = { ...filters, item: undefined, productIds: undefined };
     const itemTypeConds: Prisma.Sql[] = [
       Prisma.sql`mv.tenant_id = ${tenantId}::uuid`,
       Prisma.sql`mv.is_cancelled = FALSE`,
-      Prisma.sql`UPPER(mv.type) IN ('S', 'P')`,
-      Prisma.sql`mv.family IN (${PURE_SALES_FAMILY}, ${PURE_PURCHASE_FAMILY})`,
+      Prisma.sql`UPPER(mv.type) = ANY(${loadTypes}::text[])`,
+      Prisma.sql`mv.family = ANY(${loadFams}::text[])`,
     ];
     if (scopedFilters.startDate) itemTypeConds.push(Prisma.sql`mv.date >= ${scopedFilters.startDate}::date`);
     if (scopedFilters.endDate) itemTypeConds.push(Prisma.sql`mv.date <= ${scopedFilters.endDate}::date`);
@@ -579,13 +621,16 @@ export class SalesPurchaseAnalysisService {
         -- populated (an item can be both bought and sold). The
         -- _return_quantity columns are retained at 0 for response-shape
         -- backward compatibility.
-        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'SALES_INVOICE'), 0)::float8 AS sales_quantity,
-        COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'SALES_INVOICE'), 0)::float8 AS sales_amount,
-        AVG(rate) FILTER (WHERE family = 'SALES_INVOICE' AND rate IS NOT NULL AND rate > 0)::float8 AS average_sale_rate,
+        -- Per-side, scope-aware sums. The family FILTER restricts each column
+        -- to its side's families; the sign expression nets invoices vs returns
+        -- under scope='net' and is a no-op (+1) for invoice / return scopes.
+        COALESCE(SUM(ABS(qty) * ${salesSign}) FILTER (WHERE ${salesFamFilter}), 0)::float8 AS sales_quantity,
+        COALESCE(SUM(ABS(amount) * ${salesSign}) FILTER (WHERE ${salesFamFilter}), 0)::float8 AS sales_amount,
+        AVG(rate) FILTER (WHERE ${salesFamFilter} AND rate IS NOT NULL AND rate > 0)::float8 AS average_sale_rate,
         0::float8 AS sales_return_quantity,
-        COALESCE(SUM(ABS(qty)) FILTER (WHERE family = 'PURCHASE_INVOICE'), 0)::float8 AS purchase_quantity,
-        COALESCE(SUM(ABS(amount)) FILTER (WHERE family = 'PURCHASE_INVOICE'), 0)::float8 AS purchase_amount,
-        AVG(rate) FILTER (WHERE family = 'PURCHASE_INVOICE' AND rate IS NOT NULL AND rate > 0)::float8 AS average_purchase_rate,
+        COALESCE(SUM(ABS(qty) * ${purchaseSign}) FILTER (WHERE ${purchaseFamFilter}), 0)::float8 AS purchase_quantity,
+        COALESCE(SUM(ABS(amount) * ${purchaseSign}) FILTER (WHERE ${purchaseFamFilter}), 0)::float8 AS purchase_amount,
+        AVG(rate) FILTER (WHERE ${purchaseFamFilter} AND rate IS NOT NULL AND rate > 0)::float8 AS average_purchase_rate,
         0::float8 AS purchase_return_quantity,
         AVG(cost_rate)::float8 AS cost_rate
       FROM item_lines
@@ -667,7 +712,7 @@ export class SalesPurchaseAnalysisService {
     scopedFilters: SalesPurchaseAnalysisFilterDto,
   ): Promise<any> {
     const where = this.buildRollupWhere(tenantId, kind, scopedFilters);
-    const signedAmount = this.signedAmountColumn(kind);
+    const signedAmount = this.scopeRollupAmountColumn(kind, this.resolveScope(scopedFilters));
     const [metrics] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(b.${signedAmount}), 0)::float8 AS total_amount,
@@ -686,7 +731,7 @@ export class SalesPurchaseAnalysisService {
   ): Promise<any> {
     const where = this.buildHeaderWhere(tenantId, kind, scopedFilters, 'mv', 'mt', 'mp', 'mprod');
     const [metrics] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
-      WITH bills AS (${this.billRollupSql(tenantId, kind, where)})
+      WITH bills AS (${this.billRollupSql(tenantId, kind, where, this.resolveScope(scopedFilters))})
       SELECT
         COALESCE(SUM(signed_net_amount), 0)::float8 AS total_amount,
         COUNT(*)::int AS total_bills,
@@ -700,9 +745,10 @@ export class SalesPurchaseAnalysisService {
     // Fast path: monthly trend from the rollup table. The aggregate is just
     // COUNT/SUM over ~36k bill rows grouped by month — comfortably sub-second.
     if (!this.requiresLineLevelDrill(filters)) {
+      const scope = this.resolveScope(filters);
       const where = this.buildRollupWhere(tenantId, kind, filters);
-      const signedAmount = this.signedAmountColumn(kind);
-      const signedQuantity = this.signedQuantityColumn(kind);
+      const signedAmount = this.scopeRollupAmountColumn(kind, scope);
+      const signedQuantity = this.scopeRollupQuantityColumn(kind, scope);
       return this.prisma.$queryRaw<any[]>(Prisma.sql`
         SELECT to_char(date_trunc('month', b.date), 'YYYY-MM') AS period,
           COUNT(*)::int AS bills,
@@ -717,7 +763,7 @@ export class SalesPurchaseAnalysisService {
 
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
     return this.prisma.$queryRaw<any[]>(Prisma.sql`
-      WITH bills AS (${this.billRollupSql(tenantId, kind, where)})
+      WITH bills AS (${this.billRollupSql(tenantId, kind, where, this.resolveScope(filters))})
       SELECT to_char(date_trunc('month', date), 'YYYY-MM') AS period,
         COUNT(*)::int AS bills,
         COALESCE(SUM(signed_net_amount), 0)::float8 AS amount,
@@ -734,7 +780,7 @@ export class SalesPurchaseAnalysisService {
     // the speedup over the live path is still ~30×.
     if (!this.requiresLineLevelDrill(filters)) {
       const where = this.buildRollupWhere(tenantId, kind, filters);
-      const signedAmount = this.signedAmountColumn(kind);
+      const signedAmount = this.scopeRollupAmountColumn(kind, this.resolveScope(filters));
       return this.prisma.$queryRaw<any[]>(Prisma.sql`
         WITH ranked AS (
           SELECT
@@ -759,7 +805,7 @@ export class SalesPurchaseAnalysisService {
 
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
     return this.prisma.$queryRaw<any[]>(Prisma.sql`
-      WITH bills AS (${this.billRollupSql(tenantId, kind, where)}),
+      WITH bills AS (${this.billRollupSql(tenantId, kind, where, this.resolveScope(filters))}),
       ranked AS (
         SELECT party_code, party_name, COUNT(*)::int AS bills, COALESCE(SUM(signed_net_amount), 0)::float8 AS value
         FROM bills GROUP BY party_code, party_name
@@ -774,7 +820,7 @@ export class SalesPurchaseAnalysisService {
 
   private async topItems(tenantId: string, kind: AnalysisKind, filters: SalesPurchaseAnalysisFilterDto) {
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
-    const signExpr = this.familyAwareAmountSignSql(kind, 'mv');
+    const signExpr = this.scopeAmountSignSql(kind, this.resolveScope(filters), 'mv');
     return this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0)) * ${signExpr}) DESC)::int AS rank,
         COALESCE(p.id::text, mprod.product_id::text, mt.pid) AS item_key,
@@ -799,11 +845,11 @@ export class SalesPurchaseAnalysisService {
 
   private async taxSummary(tenantId: string, kind: AnalysisKind, filters: SalesPurchaseAnalysisFilterDto) {
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
-    // Family-signed tax aggregation: an invoice's tax is positive, a return's
-    // tax is negative (net GST liability), and a challan / SC / unknown line
-    // contributes zero (sign = 0). Without the multiplier, returning a sold
-    // batch would *increase* the reported tax_amount, which is wrong.
-    const signExpr = this.familyAwareAmountSignSql(kind, 'mv');
+    // Scope-aware tax aggregation. invoice: tax positive. net: invoice tax
+    // positive, return tax negative (net GST liability). return: tax shown
+    // positive (sign = 1, only return families pass the WHERE). Without the
+    // multiplier a return would *increase* invoice-scope tax, which is wrong.
+    const signExpr = this.scopeAmountSignSql(kind, this.resolveScope(filters), 'mv');
     return this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT COALESCE(mt.gst, 0)::float8 AS tax_pct,
         COALESCE(SUM(ABS(mt.gst_amount) * ${signExpr}), 0)::float8 AS tax_amount,
@@ -822,7 +868,7 @@ export class SalesPurchaseAnalysisService {
     // Fast path: derive payment_mode from rollup's cash/others directly.
     if (!this.requiresLineLevelDrill(filters)) {
       const where = this.buildRollupWhere(tenantId, kind, filters);
-      const signedAmount = this.signedAmountColumn(kind);
+      const signedAmount = this.scopeRollupAmountColumn(kind, this.resolveScope(filters));
       return this.prisma.$queryRaw<any[]>(Prisma.sql`
         SELECT
           CASE
@@ -841,7 +887,7 @@ export class SalesPurchaseAnalysisService {
 
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
     return this.prisma.$queryRaw<any[]>(Prisma.sql`
-      WITH bills AS (${this.billRollupSql(tenantId, kind, where)})
+      WITH bills AS (${this.billRollupSql(tenantId, kind, where, this.resolveScope(filters))})
       SELECT payment_mode, COUNT(*)::int AS bills, COALESCE(SUM(signed_net_amount), 0)::float8 AS amount
       FROM bills
       GROUP BY payment_mode
@@ -922,15 +968,16 @@ export class SalesPurchaseAnalysisService {
     kind: AnalysisKind,
     filters: SalesPurchaseAnalysisFilterDto,
   ): Prisma.Sql {
-    const types = this.documentTypes(kind);
-    const pureFamily = this.pureInvoiceFamily(kind);
-    // Two-gate pure-invoice filter: type narrows to S/P, family narrows
-    // further to SALES_INVOICE / PURCHASE_INVOICE so type=S challan
-    // vouchers (family=SALES_CHALLAN) are excluded.
+    const scope = this.resolveScope(filters);
+    const types = this.documentTypes(kind, scope);
+    // Two-gate scope filter: type narrows the load set, family is the
+    // decisive gate. Invoice scope → SALES_INVOICE/PURCHASE_INVOICE (single
+    // value, byte-identical to Part 1). Return scope → the return families.
+    // Net scope → both.
     const conds: Prisma.Sql[] = [
       Prisma.sql`b.tenant_id = ${tenantId}::uuid`,
       Prisma.sql`b.type = ANY(${types}::text[])`,
-      Prisma.sql`b.family = ${pureFamily}`,
+      this.scopeFamilyFilterSql(Prisma.sql`b.family`, kind, scope),
     ];
 
     if (filters.startDate) conds.push(Prisma.sql`b.date >= ${filters.startDate}::date`);
@@ -963,13 +1010,11 @@ export class SalesPurchaseAnalysisService {
       if (filters.paymentMode === 'CREDIT') conds.push(Prisma.sql`COALESCE(b.cash, 0) = 0`);
       if (filters.paymentMode === 'MIXED') conds.push(Prisma.sql`COALESCE(b.cash, 0) > 0 AND COALESCE(b.others, 0) > 0`);
     }
-    // The legacy 'status' filter (POSTED vs RETURN) is a no-op under
-    // pure-invoice-only mode: every row in the result set has type IN
-    // ('S', 'P'), so status is always 'POSTED'. We preserve the filter
-    // accept-and-ignore semantics for API backward compatibility — a
-    // client passing status='RETURN' will get an empty result rather
-    // than an error.
-    if (filters.status === 'RETURN') {
+    // Legacy 'status' filter. Under the default 'invoice' scope every row is
+    // POSTED, so status='RETURN' yields an empty set (preserved Part-1
+    // accept-and-ignore semantics). Under 'return'/'net' scope the caller is
+    // explicitly asking for returns, so the status filter is a no-op there.
+    if (scope === 'invoice' && filters.status === 'RETURN') {
       conds.push(Prisma.sql`FALSE`);
     }
     if (filters.minAmount !== undefined) conds.push(Prisma.sql`COALESCE(b.final_amt, 0) >= ${filters.minAmount}`);
@@ -978,9 +1023,9 @@ export class SalesPurchaseAnalysisService {
     return Prisma.sql`${Prisma.join(conds, ' AND ')}`;
   }
 
-  private billRollupSql(_tenantId: string, kind: AnalysisKind, where: Prisma.Sql): Prisma.Sql {
+  private billRollupSql(_tenantId: string, kind: AnalysisKind, where: Prisma.Sql, scope: ReportScope = 'invoice'): Prisma.Sql {
     const familyExpr = margVoucherFamilySql('mv');
-    const signExpr = this.familyAwareAmountSignSql(kind, 'mv');
+    const signExpr = this.scopeAmountSignSql(kind, scope, 'mv');
     return Prisma.sql`
       SELECT
         mv.company_id || ':' || mv.voucher AS bill_key,
@@ -1094,22 +1139,18 @@ export class SalesPurchaseAnalysisService {
     const mt = Prisma.raw(transactionAlias);
     const mp = Prisma.raw(partyAlias);
     const mprod = Prisma.raw(productAlias);
-    const types = this.documentTypes(kind);
-    const pureFamily = this.pureInvoiceFamily(kind);
-    // Cancelled vouchers are NEVER part of commercial sales / purchase
-    // aggregates regardless of which downstream query consumes this where
-    // clause. Filtering here keeps the contract in one place — every callsite
-    // that uses buildHeaderWhere automatically inherits cancellation
-    // suppression without having to remember to add it.
-    //
-    // Family filter mirrors buildRollupWhere: pure SALES_INVOICE /
-    // PURCHASE_INVOICE only. Returns, challans, adjustments do not
-    // appear in any sales/purchase analysis output by construction.
+    const scope = this.resolveScope(filters);
+    const types = this.documentTypes(kind, scope);
+    // Cancelled vouchers are NEVER part of commercial aggregates regardless of
+    // which downstream query consumes this where clause — filtering here keeps
+    // the contract in one place. The family filter is scope-aware (mirrors
+    // buildRollupWhere): invoice → pure invoice family; return → return
+    // families; net → both.
     const conds: Prisma.Sql[] = [
       Prisma.sql`${mv}.tenant_id = ${tenantId}::uuid`,
       Prisma.sql`${mv}.is_cancelled = FALSE`,
       Prisma.sql`${mv}.type = ANY(${types}::text[])`,
-      Prisma.sql`${mv}.family = ${pureFamily}`,
+      this.scopeFamilyFilterSql(Prisma.sql`${mv}.family`, kind, scope),
     ];
 
     if (filters.startDate) conds.push(Prisma.sql`${mv}.date >= ${filters.startDate}::date`);
@@ -1152,10 +1193,10 @@ export class SalesPurchaseAnalysisService {
       if (filters.paymentMode === 'CREDIT') conds.push(Prisma.sql`COALESCE(${mv}.cash, 0) = 0`);
       if (filters.paymentMode === 'MIXED') conds.push(Prisma.sql`COALESCE(${mv}.cash, 0) > 0 AND COALESCE(${mv}.others, 0) > 0`);
     }
-    // Legacy 'status' filter accepted-and-ignored under pure-invoice-only
-    // mode: every loaded row has type S/P (POSTED). A client passing
-    // status='RETURN' would expect zero results, which `FALSE` produces.
-    if (filters.status === 'RETURN') {
+    // Legacy 'status' filter. Empty result for status='RETURN' under the
+    // default invoice scope (every loaded row is POSTED); no-op under
+    // return/net scope where returns are explicitly requested.
+    if (scope === 'invoice' && filters.status === 'RETURN') {
       conds.push(Prisma.sql`FALSE`);
     }
     if (filters.minAmount !== undefined) conds.push(Prisma.sql`COALESCE(${mv}.final_amt, 0) >= ${filters.minAmount}`);
@@ -1166,26 +1207,90 @@ export class SalesPurchaseAnalysisService {
     return Prisma.sql`${Prisma.join(conds, ' AND ')}`;
   }
 
-  private documentTypes(kind: AnalysisKind): string[] {
-    // Pure-invoice-only mode: returns / challans / adjustments are NOT
-    // loaded by sales/purchase analysis. The family filter applied in
-    // buildRollupWhere / buildHeaderWhere is the second gate (catches
-    // type=S vouchers whose add_field marks them as challan, etc.).
-    if (kind === 'sales') return [...SALES_TYPES];
-    if (kind === 'purchase') return [...PURCHASE_TYPES];
-    throw new BadRequestException('Invalid analysis kind');
+  private documentTypes(kind: AnalysisKind, scope: ReportScope = 'invoice'): string[] {
+    // Header types to LOAD for the given scope. The family filter applied in
+    // buildRollupWhere / buildHeaderWhere is the second, decisive gate
+    // (e.g. it excludes a type=S voucher whose add_field marks it a challan).
+    // Default scope 'invoice' returns exactly the Part-1 pure-invoice types,
+    // so legacy callers (e.g. getBillDrilldown) are unchanged.
+    const invoiceTypes = kind === 'sales' ? [...SALES_TYPES] : [...PURCHASE_TYPES];
+    const returnTypes = kind === 'sales' ? ['R', 'W'] : ['B', 'Q'];
+    if (kind !== 'sales' && kind !== 'purchase') throw new BadRequestException('Invalid analysis kind');
+    if (scope === 'invoice') return invoiceTypes;
+    if (scope === 'return') return returnTypes;
+    return [...invoiceTypes, ...returnTypes]; // net
+  }
+
+  // ── Scope (Part 2: returns + net) ──────────────────────────────────────
+  // resolveScope defaults to 'invoice' so every legacy caller is unchanged.
+  private resolveScope(filters: SalesPurchaseAnalysisFilterDto): ReportScope {
+    return filters.scope ?? 'invoice';
+  }
+
+  /** Families a row must carry to appear, for the given kind + scope. */
+  private scopeFamilies(kind: AnalysisKind, scope: ReportScope): string[] {
+    const invoice = kind === 'sales' ? [PURE_SALES_FAMILY] : [PURE_PURCHASE_FAMILY];
+    const returns = kind === 'sales' ? SALES_RETURN_FAMILIES : PURCHASE_RETURN_FAMILIES;
+    if (scope === 'invoice') return invoice;
+    if (scope === 'return') return returns;
+    return [...invoice, ...returns]; // net
   }
 
   /**
-   * The single canonical "family" value a row must carry to appear in
-   * sales/purchase analysis. Used as the second gate after documentTypes()
-   * — together they guarantee only pure SALES_INVOICE / PURCHASE_INVOICE
-   * rows ever reach the report SQL.
+   * Family filter SQL for the given column (e.g. `b.family` / `mv.family`).
+   * Emits a single `= 'X'` for the invoice scope (byte-identical to Part 1,
+   * so the Part 1 contract tests still hold) and `= ANY(...)` for the
+   * multi-family return / net scopes.
    */
-  private pureInvoiceFamily(kind: AnalysisKind): string {
-    if (kind === 'sales') return PURE_SALES_FAMILY;
-    if (kind === 'purchase') return PURE_PURCHASE_FAMILY;
-    throw new BadRequestException('Invalid analysis kind');
+  private scopeFamilyFilterSql(familyColumn: Prisma.Sql, kind: AnalysisKind, scope: ReportScope): Prisma.Sql {
+    const fams = this.scopeFamilies(kind, scope);
+    return fams.length === 1
+      ? Prisma.sql`${familyColumn} = ${fams[0]}`
+      : Prisma.sql`${familyColumn} = ANY(${fams}::text[])`;
+  }
+
+  /**
+   * Per-row amount-sign expression for the LIVE (line-level) path. Multiplies
+   * an ABS magnitude before summing:
+   *   - invoice: family sign (+1 invoice; other families 0 — but only invoice
+   *     family passes the WHERE, so effectively +1)
+   *   - net:     family sign (+1 invoice, -1 return) → SUM = invoices − returns
+   *   - return:  +1 (only return families pass the WHERE) → SUM = positive
+   *              returns magnitude
+   * Centralising the scope rule here means billRollupSql, topItems,
+   * taxSummary, dimension, and comparison all become scope-correct by
+   * threading this one expression instead of familyAwareAmountSignSql.
+   */
+  private scopeAmountSignSql(kind: AnalysisKind, scope: ReportScope, voucherAlias = 'mv'): Prisma.Sql {
+    if (scope === 'return') return Prisma.sql`1`;
+    return this.familyAwareAmountSignSql(kind, voucherAlias);
+  }
+
+  /**
+   * Pre-signed amount column to SUM on the ROLLUP path. The rollup stores
+   * family-signed amounts (invoice +1, return -1) at sync time, so:
+   *   - invoice / net: use the signed column (net for invoices, contra for
+   *     returns → correct net-of-returns when both families are loaded)
+   *   - return: the stored sign is -1, but a returns report counts UP, so we
+   *     read the unsigned net_amount column instead.
+   */
+  private scopeRollupAmountColumn(kind: AnalysisKind, scope: ReportScope): Prisma.Sql {
+    return scope === 'return' ? Prisma.raw('net_amount') : this.signedAmountColumn(kind);
+  }
+
+  private scopeRollupQuantityColumn(kind: AnalysisKind, scope: ReportScope): Prisma.Sql {
+    return scope === 'return' ? Prisma.raw('quantity') : this.signedQuantityColumn(kind);
+  }
+
+  /**
+   * Rollup cost expression (b-aliased). For invoice/net, cost is family-signed
+   * so it nets the same way as the amount; for return it's the unsigned cost
+   * of the returned goods (positive).
+   */
+  private scopeRollupCostExpr(kind: AnalysisKind, scope: ReportScope): Prisma.Sql {
+    if (scope === 'return') return Prisma.sql`b.cost_amount`;
+    const sign = this.amountSignColumn(kind);
+    return Prisma.sql`b.cost_amount * b.${sign}`;
   }
 
   private lineTypesForHeader(headerType: string | null | undefined): string[] {
@@ -1352,6 +1457,10 @@ export class SalesPurchaseAnalysisService {
     // first so each bill contributes once per dimension, then roll up to the
     // dimension. This yields stable "bills" counts even when a single voucher
     // crosses multiple groups (e.g., one bill with products from two companies).
+    // Scope sign: invoice → +1, return → +1 (positive magnitudes), net →
+    // +1 invoice / -1 return so dimension net_amount nets correctly. Applied
+    // at the line level so all downstream sums inherit it.
+    const dimSign = this.scopeAmountSignSql(kind, this.resolveScope(filters), 'mv');
     const cte = Prisma.sql`
       WITH lines AS (
         SELECT
@@ -1361,10 +1470,10 @@ export class SalesPurchaseAnalysisService {
           mv.cid,
           ${dim.keyExpr} AS dim_key,
           ${dim.labelExpr} AS dim_label,
-          ABS(COALESCE(mt.qty, 0)) AS qty,
-          ABS(COALESCE(mt.amount, 0)) AS amount,
-          ABS(COALESCE(mt.gst_amount, 0)) AS gst_amount,
-          ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0) AS line_cost,
+          ABS(COALESCE(mt.qty, 0)) * ${dimSign} AS qty,
+          ABS(COALESCE(mt.amount, 0)) * ${dimSign} AS amount,
+          ABS(COALESCE(mt.gst_amount, 0)) * ${dimSign} AS gst_amount,
+          ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0) * ${dimSign} AS line_cost,
           mt.pid
         FROM marg_vouchers mv
         LEFT JOIN marg_transactions mt
@@ -1590,6 +1699,7 @@ export class SalesPurchaseAnalysisService {
   }> {
     const filters = { ...baseFilters, startDate, endDate };
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
+    const cmpSign = this.scopeAmountSignSql(kind, this.resolveScope(filters), 'mv');
     const [row] = await this.prisma.$queryRaw<
       Array<{
         net_amount: number;
@@ -1604,10 +1714,10 @@ export class SalesPurchaseAnalysisService {
         SELECT
           mv.company_id,
           mv.voucher,
-          ABS(COALESCE(mt.qty, 0)) AS qty,
-          ABS(COALESCE(mt.amount, 0)) AS amount,
-          ABS(COALESCE(mt.gst_amount, 0)) AS gst_amount,
-          ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0) AS line_cost,
+          ABS(COALESCE(mt.qty, 0)) * ${cmpSign} AS qty,
+          ABS(COALESCE(mt.amount, 0)) * ${cmpSign} AS amount,
+          ABS(COALESCE(mt.gst_amount, 0)) * ${cmpSign} AS gst_amount,
+          ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0) * ${cmpSign} AS line_cost,
           mt.pid
         FROM marg_vouchers mv
         LEFT JOIN marg_transactions mt
@@ -1689,6 +1799,7 @@ export class SalesPurchaseAnalysisService {
       endDate: undefined,
     };
     const baseWhere = this.buildHeaderWhere(tenantId, kind, widenedFilters, 'mv', 'mt', 'mp', 'mprod');
+    const cmpDimSign = this.scopeAmountSignSql(kind, this.resolveScope(filters), 'mv');
     const dateGuard = Prisma.sql`(
       (mv.date >= ${filters.startDate}::date AND mv.date <= ${filters.endDate}::date)
       OR (mv.date >= ${filters.compareStartDate}::date AND mv.date <= ${filters.compareEndDate}::date)
@@ -1713,8 +1824,8 @@ export class SalesPurchaseAnalysisService {
           mv.date,
           ${dim.keyExpr} AS dim_key,
           ${dim.labelExpr} AS dim_label,
-          ABS(COALESCE(mt.qty, 0)) AS qty,
-          ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0)) AS net_line
+          ABS(COALESCE(mt.qty, 0)) * ${cmpDimSign} AS qty,
+          (ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))) * ${cmpDimSign} AS net_line
         FROM marg_vouchers mv
         LEFT JOIN marg_transactions mt
           ON mt.tenant_id = mv.tenant_id

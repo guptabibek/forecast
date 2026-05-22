@@ -354,6 +354,19 @@ export class SalesPurchaseAnalysisFilterDto extends PaginationDto {
   @IsIn(['POSTED', 'RETURN'])
   status?: 'POSTED' | 'RETURN';
 
+  @ApiPropertyOptional({
+    description:
+      'Document scope. "invoice" (default) = pure commercial invoices only ' +
+      '(matches the classic Sales/Purchase Analysis). "return" = returns / ' +
+      'credit & debit notes / breakage-expiry receipts, shown as positive ' +
+      'magnitudes. "net" = invoices minus returns (net-of-returns).',
+    enum: ['invoice', 'return', 'net'],
+    default: 'invoice',
+  })
+  @IsOptional()
+  @IsIn(['invoice', 'return', 'net'])
+  scope?: 'invoice' | 'return' | 'net';
+
   @ApiPropertyOptional({ description: 'Minimum bill amount' })
   @IsOptional()
   @Type(() => Number)

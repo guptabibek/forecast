@@ -126,4 +126,73 @@ describe('SalesPurchaseAnalysisService', () => {
       expect(where).toMatch(/FALSE/);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Part 2 — scope: returns + net
+  // ─────────────────────────────────────────────────────────────────────
+  describe('report scope (returns + net)', () => {
+    const svc = () => new SalesPurchaseAnalysisService({} as any) as any;
+
+    it('default scope is invoice (unchanged Part-1 behaviour)', () => {
+      expect(svc().resolveScope({})).toBe('invoice');
+      expect(svc().resolveScope({ scope: 'return' })).toBe('return');
+      expect(svc().resolveScope({ scope: 'net' })).toBe('net');
+    });
+
+    it('documentTypes loads the right header types per scope', () => {
+      const s = svc();
+      expect(s.documentTypes('sales', 'invoice')).toEqual(['S']);
+      expect(s.documentTypes('sales', 'return')).toEqual(['R', 'W']);
+      expect(s.documentTypes('sales', 'net')).toEqual(['S', 'R', 'W']);
+      expect(s.documentTypes('purchase', 'invoice')).toEqual(['P']);
+      expect(s.documentTypes('purchase', 'return')).toEqual(['B', 'Q']);
+      expect(s.documentTypes('purchase', 'net')).toEqual(['P', 'B', 'Q']);
+    });
+
+    it('scopeFamilies returns invoice/return/net family sets', () => {
+      const s = svc();
+      expect(s.scopeFamilies('sales', 'invoice')).toEqual(['SALES_INVOICE']);
+      expect(s.scopeFamilies('sales', 'return')).toEqual(['SALES_RETURN', 'SALES_BRK_EXP_RECEIVE']);
+      expect(s.scopeFamilies('sales', 'net')).toEqual(['SALES_INVOICE', 'SALES_RETURN', 'SALES_BRK_EXP_RECEIVE']);
+      expect(s.scopeFamilies('purchase', 'return')).toEqual(['PURCHASE_RETURN', 'PURCHASE_BRK_EXP_RETURN']);
+    });
+
+    it('invoice scope WHERE is byte-identical to Part 1 (single-value family equality)', () => {
+      const where = svc().buildRollupWhere(tenantId, 'sales', { scope: 'invoice' }).sql;
+      expect(where).toMatch(/b\.family\s*=\s*\?/);
+      expect(where).not.toMatch(/b\.family\s*=\s*ANY/);
+    });
+
+    it('return scope WHERE filters on the return families via ANY(array) and does NOT force FALSE', () => {
+      const where = svc().buildRollupWhere(tenantId, 'sales', { scope: 'return' }).sql;
+      expect(where).toMatch(/b\.family\s*=\s*ANY/);
+      expect(where).not.toMatch(/FALSE/);
+    });
+
+    it('net scope WHERE spans invoice + return families', () => {
+      const fams = svc().scopeFamilies('sales', 'net');
+      expect(fams).toContain('SALES_INVOICE');
+      expect(fams).toContain('SALES_RETURN');
+      expect(fams.length).toBe(3);
+      const where = svc().buildHeaderWhere(tenantId, 'sales', { scope: 'net' }, 'mv', 'mt', 'mp', 'mprod').sql;
+      expect(where).toMatch(/mv\.family\s*=\s*ANY/);
+    });
+
+    it('rollup amount column: return scope reads unsigned net_amount; invoice/net read the signed column', () => {
+      const s = svc();
+      expect(s.scopeRollupAmountColumn('sales', 'return').sql ?? s.scopeRollupAmountColumn('sales', 'return').text ?? String(s.scopeRollupAmountColumn('sales', 'return'))).toContain('net_amount');
+      const invCol = s.scopeRollupAmountColumn('sales', 'invoice');
+      const netCol = s.scopeRollupAmountColumn('sales', 'net');
+      // Both invoice and net use the family-signed precomputed column.
+      expect(String(invCol.sql ?? invCol)).toContain('signed_sales_amount');
+      expect(String(netCol.sql ?? netCol)).toContain('signed_sales_amount');
+    });
+
+    it('live sign expression: return scope is constant +1 (returns positive); invoice/net use the family sign', () => {
+      const s = svc();
+      expect(s.scopeAmountSignSql('sales', 'return', 'mv').sql).toContain('1');
+      // net uses the family-aware CASE which contains the family column ref.
+      expect(s.scopeAmountSignSql('sales', 'net', 'mv').sql).toContain('mv.family');
+    });
+  });
 });

@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "1.0",
+  "catalogVersion": "1.3",
   "generatedFrom": [
     "docs/ai-reporting/reporting-views.schema.json",
     "docs/ai-reporting/report-inventory.json",
@@ -11,7 +11,7 @@
       "viewName": "vw_ai_sales_items",
       "domain": "sales",
       "grain": "item_level",
-      "description": "Item-level Marg sales and sales-return invoice lines",
+      "description": "Item-level Marg sales invoice lines (pure commercial invoices only; excludes sales returns, challans, and accounting adjustments — matches the Sales Analysis dashboard)",
       "allowedForNlq": true,
       "requiredSecurityFilters": [
         "tenant_id",
@@ -78,7 +78,7 @@
       "viewName": "vw_ai_sales_invoices",
       "domain": "sales",
       "grain": "invoice_level",
-      "description": "Invoice-level Marg sales and sales-return rollup",
+      "description": "Invoice-level Marg sales rollup (pure commercial invoices only; excludes sales returns, challans, and accounting adjustments — matches the Sales Analysis dashboard)",
       "allowedForNlq": true,
       "requiredSecurityFilters": [
         "tenant_id",
@@ -140,7 +140,7 @@
       "viewName": "vw_ai_purchase_items",
       "domain": "purchase",
       "grain": "item_level",
-      "description": "Item-level Marg purchase and purchase-return invoice lines",
+      "description": "Item-level Marg purchase invoice lines (pure commercial invoices only; excludes purchase returns, challans, and accounting adjustments — matches the Purchase Analysis dashboard)",
       "allowedForNlq": true,
       "requiredSecurityFilters": [
         "tenant_id",
@@ -207,7 +207,7 @@
       "viewName": "vw_ai_purchase_invoices",
       "domain": "purchase",
       "grain": "invoice_level",
-      "description": "Invoice-level Marg purchase and purchase-return rollup",
+      "description": "Invoice-level Marg purchase rollup (pure commercial invoices only; excludes purchase returns, challans, and accounting adjustments — matches the Purchase Analysis dashboard)",
       "allowedForNlq": true,
       "requiredSecurityFilters": [
         "tenant_id",
@@ -630,6 +630,328 @@
         "ledger_signed_amount",
         "ledger_source"
       ]
+    },
+    {
+      "datasetId": "sales_returns",
+      "viewName": "vw_ai_sales_returns",
+      "domain": "sales",
+      "grain": "item_level",
+      "description": "Item-level Marg sales returns — credit/debit notes and breakage-expiry, shown as POSITIVE magnitudes. Equals the Sales Analysis dashboard with scope=return. Does NOT net against invoices; for net-of-returns use the dashboard net scope.",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_cancelled",
+          "operator": "IS DISTINCT FROM",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "synonyms": [
+        "sales returns",
+        "credit notes",
+        "CN",
+        "returned products",
+        "customer returns",
+        "sales return register",
+        "breakage expiry returns"
+      ],
+      "defaultAggregateMetrics": [
+        "sales_return_quantity",
+        "sales_return_value"
+      ],
+      "defaultDetailColumns": [
+        "sret_date",
+        "sret_invoice_no",
+        "sret_customer_name",
+        "sret_product_name",
+        "sret_quantity",
+        "sret_net_amount"
+      ],
+      "displayColumns": [
+        "sret_date",
+        "sret_invoice_no",
+        "sret_customer_name",
+        "sret_product_name",
+        "sret_quantity",
+        "sret_net_amount"
+      ]
+    },
+    {
+      "datasetId": "purchase_returns",
+      "viewName": "vw_ai_purchase_returns",
+      "domain": "purchase",
+      "grain": "item_level",
+      "description": "Item-level Marg purchase returns — credit/debit notes and breakage-expiry, shown as POSITIVE magnitudes. Equals the Purchase Analysis dashboard with scope=return. Does NOT net against invoices; for net-of-returns use the dashboard net scope.",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_cancelled",
+          "operator": "IS DISTINCT FROM",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "synonyms": [
+        "purchase returns",
+        "debit notes",
+        "DN",
+        "return to supplier",
+        "supplier returns",
+        "purchase return register",
+        "breakage expiry returns"
+      ],
+      "defaultAggregateMetrics": [
+        "purchase_return_quantity",
+        "purchase_return_value"
+      ],
+      "defaultDetailColumns": [
+        "pret_date",
+        "pret_invoice_no",
+        "pret_supplier_name",
+        "pret_product_name",
+        "pret_quantity",
+        "pret_net_amount"
+      ],
+      "displayColumns": [
+        "pret_date",
+        "pret_invoice_no",
+        "pret_supplier_name",
+        "pret_product_name",
+        "pret_quantity",
+        "pret_net_amount"
+      ]
+    },
+    {
+      "datasetId": "sales_net",
+      "viewName": "vw_ai_sales_net",
+      "domain": "sales",
+      "grain": "item_level",
+      "description": "Item-level NET sales (invoices minus returns). net_amount is signed: invoices positive, returns negative. SUM(net_amount) equals the Sales Analysis dashboard scope=net.",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_cancelled",
+          "operator": "IS DISTINCT FROM",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "synonyms": [
+        "net sales",
+        "sales net of returns",
+        "net turnover",
+        "sales minus returns"
+      ],
+      "defaultAggregateMetrics": [
+        "sales_net_quantity",
+        "sales_net_amount"
+      ],
+      "defaultDetailColumns": [
+        "snet_date",
+        "snet_invoice_no",
+        "snet_doc_type",
+        "snet_customer_name",
+        "snet_product_name",
+        "snet_quantity",
+        "snet_net_amount"
+      ],
+      "displayColumns": [
+        "snet_date",
+        "snet_invoice_no",
+        "snet_doc_type",
+        "snet_customer_name",
+        "snet_product_name",
+        "snet_quantity",
+        "snet_net_amount"
+      ]
+    },
+    {
+      "datasetId": "purchase_net",
+      "viewName": "vw_ai_purchase_net",
+      "domain": "purchase",
+      "grain": "item_level",
+      "description": "Item-level NET purchases (invoices minus returns). net_amount signed: invoices positive, returns negative. Equals the Purchase Analysis dashboard scope=net.",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_cancelled",
+          "operator": "IS DISTINCT FROM",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "synonyms": [
+        "net purchase",
+        "purchase net of returns",
+        "purchases minus returns"
+      ],
+      "defaultAggregateMetrics": [
+        "purchase_net_quantity",
+        "purchase_net_amount"
+      ],
+      "defaultDetailColumns": [
+        "pnet_date",
+        "pnet_invoice_no",
+        "pnet_doc_type",
+        "pnet_supplier_name",
+        "pnet_product_name",
+        "pnet_quantity",
+        "pnet_net_amount"
+      ],
+      "displayColumns": [
+        "pnet_date",
+        "pnet_invoice_no",
+        "pnet_doc_type",
+        "pnet_supplier_name",
+        "pnet_product_name",
+        "pnet_quantity",
+        "pnet_net_amount"
+      ]
+    },
+    {
+      "datasetId": "sales_returns_invoices",
+      "viewName": "vw_ai_sales_returns_invoices",
+      "domain": "sales",
+      "grain": "invoice_level",
+      "description": "Invoice-level Marg sales returns (one row per credit note / breakage-expiry receipt). Positive magnitudes. Use for return document counts and per-document values.",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_cancelled",
+          "operator": "IS DISTINCT FROM",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "synonyms": [
+        "credit notes",
+        "sales return documents",
+        "return bills",
+        "CN list"
+      ],
+      "defaultAggregateMetrics": [
+        "sales_return_doc_count",
+        "sales_return_doc_value"
+      ],
+      "defaultDetailColumns": [
+        "sri_date",
+        "sri_invoice_no",
+        "sri_customer_name",
+        "sri_quantity",
+        "sri_net_amount"
+      ],
+      "displayColumns": [
+        "sri_date",
+        "sri_invoice_no",
+        "sri_customer_name",
+        "sri_quantity",
+        "sri_net_amount"
+      ]
+    },
+    {
+      "datasetId": "purchase_returns_invoices",
+      "viewName": "vw_ai_purchase_returns_invoices",
+      "domain": "purchase",
+      "grain": "invoice_level",
+      "description": "Invoice-level Marg purchase returns (one row per debit note / breakage-expiry return). Positive magnitudes.",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id",
+        "branch_id"
+      ],
+      "defaultFilters": [
+        {
+          "column": "is_cancelled",
+          "operator": "IS DISTINCT FROM",
+          "value": true
+        }
+      ],
+      "dateFields": [
+        {
+          "fieldId": "invoice_date",
+          "column": "invoice_date",
+          "default": true
+        }
+      ],
+      "synonyms": [
+        "debit notes",
+        "purchase return documents",
+        "DN list"
+      ],
+      "defaultAggregateMetrics": [
+        "purchase_return_doc_count",
+        "purchase_return_doc_value"
+      ],
+      "defaultDetailColumns": [
+        "pri_date",
+        "pri_invoice_no",
+        "pri_supplier_name",
+        "pri_quantity",
+        "pri_net_amount"
+      ],
+      "displayColumns": [
+        "pri_date",
+        "pri_invoice_no",
+        "pri_supplier_name",
+        "pri_quantity",
+        "pri_net_amount"
+      ]
     }
   ],
   "metrics": [
@@ -670,7 +992,7 @@
       ],
       "defaultSortDirection": "desc",
       "businessRules": [
-        "Line net equals absolute line amount plus absolute tax amount"
+        "Line net equals absolute line amount plus absolute tax amount. Dataset is pure commercial invoices only (no returns/challans/adjustments), so this metric is gross-of-returns; it equals the Sales/Purchase Analysis dashboard headline total for the same scope."
       ]
     },
     {
@@ -918,7 +1240,7 @@
       ],
       "defaultSortDirection": "desc",
       "businessRules": [
-        "Line net equals absolute line amount plus absolute tax amount"
+        "Line net equals absolute line amount plus absolute tax amount. Dataset is pure commercial invoices only (no returns/challans/adjustments), so this metric is gross-of-returns; it equals the Sales/Purchase Analysis dashboard headline total for the same scope."
       ]
     },
     {
@@ -1363,6 +1685,268 @@
         "open amount"
       ],
       "defaultSortDirection": "desc"
+    },
+    {
+      "metricId": "sales_return_value",
+      "displayName": "Sales Return Value",
+      "datasetId": "sales_returns",
+      "expression": "SUM(net_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "return value",
+        "returns amount",
+        "credit note value",
+        "value returned"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Returns dataset is positive magnitudes (returns count up). Equals the dashboard scope=return total for the same filters. Not netted against invoices."
+      ]
+    },
+    {
+      "metricId": "sales_return_quantity",
+      "displayName": "Sales Return Quantity",
+      "datasetId": "sales_returns",
+      "expression": "SUM(quantity)",
+      "aggregation": "sum",
+      "dataType": "number",
+      "synonyms": [
+        "returned quantity",
+        "return qty",
+        "units returned"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Returns dataset is positive magnitudes (returns count up). Equals the dashboard scope=return total for the same filters. Not netted against invoices."
+      ]
+    },
+    {
+      "metricId": "sales_return_invoice_count",
+      "displayName": "Sales Return Count",
+      "datasetId": "sales_returns",
+      "expression": "COUNT(DISTINCT invoice_id)",
+      "aggregation": "count",
+      "dataType": "number",
+      "synonyms": [
+        "number of returns",
+        "credit note count",
+        "return documents"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Returns dataset is positive magnitudes (returns count up). Equals the dashboard scope=return total for the same filters. Not netted against invoices."
+      ]
+    },
+    {
+      "metricId": "sales_return_tax",
+      "displayName": "Sales Return Tax",
+      "datasetId": "sales_returns",
+      "expression": "SUM(tax_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "return tax",
+        "credit note tax"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Returns dataset is positive magnitudes (returns count up). Equals the dashboard scope=return total for the same filters. Not netted against invoices."
+      ]
+    },
+    {
+      "metricId": "purchase_return_value",
+      "displayName": "Purchase Return Value",
+      "datasetId": "purchase_returns",
+      "expression": "SUM(net_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "debit note value",
+        "value returned to supplier",
+        "purchase return amount"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Returns dataset is positive magnitudes (returns count up). Equals the dashboard scope=return total for the same filters. Not netted against invoices."
+      ]
+    },
+    {
+      "metricId": "purchase_return_quantity",
+      "displayName": "Purchase Return Quantity",
+      "datasetId": "purchase_returns",
+      "expression": "SUM(quantity)",
+      "aggregation": "sum",
+      "dataType": "number",
+      "synonyms": [
+        "returned quantity",
+        "return qty"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Returns dataset is positive magnitudes (returns count up). Equals the dashboard scope=return total for the same filters. Not netted against invoices."
+      ]
+    },
+    {
+      "metricId": "purchase_return_invoice_count",
+      "displayName": "Purchase Return Count",
+      "datasetId": "purchase_returns",
+      "expression": "COUNT(DISTINCT invoice_id)",
+      "aggregation": "count",
+      "dataType": "number",
+      "synonyms": [
+        "number of purchase returns",
+        "debit note count"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Returns dataset is positive magnitudes (returns count up). Equals the dashboard scope=return total for the same filters. Not netted against invoices."
+      ]
+    },
+    {
+      "metricId": "purchase_return_tax",
+      "displayName": "Purchase Return Tax",
+      "datasetId": "purchase_returns",
+      "expression": "SUM(tax_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "return tax",
+        "debit note tax"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Returns dataset is positive magnitudes (returns count up). Equals the dashboard scope=return total for the same filters. Not netted against invoices."
+      ]
+    },
+    {
+      "metricId": "sales_net_amount",
+      "displayName": "Net Sales (after returns)",
+      "datasetId": "sales_net",
+      "expression": "SUM(net_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "net sales",
+        "net turnover",
+        "sales net of returns"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Signed: invoices add, returns subtract. Equals dashboard scope=net total."
+      ]
+    },
+    {
+      "metricId": "sales_net_quantity",
+      "displayName": "Net Sales Quantity",
+      "datasetId": "sales_net",
+      "expression": "SUM(quantity)",
+      "aggregation": "sum",
+      "dataType": "number",
+      "synonyms": [
+        "net quantity",
+        "net units sold"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Signed quantity: invoices add, returns subtract."
+      ]
+    },
+    {
+      "metricId": "purchase_net_amount",
+      "displayName": "Net Purchase (after returns)",
+      "datasetId": "purchase_net",
+      "expression": "SUM(net_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "net purchase",
+        "purchase net of returns"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Signed: invoices add, returns subtract. Equals dashboard scope=net total."
+      ]
+    },
+    {
+      "metricId": "purchase_net_quantity",
+      "displayName": "Net Purchase Quantity",
+      "datasetId": "purchase_net",
+      "expression": "SUM(quantity)",
+      "aggregation": "sum",
+      "dataType": "number",
+      "synonyms": [
+        "net purchase quantity"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Signed quantity: invoices add, returns subtract."
+      ]
+    },
+    {
+      "metricId": "sales_return_doc_count",
+      "displayName": "Sales Return Document Count",
+      "datasetId": "sales_returns_invoices",
+      "expression": "COUNT(*)",
+      "aggregation": "count",
+      "dataType": "number",
+      "synonyms": [
+        "number of credit notes",
+        "return document count",
+        "how many returns"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "One row per return document in this dataset."
+      ]
+    },
+    {
+      "metricId": "sales_return_doc_value",
+      "displayName": "Sales Return Document Value",
+      "datasetId": "sales_returns_invoices",
+      "expression": "SUM(net_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "credit note value",
+        "return document value"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Per-document return value (positive)."
+      ]
+    },
+    {
+      "metricId": "purchase_return_doc_count",
+      "displayName": "Purchase Return Document Count",
+      "datasetId": "purchase_returns_invoices",
+      "expression": "COUNT(*)",
+      "aggregation": "count",
+      "dataType": "number",
+      "synonyms": [
+        "number of debit notes",
+        "purchase return document count"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "One row per return document."
+      ]
+    },
+    {
+      "metricId": "purchase_return_doc_value",
+      "displayName": "Purchase Return Document Value",
+      "datasetId": "purchase_returns_invoices",
+      "expression": "SUM(net_amount)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "debit note value",
+        "purchase return document value"
+      ],
+      "defaultSortDirection": "desc",
+      "businessRules": [
+        "Per-document return value (positive)."
+      ]
     }
   ],
   "dimensions": [
@@ -2163,6 +2747,208 @@
         "source",
         "ledger source"
       ]
+    },
+    {
+      "dimensionId": "sales_return_customer",
+      "displayName": "Customer",
+      "datasetId": "sales_returns",
+      "columns": [
+        "customer_id",
+        "customer_code",
+        "customer_name"
+      ],
+      "labelColumn": "customer_name",
+      "synonyms": [
+        "customer",
+        "party",
+        "buyer"
+      ]
+    },
+    {
+      "dimensionId": "sales_return_product",
+      "displayName": "Product",
+      "datasetId": "sales_returns",
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "labelColumn": "product_name",
+      "synonyms": [
+        "product",
+        "item",
+        "sku"
+      ]
+    },
+    {
+      "dimensionId": "sales_return_salesman",
+      "displayName": "Salesman",
+      "datasetId": "sales_returns",
+      "columns": [
+        "salesman_code",
+        "salesman_name"
+      ],
+      "labelColumn": "salesman_name",
+      "synonyms": [
+        "salesman",
+        "mr",
+        "rep"
+      ]
+    },
+    {
+      "dimensionId": "sales_return_reason_company",
+      "displayName": "Product Company",
+      "datasetId": "sales_returns",
+      "columns": [
+        "product_company",
+        "product_company_name"
+      ],
+      "labelColumn": "product_company_name",
+      "synonyms": [
+        "company",
+        "brand",
+        "manufacturer"
+      ]
+    },
+    {
+      "dimensionId": "purchase_return_supplier",
+      "displayName": "Supplier",
+      "datasetId": "purchase_returns",
+      "columns": [
+        "supplier_id",
+        "supplier_code",
+        "supplier_name"
+      ],
+      "labelColumn": "supplier_name",
+      "synonyms": [
+        "supplier",
+        "vendor",
+        "party"
+      ]
+    },
+    {
+      "dimensionId": "purchase_return_product",
+      "displayName": "Product",
+      "datasetId": "purchase_returns",
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "labelColumn": "product_name",
+      "synonyms": [
+        "product",
+        "item",
+        "sku"
+      ]
+    },
+    {
+      "dimensionId": "sales_net_customer",
+      "displayName": "Customer",
+      "datasetId": "sales_net",
+      "columns": [
+        "customer_id",
+        "customer_code",
+        "customer_name"
+      ],
+      "labelColumn": "customer_name",
+      "synonyms": [
+        "customer",
+        "party",
+        "buyer"
+      ]
+    },
+    {
+      "dimensionId": "sales_net_product",
+      "displayName": "Product",
+      "datasetId": "sales_net",
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "labelColumn": "product_name",
+      "synonyms": [
+        "product",
+        "item",
+        "sku"
+      ]
+    },
+    {
+      "dimensionId": "sales_net_salesman",
+      "displayName": "Salesman",
+      "datasetId": "sales_net",
+      "columns": [
+        "salesman_code",
+        "salesman_name"
+      ],
+      "labelColumn": "salesman_name",
+      "synonyms": [
+        "salesman",
+        "mr",
+        "rep"
+      ]
+    },
+    {
+      "dimensionId": "purchase_net_supplier",
+      "displayName": "Supplier",
+      "datasetId": "purchase_net",
+      "columns": [
+        "supplier_id",
+        "supplier_code",
+        "supplier_name"
+      ],
+      "labelColumn": "supplier_name",
+      "synonyms": [
+        "supplier",
+        "vendor"
+      ]
+    },
+    {
+      "dimensionId": "purchase_net_product",
+      "displayName": "Product",
+      "datasetId": "purchase_net",
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "labelColumn": "product_name",
+      "synonyms": [
+        "product",
+        "item",
+        "sku"
+      ]
+    },
+    {
+      "dimensionId": "sales_retinv_customer",
+      "displayName": "Customer",
+      "datasetId": "sales_returns_invoices",
+      "columns": [
+        "customer_id",
+        "customer_code",
+        "customer_name"
+      ],
+      "labelColumn": "customer_name",
+      "synonyms": [
+        "customer",
+        "party"
+      ]
+    },
+    {
+      "dimensionId": "purchase_retinv_supplier",
+      "displayName": "Supplier",
+      "datasetId": "purchase_returns_invoices",
+      "columns": [
+        "supplier_id",
+        "supplier_code",
+        "supplier_name"
+      ],
+      "labelColumn": "supplier_name",
+      "synonyms": [
+        "supplier",
+        "vendor"
+      ]
     }
   ],
   "filters": [
@@ -2190,7 +2976,13 @@
         "purchase_invoices",
         "party_outstanding",
         "tax_register",
-        "ledger_entries"
+        "ledger_entries",
+        "sales_returns",
+        "purchase_returns",
+        "sales_net",
+        "purchase_net",
+        "sales_returns_invoices",
+        "purchase_returns_invoices"
       ],
       "column": "company_id",
       "operators": [
@@ -2210,7 +3002,13 @@
         "purchase_items",
         "purchase_invoices",
         "party_outstanding",
-        "tax_register"
+        "tax_register",
+        "sales_returns",
+        "purchase_returns",
+        "sales_net",
+        "purchase_net",
+        "sales_returns_invoices",
+        "purchase_returns_invoices"
       ],
       "column": "branch_id",
       "operators": [
@@ -2807,6 +3605,64 @@
         "entry date",
         "posting date"
       ]
+    },
+    {
+      "fieldId": "sales_return_date",
+      "datasetId": "sales_returns",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "return date",
+        "credit note date"
+      ]
+    },
+    {
+      "fieldId": "purchase_return_date",
+      "datasetId": "purchase_returns",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "return date",
+        "debit note date"
+      ]
+    },
+    {
+      "fieldId": "sales_net_date",
+      "datasetId": "sales_net",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "net sales date"
+      ]
+    },
+    {
+      "fieldId": "purchase_net_date",
+      "datasetId": "purchase_net",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "net purchase date"
+      ]
+    },
+    {
+      "fieldId": "sales_retinv_date",
+      "datasetId": "sales_returns_invoices",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "credit note date",
+        "return date"
+      ]
+    },
+    {
+      "fieldId": "purchase_retinv_date",
+      "datasetId": "purchase_returns_invoices",
+      "column": "invoice_date",
+      "default": true,
+      "synonyms": [
+        "debit note date",
+        "return date"
+      ]
     }
   ],
   "synonyms": [
@@ -3033,12 +3889,12 @@
         "purchase_items",
         "purchase_invoices"
       ],
-      "implementation": "Apply is_cancelled IS DISTINCT FROM true. The current Marg views expose NULL when cancellation is unavailable."
+      "implementation": "Apply is_cancelled IS DISTINCT FROM true. The Marg sales/purchase views expose the real mv.is_cancelled value AND hard-exclude cancelled vouchers at the source (WHERE is_cancelled = FALSE), so cancelled documents never appear regardless of the default filter."
     },
     {
       "assumptionId": "returns_follow_production_logic",
       "description": "Sales returns and purchase returns are not invented or netted differently by AI.",
-      "implementation": "Use status RETURN/POSTED and document_type values from approved views. Include or exclude returns only through approved filters/templates."
+      "implementation": "The sales_items/sales_invoices/purchase_items/purchase_invoices datasets are PURE COMMERCIAL INVOICES ONLY — returns, challans, and accounting adjustments are excluded by construction (family = SALES_INVOICE / PURCHASE_INVOICE). status is always POSTED and document_type is always SALE/PURCHASE here. Returns are NOT available via these datasets; a dedicated returns dataset is planned. Never imply a returns figure from these datasets or net returns out of them."
     },
     {
       "assumptionId": "most_selling_quantity_default",
@@ -5410,7 +6266,11 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["customer gstin", "buyer gst", "customer gst"]
+      "synonyms": [
+        "customer gstin",
+        "buyer gst",
+        "customer gst"
+      ]
     },
     {
       "columnId": "sales_item_customer_vat_no",
@@ -5420,7 +6280,10 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["customer vat", "buyer vat"]
+      "synonyms": [
+        "customer vat",
+        "buyer vat"
+      ]
     },
     {
       "columnId": "sales_item_customer_pan_no",
@@ -5430,7 +6293,10 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["customer pan", "buyer pan"]
+      "synonyms": [
+        "customer pan",
+        "buyer pan"
+      ]
     },
     {
       "columnId": "sales_item_customer_address",
@@ -5440,7 +6306,10 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["customer address", "buyer address"]
+      "synonyms": [
+        "customer address",
+        "buyer address"
+      ]
     },
     {
       "columnId": "sales_item_customer_phone",
@@ -5450,7 +6319,10 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["customer phone", "buyer phone"]
+      "synonyms": [
+        "customer phone",
+        "buyer phone"
+      ]
     },
     {
       "columnId": "sales_item_hsn_code",
@@ -5459,7 +6331,10 @@
       "label": "HSN Code",
       "dataType": "string",
       "defaultForDetail": false,
-      "synonyms": ["hsn", "hsn code"]
+      "synonyms": [
+        "hsn",
+        "hsn code"
+      ]
     },
     {
       "columnId": "sales_invoice_customer_gst_no",
@@ -5469,7 +6344,10 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["customer gstin", "buyer gst"]
+      "synonyms": [
+        "customer gstin",
+        "buyer gst"
+      ]
     },
     {
       "columnId": "sales_invoice_customer_vat_no",
@@ -5479,7 +6357,9 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["customer vat"]
+      "synonyms": [
+        "customer vat"
+      ]
     },
     {
       "columnId": "sales_invoice_customer_pan_no",
@@ -5489,7 +6369,9 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["customer pan"]
+      "synonyms": [
+        "customer pan"
+      ]
     },
     {
       "columnId": "sales_invoice_customer_address",
@@ -5499,7 +6381,9 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["customer address"]
+      "synonyms": [
+        "customer address"
+      ]
     },
     {
       "columnId": "purchase_item_supplier_gst_no",
@@ -5509,7 +6393,10 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["supplier gstin", "vendor gst"]
+      "synonyms": [
+        "supplier gstin",
+        "vendor gst"
+      ]
     },
     {
       "columnId": "purchase_item_supplier_vat_no",
@@ -5519,7 +6406,9 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["supplier vat"]
+      "synonyms": [
+        "supplier vat"
+      ]
     },
     {
       "columnId": "purchase_item_supplier_pan_no",
@@ -5529,7 +6418,9 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["supplier pan"]
+      "synonyms": [
+        "supplier pan"
+      ]
     },
     {
       "columnId": "purchase_item_supplier_address",
@@ -5539,7 +6430,9 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["supplier address"]
+      "synonyms": [
+        "supplier address"
+      ]
     },
     {
       "columnId": "purchase_invoice_supplier_gst_no",
@@ -5549,7 +6442,9 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["supplier gstin"]
+      "synonyms": [
+        "supplier gstin"
+      ]
     },
     {
       "columnId": "purchase_invoice_supplier_vat_no",
@@ -5559,7 +6454,9 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["supplier vat"]
+      "synonyms": [
+        "supplier vat"
+      ]
     },
     {
       "columnId": "purchase_invoice_supplier_pan_no",
@@ -5569,7 +6466,9 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["supplier pan"]
+      "synonyms": [
+        "supplier pan"
+      ]
     },
     {
       "columnId": "purchase_invoice_supplier_address",
@@ -5579,7 +6478,9 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["supplier address"]
+      "synonyms": [
+        "supplier address"
+      ]
     },
     {
       "columnId": "tax_party_gst_no",
@@ -5589,7 +6490,11 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["party gst", "customer gst", "supplier gst"]
+      "synonyms": [
+        "party gst",
+        "customer gst",
+        "supplier gst"
+      ]
     },
     {
       "columnId": "tax_party_vat_no",
@@ -5599,7 +6504,9 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["party vat"]
+      "synonyms": [
+        "party vat"
+      ]
     },
     {
       "columnId": "tax_party_pan_no",
@@ -5609,7 +6516,297 @@
       "dataType": "string",
       "defaultForDetail": false,
       "sensitive": true,
-      "synonyms": ["party pan"]
+      "synonyms": [
+        "party pan"
+      ]
+    },
+    {
+      "columnId": "sret_date",
+      "datasetId": "sales_returns",
+      "column": "invoice_date",
+      "label": "Return Date",
+      "dataType": "date",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "sret_invoice_no",
+      "datasetId": "sales_returns",
+      "column": "invoice_no",
+      "label": "Return No",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "sret_customer_name",
+      "datasetId": "sales_returns",
+      "column": "customer_name",
+      "label": "Customer",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "sret_product_name",
+      "datasetId": "sales_returns",
+      "column": "product_name",
+      "label": "Product",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "sret_quantity",
+      "datasetId": "sales_returns",
+      "column": "quantity",
+      "label": "Qty",
+      "dataType": "number",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "sret_net_amount",
+      "datasetId": "sales_returns",
+      "column": "net_amount",
+      "label": "Return Amount",
+      "dataType": "currency",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pret_date",
+      "datasetId": "purchase_returns",
+      "column": "invoice_date",
+      "label": "Return Date",
+      "dataType": "date",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pret_invoice_no",
+      "datasetId": "purchase_returns",
+      "column": "invoice_no",
+      "label": "Return No",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pret_supplier_name",
+      "datasetId": "purchase_returns",
+      "column": "supplier_name",
+      "label": "Supplier",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pret_product_name",
+      "datasetId": "purchase_returns",
+      "column": "product_name",
+      "label": "Product",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pret_quantity",
+      "datasetId": "purchase_returns",
+      "column": "quantity",
+      "label": "Qty",
+      "dataType": "number",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pret_net_amount",
+      "datasetId": "purchase_returns",
+      "column": "net_amount",
+      "label": "Return Amount",
+      "dataType": "currency",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "snet_date",
+      "datasetId": "sales_net",
+      "column": "invoice_date",
+      "label": "Date",
+      "dataType": "date",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "snet_invoice_no",
+      "datasetId": "sales_net",
+      "column": "invoice_no",
+      "label": "Invoice No",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "snet_doc_type",
+      "datasetId": "sales_net",
+      "column": "document_type",
+      "label": "Type",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "snet_customer_name",
+      "datasetId": "sales_net",
+      "column": "customer_name",
+      "label": "Customer",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "snet_product_name",
+      "datasetId": "sales_net",
+      "column": "product_name",
+      "label": "Product",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "snet_quantity",
+      "datasetId": "sales_net",
+      "column": "quantity",
+      "label": "Net Qty",
+      "dataType": "number",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "snet_net_amount",
+      "datasetId": "sales_net",
+      "column": "net_amount",
+      "label": "Net Amount",
+      "dataType": "currency",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pnet_date",
+      "datasetId": "purchase_net",
+      "column": "invoice_date",
+      "label": "Date",
+      "dataType": "date",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pnet_invoice_no",
+      "datasetId": "purchase_net",
+      "column": "invoice_no",
+      "label": "Invoice No",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pnet_doc_type",
+      "datasetId": "purchase_net",
+      "column": "document_type",
+      "label": "Type",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pnet_supplier_name",
+      "datasetId": "purchase_net",
+      "column": "supplier_name",
+      "label": "Supplier",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pnet_product_name",
+      "datasetId": "purchase_net",
+      "column": "product_name",
+      "label": "Product",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pnet_quantity",
+      "datasetId": "purchase_net",
+      "column": "quantity",
+      "label": "Net Qty",
+      "dataType": "number",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pnet_net_amount",
+      "datasetId": "purchase_net",
+      "column": "net_amount",
+      "label": "Net Amount",
+      "dataType": "currency",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "sri_date",
+      "datasetId": "sales_returns_invoices",
+      "column": "invoice_date",
+      "label": "Return Date",
+      "dataType": "date",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "sri_invoice_no",
+      "datasetId": "sales_returns_invoices",
+      "column": "invoice_no",
+      "label": "Return No",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "sri_customer_name",
+      "datasetId": "sales_returns_invoices",
+      "column": "customer_name",
+      "label": "Customer",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "sri_quantity",
+      "datasetId": "sales_returns_invoices",
+      "column": "quantity",
+      "label": "Qty",
+      "dataType": "number",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "sri_net_amount",
+      "datasetId": "sales_returns_invoices",
+      "column": "net_amount",
+      "label": "Return Amount",
+      "dataType": "currency",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pri_date",
+      "datasetId": "purchase_returns_invoices",
+      "column": "invoice_date",
+      "label": "Return Date",
+      "dataType": "date",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pri_invoice_no",
+      "datasetId": "purchase_returns_invoices",
+      "column": "invoice_no",
+      "label": "Return No",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pri_supplier_name",
+      "datasetId": "purchase_returns_invoices",
+      "column": "supplier_name",
+      "label": "Supplier",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pri_quantity",
+      "datasetId": "purchase_returns_invoices",
+      "column": "quantity",
+      "label": "Qty",
+      "dataType": "number",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "pri_net_amount",
+      "datasetId": "purchase_returns_invoices",
+      "column": "net_amount",
+      "label": "Return Amount",
+      "dataType": "currency",
+      "defaultForDetail": true
     }
   ]
 }

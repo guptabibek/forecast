@@ -43,7 +43,21 @@
       "Bash(npx eslint *)",
       "Bash(echo \"eslint_exit=$?\")",
       "Bash(ls -la .eslintrc* eslint.config*)",
-      "Bash(ls -la \"d:/RabbitTech/forecast-saas/\".eslintrc* \"d:/RabbitTech/forecast-saas/\"eslint.config*)"
+      "Bash(ls -la \"d:/RabbitTech/forecast-saas/\".eslintrc* \"d:/RabbitTech/forecast-saas/\"eslint.config*)",
+      "Bash(node -e ' *)",
+      "Bash(docker exec pg_migtest psql -U postgres -d migtest -c ' *)",
+      "Bash(docker exec pg_migtest psql -U postgres -d migtest -t -c ' *)",
+      "Bash(docker stop *)",
+      "Bash(docker exec pg_scopetest psql -U postgres -d st -c ' *)",
+      "Bash(docker exec pg_scopetest psql -U postgres -d st -t -c ' *)",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('./ai-reporting/semantic-catalog.json','utf8'\\)\\); console.log\\('JSON parses OK'\\)\")",
+      "Bash(docker version *)",
+      "Bash(docker info *)",
+      "Bash(docker exec pg_p2 psql -U postgres -d p2 -c ' *)",
+      "Bash(docker exec pg_p2 psql -U postgres -d p2 -t -c ' *)",
+      "Bash(node .catalog-v13.js)",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('./ai-reporting/semantic-catalog.json','utf8'\\)\\); console.log\\('parses'\\)\")",
+      "Bash(echo \"web_tsc=$?\")"
     ]
   }
 }

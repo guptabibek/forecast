@@ -72,11 +72,23 @@ const VIEW_TABS: Array<{ key: ViewKey; label: string }> = [
   { key: 'dimension', label: 'By Dimension' },
 ];
 
+type ScopeKey = 'invoice' | 'return' | 'net';
+
+const SCOPE_TABS: Array<{ key: ScopeKey; label: string; hint: string }> = [
+  { key: 'invoice', label: 'Invoices', hint: 'Pure commercial invoices only (no returns/challans)' },
+  { key: 'return', label: 'Returns', hint: 'Returns / credit & debit notes / breakage-expiry, shown positive' },
+  { key: 'net', label: 'Net', hint: 'Invoices minus returns (net-of-returns)' },
+];
+
 export default function SalesPurchaseAnalysisPage() {
   const { isPharma } = useTenantConfig();
   const DIMENSION_TABS = useMemo(() => ALL_DIMENSION_TABS.filter((d) => !d.pharmaOnly || isPharma), [isPharma]);
   const [kind, setKind] = useState<SalesPurchaseAnalysisKind>('sales');
   const [view, setView] = useState<ViewKey>('overview');
+  // Document scope: invoices (default) / returns / net-of-returns. Threaded
+  // into every query as `scope`; the backend defaults to 'invoice' so this is
+  // additive.
+  const [scope, setScope] = useState<'invoice' | 'return' | 'net'>('invoice');
   const [drilldown, setDrilldown] = useState<Drilldown>(null);
   const [dimension, setDimension] = useState<SalesPurchaseDimension>('salesman');
   const dimensionGrid = usePharmaGrid({ initialSortBy: 'netAmount', initialSortOrder: 'desc', initialPageSize: 25 });
@@ -103,17 +115,17 @@ export default function SalesPurchaseAnalysisPage() {
     }
   };
 
-  const overview = useSalesPurchaseOverview(kind, { ...dateScope, ...grid.pharmaParams }, view === 'overview');
-  const bills = useSalesPurchaseBills(kind, { ...dateScope, ...grid.pharmaParams }, view === 'bills');
+  const overview = useSalesPurchaseOverview(kind, { ...dateScope, scope, ...grid.pharmaParams }, view === 'overview');
+  const bills = useSalesPurchaseBills(kind, { ...dateScope, scope, ...grid.pharmaParams }, view === 'bills');
   const dimensionData = useSalesPurchaseDimension(
     kind,
     dimension,
-    { ...dateScope, ...dimensionGrid.pharmaParams },
+    { ...dateScope, scope, ...dimensionGrid.pharmaParams },
     view === 'dimension',
   );
   const billDetail = useSalesPurchaseBillDrilldown(kind, drilldown?.type === 'bill' ? drilldown.key : undefined);
-  const itemDetail = useSalesPurchaseItemDrilldown(kind, drilldown?.type === 'item' ? drilldown.key : undefined, grid.pharmaParams);
-  const partyDetail = useSalesPurchasePartyDrilldown(kind, drilldown?.type === 'party' ? drilldown.key : undefined, grid.pharmaParams);
+  const itemDetail = useSalesPurchaseItemDrilldown(kind, drilldown?.type === 'item' ? drilldown.key : undefined, { scope, ...grid.pharmaParams });
+  const partyDetail = useSalesPurchasePartyDrilldown(kind, drilldown?.type === 'party' ? drilldown.key : undefined, { scope, ...grid.pharmaParams });
 
   const summary = overview.data?.summary;
   const exportType = kind === 'sales' ? 'sales-analysis-bills' : 'purchase-analysis-bills';
@@ -179,12 +191,13 @@ export default function SalesPurchaseAnalysisPage() {
     [bills.data],
   );
 
+  const scopeTitleSuffix = scope === 'return' ? ' — Returns' : scope === 'net' ? ' — Net' : '';
   const pdfPayload = usePdfPayload({
-    title: kind === 'sales' ? 'Sales Analysis' : 'Purchase Analysis',
+    title: (kind === 'sales' ? 'Sales Analysis' : 'Purchase Analysis') + scopeTitleSuffix,
     reportKey: exportType,
     columns: pdfColumns,
     data: activeData,
-    filters: grid.pharmaParams,
+    filters: { scope, ...grid.pharmaParams },
     exportMode: 'current-page',
   });
 
@@ -197,7 +210,7 @@ export default function SalesPurchaseAnalysisPage() {
         </div>
         <ExportToolbar
           reportType={exportType}
-          filters={grid.pharmaParams}
+          filters={{ scope, ...grid.pharmaParams }}
           pdfPayload={pdfPayload}
           onRefresh={() => {
             void overview.refetch();
@@ -226,7 +239,24 @@ export default function SalesPurchaseAnalysisPage() {
             </button>
           ))}
         </nav>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {/* Document scope: invoices / returns / net-of-returns */}
+          <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm" role="group" aria-label="Document scope">
+            {SCOPE_TABS.map((s) => (
+              <button
+                key={s.key}
+                onClick={() => { setScope(s.key); setDrilldown(null); }}
+                title={s.hint}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
+                  scope === s.key
+                    ? 'bg-primary-600 text-white shadow'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
           <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
             {VIEW_TABS.map((v) => (
               <button
@@ -244,6 +274,13 @@ export default function SalesPurchaseAnalysisPage() {
           </div>
         </div>
       </div>
+      {scope !== 'invoice' && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          {scope === 'return'
+            ? 'Showing returns / credit & debit notes / breakage-expiry as positive values — not your invoice sales.'
+            : 'Showing net-of-returns (invoices minus returns).'}
+        </div>
+      )}
 
       {/* Sticky filter bar — date range + presets, drives every section. */}
       <Card padding="sm">
@@ -297,7 +334,7 @@ export default function SalesPurchaseAnalysisPage() {
 
       {/* Compact KPI strip — always visible above the active section. */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <Stat label="Net Amount" value={fmtCurrency(summary?.totalAmount)} />
+        <Stat label={scope === 'return' ? 'Returns Value' : scope === 'net' ? 'Net (Inv − Ret)' : 'Net Amount'} value={fmtCurrency(summary?.totalAmount)} />
         <Stat label="Bills" value={fmt(summary?.totalBills)} />
         <Stat label={kind === 'sales' ? 'Customers' : 'Suppliers'} value={fmt(kind === 'sales' ? summary?.totalCustomers : summary?.totalSuppliers)} />
         <Stat label="Quantity" value={fmt(summary?.totalQuantity, 2)} />

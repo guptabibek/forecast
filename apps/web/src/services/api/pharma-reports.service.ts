@@ -23,6 +23,13 @@ export interface PharmaFilters {
   sortDir?: 'asc' | 'desc';
   /** JSON-encoded ColumnFilter[] (per-column filters from useTableFilters) */
   filters?: string;
+  /**
+   * Document scope for sales/purchase analysis:
+   *  - 'invoice' (default): pure commercial invoices
+   *  - 'return': returns / credit & debit notes / breakage-expiry (positive)
+   *  - 'net': invoices minus returns
+   */
+  scope?: 'invoice' | 'return' | 'net';
 }
 
 export interface CurrentStockRow {
