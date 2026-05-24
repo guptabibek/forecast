@@ -75,7 +75,8 @@
       "Bash(docker run *)",
       "Bash(break)",
       "Bash(python -c \"import json,sys; s=json.load\\(sys.stdin\\)['scripts']; print\\('\\\\n'.join\\(f'{k}: {v}' for k,v in s.items\\(\\)\\)\\)\")",
-      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('eslintConfig','NONE'\\)\\)\\)\")"
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('eslintConfig','NONE'\\)\\)\\)\")",
+      "Bash(awk '/vw_ai_stock_summary AS/,/;/' prisma/migrations/20260512120000_add_ai_reporting_views/migration.sql)"
     ]
   }
 }
