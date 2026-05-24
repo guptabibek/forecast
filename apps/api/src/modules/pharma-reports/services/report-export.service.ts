@@ -55,15 +55,26 @@ export class ReportExportService {
   // Main export entry point — dispatches to the correct report query
   // and streams CSV or XLSX back
   // ─────────────────────────────────────────────────────────────────────────
+  // Columns hidden from every exported report file (CSV/XLSX), matching the
+  // on-screen report tables: clients run a single branch (Location is redundant)
+  // and SKU is hidden by request. Filtered centrally here so the download mirrors
+  // the screen without editing each report's column list. The row SQL still
+  // selects these fields; they are simply not emitted.
+  private static readonly HIDDEN_EXPORT_COLUMN_KEYS = new Set(['sku', 'location_code']);
+
+  private stripHiddenColumns(columns: ExportColumn[]): ExportColumn[] {
+    return columns.filter((c) => !ReportExportService.HIDDEN_EXPORT_COLUMN_KEYS.has(c.key));
+  }
+
   async getReportDataForPdf(tenantId: string, reportType: string, filters: Record<string, unknown>): Promise<ExportDataSet | null> {
     const dataSet = await this.getInMemoryReportData(tenantId, reportType, filters);
-    if (dataSet) return dataSet;
+    if (dataSet) return { ...dataSet, columns: this.stripHiddenColumns(dataSet.columns) };
 
     try {
       const { columns, query } = this.getReportQuery(tenantId, reportType, filters);
       const limitedQuery = Prisma.sql`${query} LIMIT 5000`;
       const rows = await this.prisma.$queryRaw<Record<string, unknown>[]>(limitedQuery);
-      return { columns, rows, sheetName: reportType };
+      return { columns: this.stripHiddenColumns(columns), rows, sheetName: reportType };
     } catch {
       return null;
     }
@@ -80,8 +91,9 @@ export class ReportExportService {
 
     const dataSet = await this.getInMemoryReportData(tenantId, reportType, filters);
     if (dataSet) {
+      const dataSetColumns = this.stripHiddenColumns(dataSet.columns);
       if (format === 'csv') {
-        const stream = this.streamRowsCsv(dataSet.rows, dataSet.columns);
+        const stream = this.streamRowsCsv(dataSet.rows, dataSetColumns);
         return {
           stream: new StreamableFile(stream),
           contentType: 'text/csv; charset=utf-8',
@@ -91,7 +103,7 @@ export class ReportExportService {
 
       const stream = await this.streamRowsXlsx(
         dataSet.rows,
-        dataSet.columns,
+        dataSetColumns,
         dataSet.sheetName ?? reportType,
       );
       return {
@@ -102,9 +114,10 @@ export class ReportExportService {
     }
 
     const { columns, query } = this.getReportQuery(tenantId, reportType, filters);
+    const visibleColumns = this.stripHiddenColumns(columns);
 
     if (format === 'csv') {
-      const stream = await this.streamCsv(query, columns);
+      const stream = await this.streamCsv(query, visibleColumns);
       return {
         stream: new StreamableFile(stream),
         contentType: 'text/csv; charset=utf-8',
@@ -112,7 +125,7 @@ export class ReportExportService {
       };
     }
 
-    const stream = await this.streamXlsx(query, columns, reportType);
+    const stream = await this.streamXlsx(query, visibleColumns, reportType);
     return {
       stream: new StreamableFile(stream),
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

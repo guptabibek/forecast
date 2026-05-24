@@ -23,7 +23,7 @@ import type {
 } from '../../services/api/pharma-reports.service';
 import ExportToolbar from './ExportToolbar';
 import KpiCard from './KpiCard';
-import { fmt, fmtCurrency, fmtDate, fmtPct } from './shared';
+import { fmt, fmtCurrency, fmtDate, fmtPct, reportCols } from './shared';
 
 type Tab = 'near' | 'expired' | 'fefo' | 'risk';
 
@@ -70,7 +70,7 @@ export default function ExpiryManagementPage() {
     LOW: 'default',
   };
 
-  const nearCols: Column<NearExpiryRow>[] = [
+  const nearCols: Column<NearExpiryRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
     { key: 'batch_number', header: 'Batch', accessor: 'batch_number', width: '120px', filterType: 'text', filterField: 'batch_number' },
@@ -87,9 +87,9 @@ export default function ExpiryManagementPage() {
     { key: 'quantity', header: 'Qty', accessor: (r) => fmt(r.quantity), align: 'right', filterType: 'number', filterField: 'quantity' },
     { key: 'at_risk_value', header: 'Value at Risk', accessor: (r) => fmtCurrency(r.at_risk_value), align: 'right', sortable: true, filterType: 'number', filterField: 'at_risk_value' },
     { key: 'urgency', header: 'Urgency', accessor: (r) => <Badge variant={urgencyVariant[r.urgency] ?? 'default'} size="sm">{r.urgency}</Badge> },
-  ];
+  ]);
 
-  const expiredCols: Column<ExpiredStockRow>[] = [
+  const expiredCols: Column<ExpiredStockRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
     { key: 'batch_number', header: 'Batch', accessor: 'batch_number', width: '120px', filterType: 'text', filterField: 'batch_number' },
@@ -104,9 +104,9 @@ export default function ExpiryManagementPage() {
       filterType: 'select', filterField: 'batch_status',
       filterOptions: [{ value: 'EXPIRED', label: 'Expired' }, { value: 'AVAILABLE', label: 'Available' }, { value: 'QUARANTINE', label: 'Quarantine' }],
     },
-  ];
+  ]);
 
-  const fefoCols: Column<FEFOPickingRow>[] = [
+  const fefoCols: Column<FEFOPickingRow>[] = reportCols([
     { key: 'picking_sequence', header: '#', accessor: (r) => r.picking_sequence, width: '50px', align: 'center' },
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
@@ -120,7 +120,7 @@ export default function ExpiryManagementPage() {
       ) : '—',
     },
     { key: 'available_qty', header: 'Available', accessor: (r) => fmt(r.available_qty), align: 'right', sortable: true, filterType: 'number', filterField: 'available_qty' },
-  ];
+  ]);
 
   const pdfColsMap = {
     risk: [] as Array<{ key: string; header: string; align?: 'left' | 'right' | 'center' }>,

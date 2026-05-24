@@ -41,10 +41,8 @@ export default function AlertsPage() {
   const pdfColumns = useMemo(() => [
     { key: 'severity', header: 'Severity' },
     { key: 'alert_type', header: 'Type' },
-    { key: 'sku', header: 'SKU' },
     { key: 'product_name', header: 'Product' },
     { key: 'message', header: 'Message' },
-    { key: 'location_code', header: 'Location' },
     { key: 'batch_number', header: 'Batch' },
     { key: 'value_at_risk', header: 'Value at Risk', align: 'right' as const },
   ], []);
@@ -159,14 +157,13 @@ export default function AlertsPage() {
                 {/* Details */}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">
-                    {alert.sku} — {alert.product_name}
+                    {alert.product_name}
                   </p>
                   <p className="text-xs text-gray-500 truncate">{alert.message}</p>
                 </div>
 
                 {/* Meta */}
                 <div className="hidden md:flex items-center gap-4 text-xs text-gray-500 whitespace-nowrap">
-                  {alert.location_code && <span>{alert.location_code}</span>}
                   {alert.batch_number && <span>Batch: {alert.batch_number}</span>}
                 </div>
 

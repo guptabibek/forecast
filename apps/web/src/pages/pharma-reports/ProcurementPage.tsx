@@ -21,7 +21,7 @@ import type {
   SupplierPerformanceRow,
 } from '../../services/api/pharma-reports.service';
 import ExportToolbar from './ExportToolbar';
-import { fmt, fmtCurrency, fmtDate, fmtPct } from './shared';
+import { fmt, fmtCurrency, fmtDate, fmtPct, reportCols } from './shared';
 
 type Tab = 'purchase' | 'supplier' | 'stockouts';
 
@@ -172,7 +172,7 @@ export default function ProcurementPage() {
     </button>
   );
 
-  const purchaseCols: Column<SuggestedPurchaseRow>[] = [
+  const purchaseCols: Column<SuggestedPurchaseRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '90px', filterType: 'text', filterField: 'location_code' },
@@ -187,9 +187,9 @@ export default function ProcurementPage() {
     },
     { key: 'estimated_cost', header: 'Est. Cost', accessor: (r) => fmtCurrency(r.estimated_cost), align: 'right' },
     { key: 'preferred_supplier', header: 'Supplier', accessor: (r) => r.preferred_supplier ?? '—' },
-  ];
+  ]);
 
-  const supplierCols: Column<SupplierPerformanceRow>[] = [
+  const supplierCols: Column<SupplierPerformanceRow>[] = reportCols([
     {
       key: 'supplier_name',
       header: 'Supplier Name',
@@ -252,9 +252,9 @@ export default function ProcurementPage() {
         </div>
       ),
     },
-  ];
+  ]);
 
-  const purchaseOrderDetailCols: Column<SupplierPerformancePurchaseOrderDetailRow>[] = [
+  const purchaseOrderDetailCols: Column<SupplierPerformancePurchaseOrderDetailRow>[] = reportCols([
     {
       key: 'document_number',
       header: 'PO No.',
@@ -307,9 +307,9 @@ export default function ProcurementPage() {
       align: 'center',
       width: '56px',
     },
-  ];
+  ]);
 
-  const purchaseInvoiceDetailCols: Column<SupplierPerformancePurchaseInvoiceDetailRow>[] = [
+  const purchaseInvoiceDetailCols: Column<SupplierPerformancePurchaseInvoiceDetailRow>[] = reportCols([
     {
       key: 'document_number',
       header: 'Invoice No.',
@@ -357,9 +357,9 @@ export default function ProcurementPage() {
       align: 'center',
       width: '56px',
     },
-  ];
+  ]);
 
-  const stockoutCols: Column<StockOutRow>[] = [
+  const stockoutCols: Column<StockOutRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'item_name', header: 'Item Name', accessor: 'item_name', filterType: 'text', filterField: 'item_name' },
     { key: 'stock_out_count', header: 'Stock-Out Count', accessor: (r) => fmt(r.stock_out_count), align: 'right', sortable: true, filterType: 'number', filterField: 'stock_out_count' },
@@ -387,7 +387,7 @@ export default function ProcurementPage() {
         </div>
       ),
     },
-  ];
+  ]);
 
   const pdfColsMap = {
     purchase: purchaseCols.map((c) => ({ key: c.key, header: c.header, align: c.align })),

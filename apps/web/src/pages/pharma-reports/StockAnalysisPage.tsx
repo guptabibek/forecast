@@ -17,7 +17,7 @@ import type {
     XYZRow,
 } from '../../services/api/pharma-reports.service';
 import ExportToolbar from './ExportToolbar';
-import { fmt, fmtCurrency, fmtDate, fmtPct } from './shared';
+import { fmt, fmtCurrency, fmtDate, fmtPct, reportCols } from './shared';
 
 type Tab = 'deadSlow' | 'abc' | 'xyz' | 'turnover';
 
@@ -63,7 +63,7 @@ export default function StockAnalysisPage() {
   const abcColors: Record<string, string> = { A: '#10B981', B: '#F59E0B', C: '#94A3B8' };
   const xyzColors: Record<string, string> = { X: '#3B82F6', Y: '#F59E0B', Z: '#EF4444' };
 
-  const deadSlowCols: Column<DeadSlowRow>[] = [
+  const deadSlowCols: Column<DeadSlowRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
     { key: 'category', header: 'Category', accessor: (r) => r.category ?? '—', filterType: 'text', filterField: 'category' },
@@ -76,9 +76,9 @@ export default function StockAnalysisPage() {
       key: 'classification', header: 'Class',
       accessor: (r) => <Badge variant={r.classification === 'DEAD' ? 'error' : 'warning'} size="sm">{r.classification}</Badge>,
     },
-  ];
+  ]);
 
-  const abcCols: Column<ABCRow>[] = [
+  const abcCols: Column<ABCRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
     { key: 'consumption_value', header: 'Consumption', accessor: (r) => fmtCurrency(r.consumption_value), align: 'right', sortable: true, filterType: 'number', filterField: 'consumption_value' },
@@ -90,9 +90,9 @@ export default function StockAnalysisPage() {
       key: 'abc_class', header: 'Class',
       accessor: (r) => <Badge variant={r.abc_class === 'A' ? 'success' : r.abc_class === 'B' ? 'warning' : 'default'} size="sm">{r.abc_class}</Badge>,
     },
-  ];
+  ]);
 
-  const xyzCols: Column<XYZRow>[] = [
+  const xyzCols: Column<XYZRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
     { key: 'avg_monthly_demand', header: 'Avg Demand/Mo', accessor: (r) => r.avg_monthly_demand?.toFixed(1) ?? '—', align: 'right', sortable: true, filterType: 'number', filterField: 'avg_monthly_demand' },
@@ -103,9 +103,9 @@ export default function StockAnalysisPage() {
       key: 'xyz_class', header: 'Class',
       accessor: (r) => <Badge variant={r.xyz_class === 'X' ? 'primary' : r.xyz_class === 'Y' ? 'warning' : 'error'} size="sm">{r.xyz_class}</Badge>,
     },
-  ];
+  ]);
 
-  const turnoverCols: Column<TurnoverRow>[] = [
+  const turnoverCols: Column<TurnoverRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '90px', filterType: 'text', filterField: 'location_code' },
@@ -113,7 +113,7 @@ export default function StockAnalysisPage() {
     { key: 'avg_inventory', header: 'Avg Inventory', accessor: (r) => fmtCurrency(r.avg_inventory), align: 'right', sortable: true, filterType: 'number', filterField: 'avg_inventory' },
     { key: 'turnover_ratio', header: 'Turnover', accessor: (r) => r.turnover_ratio != null ? r.turnover_ratio.toFixed(2) : '—', align: 'right' },
     { key: 'days_of_inventory', header: 'Days of Inv.', accessor: (r) => r.days_of_inventory != null ? r.days_of_inventory.toFixed(0) : '—', align: 'right' },
-  ];
+  ]);
 
   const pdfColsMap = {
     abc: abcCols.map((c) => ({ key: c.key, header: c.header, align: c.align })),

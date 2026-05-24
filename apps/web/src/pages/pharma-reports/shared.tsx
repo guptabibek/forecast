@@ -1,9 +1,21 @@
 import { useCallback, useState } from 'react';
 import toast from 'react-hot-toast';
+import type { Column } from '../../components/ui';
 import { pharmaReportsService } from '../../services/api/pharma-reports.service';
 import { formatIndianNumber, formatInr } from '../../utils/number-format';
 
 export type ExportFormat = 'csv' | 'xlsx';
+
+// Columns hidden from every client-facing report table. Clients run a single
+// branch/location, so the Location column is redundant; SKU is hidden by request
+// (the product name identifies the row, and the raw Marg codes are noisy).
+// Centralised so there is exactly one place to flip if a tenant ever needs
+// multi-branch. Apply by wrapping a report's column array: reportCols([...]).
+export const HIDDEN_REPORT_COLUMN_KEYS = new Set(['sku', 'location_code']);
+
+export function reportCols<T>(cols: Column<T>[]): Column<T>[] {
+  return cols.filter((c) => !HIDDEN_REPORT_COLUMN_KEYS.has(c.key));
+}
 
 export function useReportExport() {
   const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);

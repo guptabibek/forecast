@@ -22,7 +22,7 @@ import type {
   StockAgeingRow,
 } from '../../services/api/pharma-reports.service';
 import ExportToolbar from './ExportToolbar';
-import { fmt, fmtCurrency, fmtDate } from './shared';
+import { fmt, fmtCurrency, fmtDate, reportCols } from './shared';
 
 type Tab = 'current' | 'batch' | 'ledger' | 'reorder' | 'ageing';
 
@@ -103,7 +103,7 @@ export default function InventoryReportsPage() {
     ageing: ageingGrid.pharmaParams,
   };
 
-  const currentCols: Column<CurrentStockRow>[] = [
+  const currentCols: Column<CurrentStockRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', sortable: true, filterType: 'text', filterField: 'product_name' },
     { key: 'company', header: 'Company', accessor: (r) => r.company_display ?? r.company ?? '-', filterType: 'text', filterField: 'company' },
@@ -116,9 +116,9 @@ export default function InventoryReportsPage() {
     { key: 'in_transit_qty', header: 'In Transit', accessor: (r) => fmt(r.in_transit_qty), align: 'right', filterType: 'number', filterField: 'in_transit_qty' },
     { key: 'on_order_qty', header: 'On Order', accessor: (r) => fmt(r.on_order_qty), align: 'right', filterType: 'number', filterField: 'on_order_qty' },
     { key: 'inventory_value', header: 'Value', accessor: (r) => fmtCurrency(r.inventory_value), align: 'right', sortable: true, filterType: 'number', filterField: 'inventory_value' },
-  ];
+  ]);
 
-  const batchCols: Column<BatchInventoryRow>[] = [
+  const batchCols: Column<BatchInventoryRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', sortable: true, filterType: 'text', filterField: 'product_name' },
     { key: 'batch_number', header: 'Batch', accessor: 'batch_number', width: '120px', sortable: true, filterType: 'text', filterField: 'batch_number' },
@@ -145,9 +145,9 @@ export default function InventoryReportsPage() {
         { value: 'IN_PROCESS', label: 'In Process' },
       ],
     },
-  ];
+  ]);
 
-  const ledgerCols: Column<MovementLedgerRow>[] = [
+  const ledgerCols: Column<MovementLedgerRow>[] = reportCols([
     { key: 'transaction_date', header: 'Date', accessor: (r) => fmtDate(r.transaction_date), width: '100px', sortable: true, filterType: 'date', filterField: 'transaction_date' },
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
@@ -169,9 +169,9 @@ export default function InventoryReportsPage() {
     { key: 'total_cost', header: 'Value', accessor: (r) => fmtCurrency(r.total_cost), align: 'right', filterType: 'number', filterField: 'total_cost' },
     { key: 'running_balance', header: 'Balance', accessor: (r) => fmt(r.running_balance), align: 'right', filterType: 'number', filterField: 'running_balance' },
     { key: 'batch_number', header: 'Batch', accessor: (r) => r.batch_number ?? '—', width: '100px', filterType: 'text', filterField: 'batch_number' },
-  ];
+  ]);
 
-  const reorderCols: Column<ReorderRow>[] = [
+  const reorderCols: Column<ReorderRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '90px', filterType: 'text', filterField: 'location_code' },
@@ -209,9 +209,9 @@ export default function InventoryReportsPage() {
       filterOptions: [{ value: 'A', label: 'A' }, { value: 'B', label: 'B' }, { value: 'C', label: 'C' }],
     },
     { key: 'days_of_stock', header: 'Days Stock', accessor: (r) => r.days_of_stock != null ? r.days_of_stock.toFixed(0) : '—', align: 'right' },
-  ];
+  ]);
 
-  const ageingCols: Column<StockAgeingRow>[] = [
+  const ageingCols: Column<StockAgeingRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
     { key: 'batch_number', header: 'Batch', accessor: 'batch_number', width: '120px', filterType: 'text', filterField: 'batch_number' },
@@ -221,7 +221,7 @@ export default function InventoryReportsPage() {
     { key: 'age_bucket', header: 'Bucket', accessor: (r) => <Badge variant={r.age_bucket.startsWith('>') ? 'error' : r.age_bucket.includes('181') ? 'warning' : 'default'} size="sm">{r.age_bucket}</Badge> },
     { key: 'quantity', header: 'Qty', accessor: (r) => fmt(r.quantity), align: 'right', sortable: true, filterType: 'number', filterField: 'quantity' },
     { key: 'batch_value', header: 'Value', accessor: (r) => fmtCurrency(r.batch_value), align: 'right', sortable: true, filterType: 'number', filterField: 'batch_value' },
-  ];
+  ]);
 
   const pdfColsMap = {
     current: currentCols.map((c) => ({ key: c.key, header: c.header, align: c.align })),
