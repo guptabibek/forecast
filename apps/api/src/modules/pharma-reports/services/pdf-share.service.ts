@@ -4,8 +4,8 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import PDFDocument = require('pdfkit');
 import { ReportExportService } from './report-export.service';
+import PDFDocument = require('pdfkit');
 
 export interface PdfField {
   label: string;
@@ -405,20 +405,38 @@ export class PdfShareService {
   }
 
   private renderDataTable(doc: PDFKit.PDFDocument, columns: PdfTableColumn[], rows: Array<Record<string, unknown>>): void {
+    if (!columns.length) return;
+
     const pageWidth = doc.page.width - 56;
     const maxCols = Math.min(columns.length, 20);
     const visibleCols = columns.slice(0, maxCols);
     const colWidth = pageWidth / visibleCols.length;
-    const rowHeight = 13;
-    const headerHeight = 15;
+    
+    const CELL_FONT_SIZE = 6.5;
+    const HEADER_FONT_SIZE = 6;
+    const PAD_H = 3;          // horizontal padding per side
+    const PAD_V = 3;          // vertical padding per side (top + bottom = PAD_V * 2)
+    const MIN_ROW_HEIGHT = 13;
+    const cellWidth = colWidth - PAD_H * 2;
 
-    const drawHeader = (y: number) => {
+    // Pre-measure text height at the current font/size within the cell width.
+    // Called before drawing so we know the row height before placing any ink.
+    const measureH = (text: string, fontSize: number, font: string): number => {
+      doc.fontSize(fontSize).font(font);
+      return doc.heightOfString(text, { width: cellWidth });
+    };
+
+    // Header height grows to fit the tallest header label (uncommon but correct).
+    const headerContentH = Math.max(...visibleCols.map((col) => measureH(col.header, HEADER_FONT_SIZE, 'Helvetica-Bold')));
+    const headerHeight = Math.max(15, headerContentH + PAD_V * 2);
+
+    const drawHeader = (y: number): number => {
       doc.rect(28, y, pageWidth, headerHeight).fillColor('#1f2937').fill();
       visibleCols.forEach((col, i) => {
         const x = 28 + i * colWidth;
         const align = col.align === 'right' ? 'right' : col.align === 'center' ? 'center' : 'left';
-        doc.fontSize(6).font('Helvetica-Bold').fillColor('#ffffff')
-          .text(col.header, x + 3, y + 4, { width: colWidth - 6, align, lineBreak: false });
+        doc.fontSize(HEADER_FONT_SIZE).font('Helvetica-Bold').fillColor('#ffffff')
+          .text(col.header, x + PAD_H, y + PAD_V, { width: cellWidth, align, lineBreak: true });
       });
       return y + headerHeight;
     };
@@ -426,27 +444,39 @@ export class PdfShareService {
     let y = drawHeader(doc.y);
 
     for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+      const row = rows[rowIdx];
+
+      // Resolve display text for every cell in this row.
+      const cellTexts = visibleCols.map((col) => {
+        const v = row[col.key];
+        return v === null || v === undefined || v === '' ? '-' : String(v);
+      });
+
+      // Measure each cell, then size the row to the tallest one so that no
+      // cell's content bleeds into the next row.
+      const rowContentH = Math.max(...cellTexts.map((t) => measureH(t, CELL_FONT_SIZE, 'Helvetica')));
+      const rowHeight = Math.max(MIN_ROW_HEIGHT, rowContentH + PAD_V * 2);
+
+      // If this row won't fit on the remaining page, start a fresh page with a
+      // repeated header so column labels are always visible.
       if (y + rowHeight > doc.page.height - 50) {
         doc.addPage();
         y = drawHeader(36);
       }
 
-      const row = rows[rowIdx];
+      // Alternating stripe + row border drawn at the computed height.
       if (rowIdx % 2 === 0) {
         doc.rect(28, y, pageWidth, rowHeight).fillColor('#f9fafb').fill();
       }
-
       doc.rect(28, y, pageWidth, rowHeight).strokeColor('#e5e7eb').lineWidth(0.25).stroke();
 
+      // Render cell text with wrapping enabled; absolute y anchors each cell to
+      // the top of this row so multi-line cells stay vertically aligned.
       visibleCols.forEach((col, i) => {
         const x = 28 + i * colWidth;
         const align = col.align === 'right' ? 'right' : col.align === 'center' ? 'center' : 'left';
-        const rawVal = row[col.key];
-        const cellText = rawVal === null || rawVal === undefined || rawVal === '' ? '-' : String(rawVal);
-        const truncated = cellText.length > 40 ? cellText.slice(0, 37) + '...' : cellText;
-
-        doc.fontSize(6.5).font('Helvetica').fillColor('#111827')
-          .text(truncated, x + 3, y + 3, { width: colWidth - 6, align, lineBreak: false });
+        doc.fontSize(CELL_FONT_SIZE).font('Helvetica').fillColor('#111827')
+          .text(cellTexts[i], x + PAD_H, y + PAD_V, { width: cellWidth, align, lineBreak: true });
       });
 
       y += rowHeight;
