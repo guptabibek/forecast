@@ -113,13 +113,83 @@ export interface ReorderRow {
   location_code: string;
   on_hand_qty: number;
   available_qty: number;
+  on_order_qty: number;
   reorder_point: number;
+  order_up_to_qty: number;
   safety_stock_qty: number;
   lead_time_days: number;
+  /** Net average daily demand (units sold − returned) over the lookback window. */
   avg_daily_sales: number;
   suggested_order_qty: number;
+  reorder_status: 'OUT_OF_STOCK' | 'BELOW_REORDER' | 'OK';
+  is_configured: boolean;
   abc_class: string | null;
   days_of_stock: number | null;
+  lookback_days: number;
+  coverage_days: number;
+}
+
+export interface ReorderParams {
+  /** Demand window (trailing days of net sales). */
+  lookbackDays?: number;
+  /** Coverage horizon (days of demand the order should cover). */
+  coverageDays?: number;
+  /** Default supplier lead time (days) when no per-product policy. */
+  leadTimeDays?: number;
+  /** Default safety cover (days × avg demand) when no per-product policy. */
+  safetyDays?: number;
+  /** Show every product×location, not just items needing reorder. */
+  includeAll?: boolean;
+}
+
+export interface ReorderPolicyRow {
+  product_id: string;
+  product_code: string;
+  product_name: string;
+  location_id: string;
+  location_code: string;
+  location_name: string;
+  reorder_point: number | null;
+  reorder_qty: number | null;
+  min_order_qty: number | null;
+  max_order_qty: number | null;
+  multiple_order_qty: number | null;
+  safety_stock_qty: number | null;
+  safety_stock_days: number | null;
+  lead_time_days: number | null;
+  abc_class: string | null;
+}
+
+export interface ReorderConfigTemplateRow {
+  product_code: string;
+  product_name: string;
+  location_code: string;
+  location_name: string;
+  reorder_point: number | null;
+  min_order_qty: number | null;
+  max_order_qty: number | null;
+  multiple_order_qty: number | null;
+  reorder_qty: number | null;
+  safety_stock_qty: number | null;
+  safety_stock_days: number | null;
+  lead_time_days: number | null;
+  abc_class: string | null;
+}
+
+export interface ReorderPolicyInput {
+  productId?: string;
+  productCode?: string;
+  locationId?: string;
+  locationCode?: string;
+  reorderPoint?: number;
+  reorderQty?: number;
+  minOrderQty?: number;
+  maxOrderQty?: number;
+  multipleOrderQty?: number;
+  safetyStockQty?: number;
+  safetyStockDays?: number;
+  leadTimeDays?: number;
+  abcClass?: string;
 }
 
 export interface StockAgeingRow {
@@ -973,8 +1043,26 @@ export const pharmaReportsService = {
   getMovementLedger: (filters?: PharmaFilters) =>
     apiClient.get<PaginatedResponse<MovementLedgerRow>>(`${BASE}/inventory/movement-ledger`, { params: toParams(filters ?? {}) }).then((r) => r.data),
 
-  getReorderReport: (filters?: PharmaFilters & { avgSalesDays?: number }) =>
+  getReorderReport: (filters?: PharmaFilters & ReorderParams & { avgSalesDays?: number }) =>
     apiClient.get<PaginatedResponse<ReorderRow>>(`${BASE}/inventory/reorder`, { params: toParams(filters ?? {}) }).then((r) => r.data),
+
+  getReorderConfig: (filters?: PharmaFilters) =>
+    apiClient.get<PaginatedResponse<ReorderPolicyRow>>(`${BASE}/inventory/reorder-config`, { params: toParams(filters ?? {}) }).then((r) => r.data),
+
+  upsertReorderConfig: (rows: ReorderPolicyInput[]) =>
+    apiClient
+      .post<{ upserted: number; skipped: Array<{ row: number; reason: string }> }>(`${BASE}/inventory/reorder-config`, { rows })
+      .then((r) => r.data),
+
+  getReorderConfigTemplate: (filters?: PharmaFilters) =>
+    apiClient
+      .get<ReorderConfigTemplateRow[]>(`${BASE}/inventory/reorder-config/template`, { params: toParams(filters ?? {}) })
+      .then((r) => r.data),
+
+  deleteReorderConfig: (productId: string, locationId: string) =>
+    apiClient
+      .delete<{ deleted: number }>(`${BASE}/inventory/reorder-config`, { params: { productId, locationId } })
+      .then((r) => r.data),
 
   getStockAgeing: (filters?: PharmaFilters & { bucketDays?: number[] }) =>
     apiClient.get<{ data: StockAgeingRow[]; summary: { bucket: string; total_qty: number; total_value: number }[]; total: number }>(`${BASE}/inventory/ageing`, { params: toParams(filters ?? {}) }).then((r) => r.data),

@@ -6,6 +6,7 @@
 import {
     Body,
     Controller,
+    Delete,
     Get,
     Param,
     Post,
@@ -34,6 +35,7 @@ import {
     ExpiryFilterDto,
     InventoryBaseFilterDto,
     ReorderFilterDto,
+    ReorderPolicyBulkDto,
     SalesPurchaseAnalysisFilterDto,
     SalesPurchaseComparisonFilterDto,
     StockAgeingFilterDto,
@@ -149,6 +151,78 @@ export class PharmaReportsController {
     @Query() filters: ReorderFilterDto,
   ) {
     return this.inventoryReports.getReorderReport(user.tenantId, filters);
+  }
+
+  @Get('inventory/reorder-config')
+  @ApiOperation({ summary: 'List reorder-policy overrides (min/max/reorder point/lead time) per product×location' })
+  @ApiResponse({ status: 200, description: 'Configured reorder policies' })
+  async getReorderConfig(
+    @CurrentUser() user: any,
+    @Query() filters: InventoryBaseFilterDto,
+  ) {
+    return this.inventoryReports.getReorderPolicies(user.tenantId, {
+      productIds: filters.productIds,
+      locationIds: filters.locationIds,
+      limit: filters.limit,
+      offset: filters.offset,
+    });
+  }
+
+  @Get('inventory/reorder-config/template')
+  @Roles('ADMIN', 'PLANNER')
+  @ApiOperation({
+    summary: 'Reorder-config template covering every active product × stock location',
+    description:
+      'Returns one row per product×location that can hold stock (same universe as ' +
+      'the reorder report), with any existing override pre-filled. Intended as a ' +
+      'download → edit → re-import template so the client can configure all products.',
+  })
+  @ApiResponse({ status: 200, description: 'Template rows (product/location codes + names + policy fields)' })
+  async getReorderConfigTemplate(
+    @CurrentUser() user: any,
+    @Query() filters: InventoryBaseFilterDto,
+  ) {
+    return this.inventoryReports.getReorderConfigTemplate(user.tenantId, {
+      productIds: filters.productIds,
+      locationIds: filters.locationIds,
+    });
+  }
+
+  @Post('inventory/reorder-config')
+  @Roles('ADMIN', 'PLANNER')
+  @ApiOperation({
+    summary: 'Create/update reorder-policy overrides (bulk). Accepts a parsed CSV as rows[].',
+    description:
+      'Each row identifies its product×location by UUID or by code (SKU / location code). ' +
+      'Only the fields supplied are written; the rest fall back to the demand-driven ' +
+      'computation in the reorder report. Unresolved product/location codes are returned ' +
+      'in `skipped` rather than silently dropped.',
+  })
+  @ApiResponse({ status: 200, description: 'Upsert result: { upserted, skipped[] }' })
+  async upsertReorderConfig(
+    @CurrentUser() user: any,
+    @Body() dto: ReorderPolicyBulkDto,
+  ) {
+    return this.inventoryReports.upsertReorderPolicies(user.tenantId, dto.rows);
+  }
+
+  @Delete('inventory/reorder-config')
+  @Roles('ADMIN', 'PLANNER')
+  @ApiOperation({
+    summary: 'Delete a reorder-policy override for one product×location',
+    description:
+      'Removes the stored override so the reorder report falls back to the ' +
+      'demand-driven computation for that product×location.',
+  })
+  @ApiQuery({ name: 'productId', required: true })
+  @ApiQuery({ name: 'locationId', required: true })
+  @ApiResponse({ status: 200, description: 'Delete result: { deleted }' })
+  async deleteReorderConfig(
+    @CurrentUser() user: any,
+    @Query('productId') productId: string,
+    @Query('locationId') locationId: string,
+  ) {
+    return this.inventoryReports.deleteReorderPolicy(user.tenantId, productId, locationId);
   }
 
   @Get('inventory/ageing')

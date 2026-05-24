@@ -59,7 +59,23 @@
       "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('./ai-reporting/semantic-catalog.json','utf8'\\)\\); console.log\\('parses'\\)\")",
       "Bash(echo \"web_tsc=$?\")",
       "Bash(docker exec pg_v psql -U postgres -d v -c ' *)",
-      "Bash(docker exec pg_v psql -U postgres -d v -t -c ' *)"
+      "Bash(docker exec pg_v psql -U postgres -d v -t -c ' *)",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('docs/bpos-sample-payloads.json','utf8'\\)\\); console.log\\('valid JSON, resources:', Object.keys\\(JSON.parse\\(require\\('fs'\\).readFileSync\\('docs/bpos-sample-payloads.json','utf8'\\)\\)\\).length\\)\")",
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\('docs/bpos-sample-payloads.json','utf8'\\)\\); console.log\\('valid; resources:', Object.keys\\(d\\).filter\\(k=>d[k].endpoint\\).length\\); console.log\\('doc types:', d.documents.documentTypeEnum.join\\(','\\)\\); console.log\\('movement types:', d.stockMovements.movementTypeEnum.join\\(','\\)\\);\")",
+      "Bash(sed -n '/interface ReorderRow/,/^}/p' inventory-reports.service.ts)",
+      "Bash(sed -n '/REORDER_COLUMNS/,/};/p' inventory-reports.service.ts)",
+      "Bash(docker exec *)",
+      "Bash(echo \" exit=$?\")",
+      "Bash(echo \"seed_exit=$?\")",
+      "Bash(echo \"WEB_TSC_EXIT=$?\")",
+      "Bash(echo \"API_TSC_EXIT=$?\")",
+      "Bash(cat)",
+      "Bash(docker cp *)",
+      "Bash(python -)",
+      "Bash(docker run *)",
+      "Bash(break)",
+      "Bash(python -c \"import json,sys; s=json.load\\(sys.stdin\\)['scripts']; print\\('\\\\n'.join\\(f'{k}: {v}' for k,v in s.items\\(\\)\\)\\)\")",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('eslintConfig','NONE'\\)\\)\\)\")"
     ]
   }
 }

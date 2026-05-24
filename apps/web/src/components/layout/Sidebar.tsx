@@ -58,6 +58,7 @@ const navigation: NavigationItem[] = [
     module: 'reports',
     items: [
       { name: 'Inventory', href: '/pharma-reports/inventory', icon: TableCellsIcon, module: 'reports' },
+      { name: 'Reorder Config', href: '/pharma-reports/reorder-config', icon: Cog6ToothIcon, module: 'reports' },
       { name: 'Expiry Mgmt', href: '/pharma-reports/expiry', icon: ClockIcon, module: 'reports' },
       { name: 'Stock Analysis', href: '/pharma-reports/analysis', icon: ChartBarIcon, module: 'reports' },
       { name: 'Sales & Purchase', href: '/pharma-reports/sales-purchase', icon: DocumentChartBarIcon, module: 'reports' },

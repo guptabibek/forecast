@@ -1,6 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   PharmaFilters,
+  type ReorderParams,
+  type ReorderPolicyInput,
   SalesPurchaseAnalysisKind,
   type SalesPurchaseDimension,
   ThreeSixtyPeriod,
@@ -30,6 +32,7 @@ export const pharmaKeys = {
   batchInventory: (f?: PharmaFilters) => [...pharmaKeys.inventory(), 'batch', f] as const,
   movementLedger: (f?: PharmaFilters) => [...pharmaKeys.inventory(), 'ledger', f] as const,
   reorder: (f?: PharmaFilters) => [...pharmaKeys.inventory(), 'reorder', f] as const,
+  reorderConfig: (f?: PharmaFilters) => [...pharmaKeys.inventory(), 'reorder-config', f] as const,
   ageing: (f?: PharmaFilters) => [...pharmaKeys.inventory(), 'ageing', f] as const,
 
   expiry: () => [...pharmaKeys.all, 'expiry'] as const,
@@ -153,11 +156,42 @@ export function useMovementLedger(filters?: PharmaFilters, enabled = true) {
   });
 }
 
-export function useReorderReport(filters?: PharmaFilters & { avgSalesDays?: number }, enabled = true) {
+export function useReorderReport(filters?: PharmaFilters & ReorderParams & { avgSalesDays?: number }, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.reorder(filters),
     queryFn: () => pharmaReportsService.getReorderReport(filters),
     enabled,
+  });
+}
+
+export function useReorderConfig(filters?: PharmaFilters, enabled = true) {
+  return useQuery({
+    queryKey: pharmaKeys.reorderConfig(filters),
+    queryFn: () => pharmaReportsService.getReorderConfig(filters),
+    enabled,
+  });
+}
+
+export function useUpsertReorderConfig() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (rows: ReorderPolicyInput[]) => pharmaReportsService.upsertReorderConfig(rows),
+    onSuccess: () => {
+      // Config changes the reorder math, so invalidate the whole inventory
+      // subtree (reorder report + config list).
+      void queryClient.invalidateQueries({ queryKey: pharmaKeys.inventory() });
+    },
+  });
+}
+
+export function useDeleteReorderConfig() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ productId, locationId }: { productId: string; locationId: string }) =>
+      pharmaReportsService.deleteReorderConfig(productId, locationId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: pharmaKeys.inventory() });
+    },
   });
 }
 

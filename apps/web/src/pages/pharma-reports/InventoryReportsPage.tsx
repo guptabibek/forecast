@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { Column } from '../../components/ui';
 import { Badge, Card, CardHeader, DataTable, QueryErrorBanner } from '../../components/ui';
 import { usePharmaGrid } from '../../hooks/usePharmaGrid';
@@ -10,7 +11,9 @@ import {
   useMovementLedger,
   useReorderReport,
   useStockAgeing,
+  useUpsertReorderConfig,
 } from '../../hooks/usePharmaReports';
+import { parseReorderConfigCsv } from './reorderConfigCsv';
 import type {
   BatchInventoryRow,
   CurrentStockRow,
@@ -43,6 +46,38 @@ export default function InventoryReportsPage() {
   const { showSaltColumn } = useTenantConfig();
   const [activeTab, setActiveTab] = useState<Tab>('current');
 
+  // Reorder report horizons — client-configurable per run. Defaults mirror the
+  // backend (lookback 90d, cover next 30d, lead 7d, safety 7d).
+  const [reorderParams, setReorderParams] = useState({
+    lookbackDays: 90,
+    coverageDays: 30,
+    leadTimeDays: 7,
+    safetyDays: 7,
+    includeAll: false,
+  });
+  const csvInputRef = useRef<HTMLInputElement>(null);
+  const [importMsg, setImportMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const upsertConfig = useUpsertReorderConfig();
+
+  const handleConfigCsv = async (file: File) => {
+    setImportMsg(null);
+    const text = await file.text();
+    const { rows, errors } = parseReorderConfigCsv(text);
+    if (errors.length) {
+      setImportMsg({ kind: 'error', text: `CSV not imported. ${errors.slice(0, 3).join(' ')}${errors.length > 3 ? ` (+${errors.length - 3} more)` : ''}` });
+      return;
+    }
+    try {
+      const res = await upsertConfig.mutateAsync(rows);
+      const skippedNote = res.skipped.length
+        ? ` ${res.skipped.length} row(s) skipped (unknown product/location).`
+        : '';
+      setImportMsg({ kind: res.skipped.length ? 'error' : 'ok', text: `Imported ${res.upserted} policy override(s).${skippedNote}` });
+    } catch {
+      setImportMsg({ kind: 'error', text: 'Import failed. Check your access and try again.' });
+    }
+  };
+
   // One grid state per tab — filters/sort/pagination are isolated per report.
   const currentGrid = usePharmaGrid({ initialSortBy: 'sku' });
   const batchGrid = usePharmaGrid({ initialSortBy: 'expiry_date' });
@@ -53,7 +88,7 @@ export default function InventoryReportsPage() {
   const currentStock = useCurrentStock(currentGrid.pharmaParams, activeTab === 'current');
   const batchInv = useBatchInventory(batchGrid.pharmaParams, activeTab === 'batch');
   const ledger = useMovementLedger(ledgerGrid.pharmaParams, activeTab === 'ledger');
-  const reorder = useReorderReport(reorderGrid.pharmaParams, activeTab === 'reorder');
+  const reorder = useReorderReport({ ...reorderGrid.pharmaParams, ...reorderParams }, activeTab === 'reorder');
   const ageing = useStockAgeing(ageingGrid.pharmaParams, activeTab === 'ageing');
 
   const queryMap = { current: currentStock, batch: batchInv, ledger, reorder, ageing };
@@ -140,11 +175,33 @@ export default function InventoryReportsPage() {
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '90px', filterType: 'text', filterField: 'location_code' },
+    {
+      key: 'reorder_status', header: 'Status',
+      accessor: (r) => (
+        <Badge
+          variant={r.reorder_status === 'OUT_OF_STOCK' ? 'error' : r.reorder_status === 'BELOW_REORDER' ? 'warning' : 'success'}
+          size="sm"
+        >
+          {r.reorder_status === 'OUT_OF_STOCK' ? 'Out' : r.reorder_status === 'BELOW_REORDER' ? 'Reorder' : 'OK'}
+        </Badge>
+      ),
+      filterType: 'select', filterField: 'reorder_status',
+      filterOptions: [{ value: 'OUT_OF_STOCK', label: 'Out of stock' }, { value: 'BELOW_REORDER', label: 'Below reorder' }, { value: 'OK', label: 'OK' }],
+    },
     { key: 'on_hand_qty', header: 'On Hand', accessor: (r) => fmt(r.on_hand_qty), align: 'right', sortable: true, filterType: 'number', filterField: 'on_hand_qty' },
-    { key: 'reorder_point', header: 'Reorder Pt', accessor: (r) => fmt(r.reorder_point), align: 'right', filterType: 'number', filterField: 'reorder_point' },
+    { key: 'on_order_qty', header: 'On Order', accessor: (r) => fmt(r.on_order_qty), align: 'right', sortable: true, filterType: 'number', filterField: 'on_order_qty' },
+    { key: 'avg_daily_sales', header: 'Avg/Day', accessor: (r) => r.avg_daily_sales?.toFixed(1) ?? '—', align: 'right', sortable: true, filterType: 'number', filterField: 'avg_daily_sales' },
+    {
+      key: 'reorder_point', header: 'Reorder Pt', align: 'right', sortable: true, filterType: 'number', filterField: 'reorder_point',
+      accessor: (r) => (
+        <span title={r.is_configured ? 'From configured policy' : 'Auto-computed from demand'}>
+          {fmt(r.reorder_point)}{r.is_configured ? ' *' : ''}
+        </span>
+      ),
+    },
+    { key: 'order_up_to_qty', header: 'Order Up To', accessor: (r) => fmt(r.order_up_to_qty), align: 'right', sortable: true, filterType: 'number', filterField: 'order_up_to_qty' },
     { key: 'safety_stock_qty', header: 'Safety', accessor: (r) => fmt(r.safety_stock_qty), align: 'right', filterType: 'number', filterField: 'safety_stock_qty' },
-    { key: 'avg_daily_sales', header: 'Avg/Day', accessor: (r) => r.avg_daily_sales?.toFixed(1) ?? '—', align: 'right' },
-    { key: 'suggested_order_qty', header: 'Suggested Qty', accessor: (r) => <span className="font-semibold text-primary-700">{fmt(r.suggested_order_qty)}</span>, align: 'right' },
+    { key: 'suggested_order_qty', header: 'Suggested Qty', accessor: (r) => <span className="font-semibold text-primary-700">{fmt(r.suggested_order_qty)}</span>, align: 'right', sortable: true, filterType: 'number', filterField: 'suggested_order_qty' },
     {
       key: 'abc_class', header: 'ABC',
       accessor: (r) => <Badge variant={r.abc_class === 'A' ? 'success' : r.abc_class === 'B' ? 'warning' : 'default'} size="sm">{r.abc_class ?? '—'}</Badge>,
@@ -286,16 +343,83 @@ export default function InventoryReportsPage() {
         )}
 
         {activeTab === 'reorder' && (
-          <DataTable<ReorderRow>
-            data={reorder.data?.data ?? []}
-            columns={reorderCols}
-            keyExtractor={(r) => `${r.product_id}-${r.location_id}`}
-            isLoading={reorder.isLoading}
-            emptyMessage="No items below reorder point"
-            sorting={reorderGrid.sortingProps}
-            filtering={reorderGrid.filteringProps}
-            pagination={reorderGrid.paginationProps(reorder.data?.total ?? 0)}
-          />
+          <>
+            <div className="px-6 pb-4 flex flex-wrap items-end gap-3 border-b border-gray-100">
+              {([
+                ['lookbackDays', 'Demand window (days)', 'Trailing days of net sales used for average daily demand'],
+                ['coverageDays', 'Cover next (days)', 'Days of demand the order should cover'],
+                ['leadTimeDays', 'Lead time (days)', 'Default supplier lead time (per-product config overrides this)'],
+                ['safetyDays', 'Safety (days)', 'Buffer days of cover (per-product config overrides this)'],
+              ] as const).map(([k, label, hint]) => (
+                <label key={k} className="flex flex-col gap-1" title={hint}>
+                  <span className="text-xs font-medium text-gray-500">{label}</span>
+                  <input
+                    type="number"
+                    min={k === 'coverageDays' || k === 'lookbackDays' ? 1 : 0}
+                    value={reorderParams[k]}
+                    onChange={(e) => setReorderParams((p) => ({ ...p, [k]: Math.max(0, Number(e.target.value) || 0) }))}
+                    className="w-28 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+              ))}
+              <label className="flex items-center gap-2 text-sm text-gray-700 pb-1.5">
+                <input
+                  type="checkbox"
+                  checked={reorderParams.includeAll}
+                  onChange={(e) => setReorderParams((p) => ({ ...p, includeAll: e.target.checked }))}
+                />
+                Show all items
+              </label>
+              <div className="ml-auto flex flex-col gap-1">
+                <span className="text-xs font-medium text-gray-500">Min/Max config</span>
+                <div className="flex gap-2">
+                  <Link
+                    to="/pharma-reports/reorder-config"
+                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Manage config →
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => csvInputRef.current?.click()}
+                    disabled={upsertConfig.isPending}
+                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {upsertConfig.isPending ? 'Importing…' : 'Import config CSV'}
+                  </button>
+                </div>
+                <input
+                  ref={csvInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleConfigCsv(f);
+                    e.target.value = '';
+                  }}
+                />
+              </div>
+            </div>
+            {importMsg && (
+              <div className={`px-6 py-2 text-xs ${importMsg.kind === 'ok' ? 'text-green-700 bg-green-50' : 'text-amber-800 bg-amber-50'}`}>
+                {importMsg.text}
+              </div>
+            )}
+            <div className="px-6 pt-2 pb-1 text-xs text-gray-400">
+              Demand-driven from net sales over the last {reorderParams.lookbackDays} days; “Reorder Pt” marked “*” is a configured override. CSV columns: productCode, locationCode, reorderPoint, minOrderQty, maxOrderQty, multipleOrderQty, safetyStockQty, safetyStockDays, leadTimeDays.
+            </div>
+            <DataTable<ReorderRow>
+              data={reorder.data?.data ?? []}
+              columns={reorderCols}
+              keyExtractor={(r) => `${r.product_id}-${r.location_id}`}
+              isLoading={reorder.isLoading}
+              emptyMessage={reorderParams.includeAll ? 'No stock data' : 'No items need reordering'}
+              sorting={reorderGrid.sortingProps}
+              filtering={reorderGrid.filteringProps}
+              pagination={reorderGrid.paginationProps(reorder.data?.total ?? 0)}
+            />
+          </>
         )}
 
         {activeTab === 'ageing' && (

@@ -142,13 +142,21 @@ export interface ReorderRow {
   location_code: string;
   on_hand_qty: number;
   available_qty: number;
+  on_order_qty: number;
   reorder_point: number;
+  order_up_to_qty: number;
   safety_stock_qty: number;
   lead_time_days: number;
+  /** Net average daily demand (units sold − returned) over the lookback window. */
   avg_daily_sales: number;
   suggested_order_qty: number;
+  reorder_status: 'OUT_OF_STOCK' | 'BELOW_REORDER' | 'OK';
+  /** True when the product×location has an explicit inventory_policy override. */
+  is_configured: boolean;
   abc_class: string | null;
   days_of_stock: number | null;
+  lookback_days: number;
+  coverage_days: number;
 }
 
 export interface StockAgeingRow {
@@ -282,17 +290,26 @@ export function normalizeMovementLedgerFilters(filters: PharmaColumnFilter[]): P
   });
 }
 
+// Filter/sort columns for the reorder report. The report computes everything
+// in a CTE (`rr`) and the outer SELECT reads bare column names from it, so the
+// expressions here are plain output-column names — valid in the outer WHERE
+// and ORDER BY (which reference CTE columns, not SELECT aliases).
 const REORDER_COLUMNS: AllowedSqlColumns = {
-  sku: { expression: 'p.code', type: 'string' },
-  product_name: { expression: 'p.name', type: 'string' },
-  category: { expression: 'p.category', type: 'string' },
-  location_code: { expression: 'l.code', type: 'string' },
-  on_hand_qty: { expression: 'COALESCE(il.on_hand_qty, 0)', type: 'number' },
-  available_qty: { expression: 'COALESCE(il.available_qty, 0)', type: 'number' },
-  reorder_point: { expression: 'COALESCE(ip.reorder_point, 0)', type: 'number' },
-  safety_stock_qty: { expression: 'COALESCE(ip.safety_stock_qty, 0)', type: 'number' },
-  lead_time_days: { expression: 'COALESCE(ip.lead_time_days, 7)', type: 'number' },
-  abc_class: { expression: 'ip.abc_class', type: 'string' },
+  sku: { expression: 'sku', type: 'string' },
+  product_name: { expression: 'product_name', type: 'string' },
+  location_code: { expression: 'location_code', type: 'string' },
+  on_hand_qty: { expression: 'on_hand_qty', type: 'number' },
+  available_qty: { expression: 'available_qty', type: 'number' },
+  on_order_qty: { expression: 'on_order_qty', type: 'number' },
+  reorder_point: { expression: 'reorder_point', type: 'number' },
+  order_up_to_qty: { expression: 'order_up_to_qty', type: 'number' },
+  safety_stock_qty: { expression: 'safety_stock_qty', type: 'number' },
+  lead_time_days: { expression: 'lead_time_days', type: 'number' },
+  avg_daily_sales: { expression: 'avg_daily_sales', type: 'number' },
+  suggested_order_qty: { expression: 'suggested_order_qty', type: 'number' },
+  reorder_status: { expression: 'reorder_status', type: 'enum' },
+  days_of_stock: { expression: 'days_of_stock', type: 'number' },
+  abc_class: { expression: 'abc_class', type: 'string' },
 };
 
 const STOCK_AGEING_COLUMNS: AllowedSqlColumns = {
@@ -627,115 +644,341 @@ export class InventoryReportsService {
   ): Promise<{ data: ReorderRow[]; total: number }> {
     const limit = filters.limit ?? 50;
     const offset = filters.offset ?? 0;
-    const avgDays = filters.avgSalesDays ?? 30;
+    // Configurable horizons (client-driven). avgSalesDays kept as a legacy
+    // alias of lookbackDays.
+    const lookbackDays = Math.max(1, filters.lookbackDays ?? filters.avgSalesDays ?? 90);
+    const coverageDays = Math.max(1, filters.coverageDays ?? 30);
+    const leadTimeDays = Math.max(0, filters.leadTimeDays ?? 7);
+    const safetyDays = Math.max(0, filters.safetyDays ?? 7);
+    const includeAll = filters.includeAll === true;
 
-    const extraConds: Prisma.Sql[] = [];
-    if (filters.productIds?.length) {
-      extraConds.push(
-        Prisma.sql`p.id = ANY(${filters.productIds}::uuid[])`,
-      );
-    }
-    if (filters.locationIds?.length) {
-      extraConds.push(
-        Prisma.sql`l.id = ANY(${filters.locationIds}::uuid[])`,
-      );
-    }
-    if (filters.category) {
-      extraConds.push(Prisma.sql`p.category = ${filters.category}`);
-    }
+    // Inner (CTE-level) filters operate on base tables.
+    const innerConds: Prisma.Sql[] = [];
+    if (filters.productIds?.length) innerConds.push(Prisma.sql`il.product_id = ANY(${filters.productIds}::uuid[])`);
+    if (filters.locationIds?.length) innerConds.push(Prisma.sql`il.location_id = ANY(${filters.locationIds}::uuid[])`);
+    if (filters.category) innerConds.push(Prisma.sql`p.category = ${filters.category}`);
+    const innerWhere = innerConds.length ? Prisma.sql`AND ${Prisma.join(innerConds, ' AND ')}` : Prisma.empty;
 
+    // Outer filters/sort operate on the computed `rr` columns (bare names).
     const columnFilters = parsePharmaFilters(filters.filters);
     const filterConds = buildPharmaFilterSql(columnFilters, REORDER_COLUMNS);
-
-    const baseWhere = Prisma.sql`il.tenant_id = ${tenantId}::uuid`;
-    const where = joinConditions(baseWhere, [...extraConds, ...filterConds]);
+    const filterWhere = filterConds.length ? Prisma.sql`AND ${Prisma.join(filterConds, ' AND ')}` : Prisma.empty;
+    // "Needs reorder" gate: show a row only when there is something to act on —
+    // a positive suggested qty (demand-driven need), OR stock at/below a REAL
+    // (>0) reorder point. The reorder_point>0 guard is what stops zero-everything
+    // rows (out-of-stock items with no demand and no configured policy — fees,
+    // dormant SKUs) from masquerading as OUT_OF_STOCK via the 0<=0 comparison.
+    // includeAll bypasses the gate to expose every product×location.
+    const gate = includeAll
+      ? Prisma.sql`TRUE`
+      : Prisma.sql`(rr.suggested_order_qty > 0 OR (rr.reorder_point > 0 AND rr.on_hand_qty <= rr.reorder_point))`;
     const orderBy = buildPharmaOrderBySql(
       filters.sortBy, filters.sortDir, REORDER_COLUMNS,
-      Prisma.sql`CASE ip.abc_class WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 ELSE 4 END, suggested_order_qty DESC`,
+      Prisma.sql`CASE rr.reorder_status WHEN 'OUT_OF_STOCK' THEN 0 WHEN 'BELOW_REORDER' THEN 1 ELSE 2 END,
+                 CASE rr.abc_class WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 ELSE 4 END,
+                 rr.suggested_order_qty DESC`,
     );
 
-    const countResult = await this.prisma.$queryRaw<[{ cnt: bigint }]>(
-      Prisma.sql`
-        SELECT COUNT(*)::bigint AS cnt
-        FROM inventory_levels il
-        JOIN products p ON p.id = il.product_id AND p.tenant_id = il.tenant_id
-        JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
-        LEFT JOIN inventory_policies ip
-          ON ip.tenant_id = il.tenant_id
-          AND ip.product_id = il.product_id
-          AND ip.location_id = il.location_id
-        WHERE ${where}
-      `,
-    );
-
-    const rows = await this.prisma.$queryRaw<ReorderRow[]>(
-      Prisma.sql`
-        WITH daily_sales AS (
-          SELECT
-            it.product_id,
-            it.location_id,
-            COALESCE(SUM(it.quantity), 0)::float8 AS total_issued
-          FROM inventory_transactions it
-          WHERE it.tenant_id = ${tenantId}::uuid
-            AND it.transaction_type IN ('ISSUE', 'PRODUCTION_ISSUE')
-            AND it.transaction_date >= (CURRENT_DATE - ${avgDays}::int)
-          GROUP BY it.product_id, it.location_id
-        )
+    // Demand = family-correct NET sales (units sold − returned) per
+    // product×location over the lookback window, sourced from the projected
+    // `actuals` (ActualType=SALES). This deliberately excludes challans /
+    // stock transfers / replacements that raw inventory ISSUE would include —
+    // reorder must track true sell-through. Clamped ≥ 0 (a window where
+    // returns exceed sales yields 0 demand, not negative).
+    //
+    // on_order = committed inbound (open PO qty − received), attributed to the
+    // PO's destination location, so we never re-suggest stock already on the way.
+    //
+    // Layered CTEs build the suggested qty so each rounding step references the
+    // previous one (Postgres forbids alias reuse within a single SELECT):
+    //   base  → demand/lead/safety per row
+    //   calc  → reorder_point (config override else computed), order_up_to, raw need
+    //   r1    → apply fixed reorder lot (reorder_qty) if configured
+    //   r2    → floor up to min_order_qty
+    //   r3    → round up to the pack multiple (multiple_order_qty)
+    //   rr    → cap at max_order_qty, ceil to whole units, status, days-of-stock
+    const cte = Prisma.sql`
+      WITH demand AS (
+        SELECT a.product_id, a.location_id,
+          GREATEST(COALESCE(SUM(a.quantity), 0), 0)::float8 / ${lookbackDays}::float8 AS avg_daily_demand
+        FROM actuals a
+        WHERE a.tenant_id = ${tenantId}::uuid
+          AND a.actual_type = 'SALES'::"ActualType"
+          AND a.period_date >= (CURRENT_DATE - ${lookbackDays}::int)
+        GROUP BY a.product_id, a.location_id
+      ),
+      on_order AS (
+        SELECT pol.product_id, po.location_id,
+          COALESCE(SUM(GREATEST(pol.quantity - pol.received_qty, 0)), 0)::float8 AS on_order_qty
+        FROM purchase_order_lines pol
+        JOIN purchase_orders po ON po.id = pol.purchase_order_id AND po.tenant_id = ${tenantId}::uuid
+        WHERE po.status NOT IN ('DRAFT', 'CLOSED', 'CANCELLED')
+        GROUP BY pol.product_id, po.location_id
+      ),
+      base AS (
         SELECT
-          p.id             AS product_id,
-          p.code           AS sku,
-          p.name           AS product_name,
-          l.id             AS location_id,
-          l.code           AS location_code,
-          COALESCE(il.on_hand_qty, 0)::float8            AS on_hand_qty,
-          COALESCE(il.available_qty, 0)::float8           AS available_qty,
-          COALESCE(ip.reorder_point, 0)::float8           AS reorder_point,
-          COALESCE(ip.safety_stock_qty, 0)::float8        AS safety_stock_qty,
-          COALESCE(ip.lead_time_days, 7)::int             AS lead_time_days,
-          CASE
-            WHEN ${avgDays}::int > 0
-            THEN COALESCE(ds.total_issued, 0)::float8 / ${avgDays}::float8
-            ELSE 0
-          END AS avg_daily_sales,
-          GREATEST(
-            (
-              (COALESCE(ds.total_issued, 0)::float8 / NULLIF(${avgDays}::float8, 0))
-              * COALESCE(ip.lead_time_days, 7)::float8
-            )
-            + COALESCE(ip.safety_stock_qty, 0)::float8
-            - COALESCE(il.on_hand_qty, 0)::float8,
-            0
-          )::float8 AS suggested_order_qty,
-          ip.abc_class,
-          CASE
-            WHEN COALESCE(ds.total_issued, 0) > 0
-            THEN (
-              COALESCE(il.on_hand_qty, 0)::float8
-              / (COALESCE(ds.total_issued, 0)::float8 / ${avgDays}::float8)
-            )
-            ELSE NULL
-          END AS days_of_stock
+          p.id AS product_id, p.code AS sku, p.name AS product_name,
+          l.id AS location_id, l.code AS location_code, ip.abc_class,
+          (ip.id IS NOT NULL) AS is_configured,
+          COALESCE(il.on_hand_qty, 0)::float8 AS on_hand_qty,
+          COALESCE(il.available_qty, 0)::float8 AS available_qty,
+          COALESCE(oo.on_order_qty, 0)::float8 AS on_order_qty,
+          COALESCE(d.avg_daily_demand, 0)::float8 AS avg_daily_sales,
+          COALESCE(NULLIF(ip.lead_time_days, 0), ${leadTimeDays})::float8 AS lead_time_days,
+          COALESCE(ip.safety_stock_qty, COALESCE(ip.safety_stock_days, ${safetyDays})::float8 * COALESCE(d.avg_daily_demand, 0))::float8 AS safety_stock_qty,
+          ip.reorder_point::float8 AS cfg_reorder_point,
+          ip.reorder_qty::float8 AS cfg_reorder_qty,
+          ip.min_order_qty::float8 AS cfg_min_order,
+          ip.multiple_order_qty::float8 AS cfg_multiple,
+          ip.max_order_qty::float8 AS cfg_max_order
         FROM inventory_levels il
-        JOIN products p  ON p.id = il.product_id AND p.tenant_id = il.tenant_id
+        JOIN products p ON p.id = il.product_id AND p.tenant_id = il.tenant_id AND p.status = 'ACTIVE'::"DimensionStatus"
         JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
-        LEFT JOIN inventory_policies ip
-          ON ip.tenant_id = il.tenant_id
-          AND ip.product_id = il.product_id
-          AND ip.location_id = il.location_id
-        LEFT JOIN daily_sales ds
-          ON ds.product_id = il.product_id
-          AND ds.location_id = il.location_id
-        WHERE ${where}
-          AND (
-            COALESCE(il.on_hand_qty, 0) <= COALESCE(ip.reorder_point, 0)
-            OR COALESCE(il.on_hand_qty, 0) <= COALESCE(ip.safety_stock_qty, 0)
-          )
-        ORDER BY ${orderBy}
-        LIMIT ${limit} OFFSET ${offset}
-      `,
-    );
+        LEFT JOIN inventory_policies ip ON ip.tenant_id = il.tenant_id AND ip.product_id = il.product_id AND ip.location_id = il.location_id
+        LEFT JOIN demand d ON d.product_id = il.product_id AND d.location_id = il.location_id
+        LEFT JOIN on_order oo ON oo.product_id = il.product_id AND oo.location_id = il.location_id
+        WHERE il.tenant_id = ${tenantId}::uuid ${innerWhere}
+      ),
+      calc AS (
+        SELECT base.*,
+          COALESCE(cfg_reorder_point, avg_daily_sales * lead_time_days + safety_stock_qty)::float8 AS reorder_point,
+          (avg_daily_sales * (lead_time_days + ${coverageDays}::float8) + safety_stock_qty)::float8 AS order_up_to_qty,
+          GREATEST(
+            (avg_daily_sales * (lead_time_days + ${coverageDays}::float8) + safety_stock_qty)
+            - on_hand_qty - on_order_qty, 0
+          )::float8 AS need_raw
+        FROM base
+      ),
+      r1 AS (
+        SELECT calc.*,
+          CASE WHEN cfg_reorder_qty IS NOT NULL AND cfg_reorder_qty > 0 AND need_raw > 0
+               THEN cfg_reorder_qty ELSE need_raw END::float8 AS s1
+        FROM calc
+      ),
+      r2 AS (
+        SELECT r1.*,
+          CASE WHEN s1 > 0 THEN GREATEST(s1, COALESCE(cfg_min_order, 0)) ELSE 0 END::float8 AS s2
+        FROM r1
+      ),
+      r3 AS (
+        SELECT r2.*,
+          CASE WHEN cfg_multiple IS NOT NULL AND cfg_multiple > 0 AND s2 > 0
+               THEN CEIL(s2 / cfg_multiple) * cfg_multiple ELSE s2 END::float8 AS s3
+        FROM r2
+      ),
+      rr AS (
+        SELECT r3.*,
+          CEIL(
+            CASE WHEN cfg_max_order IS NOT NULL AND cfg_max_order > 0 THEN LEAST(s3, cfg_max_order) ELSE s3 END
+          )::float8 AS suggested_order_qty,
+          CASE
+            WHEN on_hand_qty <= 0 THEN 'OUT_OF_STOCK'
+            WHEN on_hand_qty <= reorder_point THEN 'BELOW_REORDER'
+            ELSE 'OK'
+          END AS reorder_status,
+          CASE WHEN avg_daily_sales > 0 THEN (on_hand_qty / avg_daily_sales)::float8 ELSE NULL END AS days_of_stock
+        FROM r3
+      )
+    `;
+
+    const countResult = await this.prisma.$queryRaw<[{ cnt: bigint }]>(Prisma.sql`
+      ${cte}
+      SELECT COUNT(*)::bigint AS cnt FROM rr WHERE ${gate} ${filterWhere}
+    `);
+
+    const rows = await this.prisma.$queryRaw<ReorderRow[]>(Prisma.sql`
+      ${cte}
+      SELECT
+        product_id, sku, product_name, location_id, location_code,
+        on_hand_qty, available_qty, on_order_qty,
+        reorder_point, order_up_to_qty, safety_stock_qty, lead_time_days,
+        avg_daily_sales, suggested_order_qty, reorder_status, is_configured,
+        abc_class, days_of_stock,
+        ${lookbackDays}::int AS lookback_days,
+        ${coverageDays}::int AS coverage_days
+      FROM rr
+      WHERE ${gate} ${filterWhere}
+      ORDER BY ${orderBy}
+      LIMIT ${limit} OFFSET ${offset}
+    `);
 
     return { data: rows, total: Number(countResult[0]?.cnt ?? 0) };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // D2. REORDER CONFIG (inventory_policies) — list + upsert
+  //
+  // Lets the client set per product×location overrides (reorder point / min /
+  // max / pack multiple / safety / lead time) in OUR system, since Marg does
+  // not provide them. The reorder report (above) reads these via COALESCE, so
+  // any field left unset falls back to the demand-driven computation.
+  // ─────────────────────────────────────────────────────────────────────────
+  /**
+   * Build a config template covering EVERY active product × location that can
+   * hold stock (the same universe the reorder report runs over — i.e. rows in
+   * inventory_levels). Existing overrides are pre-filled so a download → edit →
+   * re-import round-trips without losing what's already configured; unconfigured
+   * combos come back blank for the client to fill. product_name / location_name
+   * are included as human helpers and are ignored on import.
+   */
+  async getReorderConfigTemplate(
+    tenantId: string,
+    filters: { productIds?: string[]; locationIds?: string[] } = {},
+  ): Promise<any[]> {
+    const conds: Prisma.Sql[] = [Prisma.sql`il.tenant_id = ${tenantId}::uuid`];
+    if (filters.productIds?.length) conds.push(Prisma.sql`il.product_id = ANY(${filters.productIds}::uuid[])`);
+    if (filters.locationIds?.length) conds.push(Prisma.sql`il.location_id = ANY(${filters.locationIds}::uuid[])`);
+    const where = Prisma.join(conds, ' AND ');
+
+    return this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        p.code AS product_code, p.name AS product_name,
+        l.code AS location_code, l.name AS location_name,
+        ip.reorder_point::float8 AS reorder_point,
+        ip.min_order_qty::float8 AS min_order_qty,
+        ip.max_order_qty::float8 AS max_order_qty,
+        ip.multiple_order_qty::float8 AS multiple_order_qty,
+        ip.reorder_qty::float8 AS reorder_qty,
+        ip.safety_stock_qty::float8 AS safety_stock_qty,
+        ip.safety_stock_days AS safety_stock_days,
+        ip.lead_time_days AS lead_time_days,
+        ip.abc_class
+      FROM inventory_levels il
+      JOIN products p ON p.id = il.product_id AND p.tenant_id = il.tenant_id AND p.status = 'ACTIVE'::"DimensionStatus"
+      JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
+      LEFT JOIN inventory_policies ip ON ip.tenant_id = il.tenant_id AND ip.product_id = il.product_id AND ip.location_id = il.location_id
+      WHERE ${where}
+      ORDER BY p.code, l.code
+    `);
+  }
+
+  async getReorderPolicies(
+    tenantId: string,
+    filters: { productIds?: string[]; locationIds?: string[]; limit?: number; offset?: number },
+  ): Promise<{ data: any[]; total: number }> {
+    const limit = Math.min(Math.max(filters.limit ?? 100, 1), 1000);
+    const offset = Math.max(filters.offset ?? 0, 0);
+    const conds: Prisma.Sql[] = [Prisma.sql`ip.tenant_id = ${tenantId}::uuid`];
+    if (filters.productIds?.length) conds.push(Prisma.sql`ip.product_id = ANY(${filters.productIds}::uuid[])`);
+    if (filters.locationIds?.length) conds.push(Prisma.sql`ip.location_id = ANY(${filters.locationIds}::uuid[])`);
+    const where = Prisma.join(conds, ' AND ');
+
+    const [{ cnt }] = await this.prisma.$queryRaw<[{ cnt: bigint }]>(Prisma.sql`
+      SELECT COUNT(*)::bigint AS cnt FROM inventory_policies ip WHERE ${where}
+    `);
+    const data = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        ip.product_id, p.code AS product_code, p.name AS product_name,
+        ip.location_id, l.code AS location_code, l.name AS location_name,
+        ip.reorder_point::float8 AS reorder_point,
+        ip.reorder_qty::float8 AS reorder_qty,
+        ip.min_order_qty::float8 AS min_order_qty,
+        ip.max_order_qty::float8 AS max_order_qty,
+        ip.multiple_order_qty::float8 AS multiple_order_qty,
+        ip.safety_stock_qty::float8 AS safety_stock_qty,
+        ip.safety_stock_days AS safety_stock_days,
+        ip.lead_time_days AS lead_time_days,
+        ip.abc_class, ip.updated_at
+      FROM inventory_policies ip
+      JOIN products p ON p.id = ip.product_id AND p.tenant_id = ip.tenant_id
+      JOIN locations l ON l.id = ip.location_id AND l.tenant_id = ip.tenant_id
+      WHERE ${where}
+      ORDER BY p.code, l.code
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+    return { data, total: Number(cnt) };
+  }
+
+  /**
+   * Upsert reorder-policy overrides. Each row may identify product/location by
+   * UUID or by code (codes resolved here, so CSV imports work). Returns counts
+   * and any rows that couldn't be resolved — the caller surfaces these so a
+   * bad SKU in a CSV is reported, not silently dropped.
+   */
+  async upsertReorderPolicies(
+    tenantId: string,
+    rows: Array<{
+      productId?: string; productCode?: string;
+      locationId?: string; locationCode?: string;
+      reorderPoint?: number; reorderQty?: number; minOrderQty?: number; maxOrderQty?: number;
+      multipleOrderQty?: number; safetyStockQty?: number; safetyStockDays?: number;
+      leadTimeDays?: number; abcClass?: string;
+    }>,
+  ): Promise<{ upserted: number; skipped: Array<{ row: number; reason: string }> }> {
+    // Resolve codes → ids in two batched lookups (not per-row).
+    const productCodes = Array.from(new Set(rows.map((r) => r.productCode).filter(Boolean) as string[]));
+    const locationCodes = Array.from(new Set(rows.map((r) => r.locationCode).filter(Boolean) as string[]));
+    const [prods, locs] = await Promise.all([
+      productCodes.length
+        ? this.prisma.product.findMany({ where: { tenantId, code: { in: productCodes } }, select: { id: true, code: true } })
+        : Promise.resolve([] as Array<{ id: string; code: string }>),
+      locationCodes.length
+        ? this.prisma.location.findMany({ where: { tenantId, code: { in: locationCodes } }, select: { id: true, code: true } })
+        : Promise.resolve([] as Array<{ id: string; code: string }>),
+    ]);
+    const prodByCode = new Map(prods.map((p) => [p.code, p.id]));
+    const locByCode = new Map(locs.map((l) => [l.code, l.id]));
+
+    const skipped: Array<{ row: number; reason: string }> = [];
+    let upserted = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const productId = r.productId ?? (r.productCode ? prodByCode.get(r.productCode) : undefined);
+      const locationId = r.locationId ?? (r.locationCode ? locByCode.get(r.locationCode) : undefined);
+      if (!productId) { skipped.push({ row: i, reason: `unknown product: ${r.productCode ?? r.productId ?? '(none)'}` }); continue; }
+      if (!locationId) { skipped.push({ row: i, reason: `unknown location: ${r.locationCode ?? r.locationId ?? '(none)'}` }); continue; }
+
+      // Upsert on the natural key (tenant, product, location). effective_from
+      // is required by the schema; set on create, preserved on update.
+      await this.prisma.inventoryPolicy.upsert({
+        where: { tenantId_productId_locationId: { tenantId, productId, locationId } },
+        create: {
+          tenantId, productId, locationId,
+          effectiveFrom: new Date(),
+          reorderPoint: r.reorderPoint ?? null,
+          reorderQty: r.reorderQty ?? null,
+          minOrderQty: r.minOrderQty ?? null,
+          maxOrderQty: r.maxOrderQty ?? null,
+          multipleOrderQty: r.multipleOrderQty ?? null,
+          safetyStockQty: r.safetyStockQty ?? null,
+          safetyStockDays: r.safetyStockDays ?? null,
+          leadTimeDays: r.leadTimeDays ?? 0,
+          abcClass: r.abcClass ?? null,
+        },
+        update: {
+          // Only overwrite fields that were provided in this row; undefined
+          // leaves the stored value untouched.
+          reorderPoint: r.reorderPoint ?? undefined,
+          reorderQty: r.reorderQty ?? undefined,
+          minOrderQty: r.minOrderQty ?? undefined,
+          maxOrderQty: r.maxOrderQty ?? undefined,
+          multipleOrderQty: r.multipleOrderQty ?? undefined,
+          safetyStockQty: r.safetyStockQty ?? undefined,
+          safetyStockDays: r.safetyStockDays ?? undefined,
+          leadTimeDays: r.leadTimeDays ?? undefined,
+          abcClass: r.abcClass ?? undefined,
+        },
+      });
+      upserted++;
+    }
+    return { upserted, skipped };
+  }
+
+  /**
+   * Delete a single reorder-policy override (product×location). After deletion
+   * the reorder report falls back to the demand-driven computation for that
+   * product×location. Returns whether a row was actually removed.
+   */
+  async deleteReorderPolicy(
+    tenantId: string,
+    productId: string,
+    locationId: string,
+  ): Promise<{ deleted: number }> {
+    const res = await this.prisma.inventoryPolicy.deleteMany({
+      where: { tenantId, productId, locationId },
+    });
+    return { deleted: res.count };
   }
 
   // ─────────────────────────────────────────────────────────────────────────

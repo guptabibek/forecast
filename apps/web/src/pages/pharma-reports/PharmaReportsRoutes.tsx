@@ -13,6 +13,7 @@ import FinancialReportsPage from './FinancialReportsPage';
 import GrowthAnalysisPage from './GrowthAnalysisPage';
 import InventoryReportsPage from './InventoryReportsPage';
 import ProcurementPage from './ProcurementPage';
+import ReorderConfigPage from './ReorderConfigPage';
 import SalesPurchaseAnalysisPage from './SalesPurchaseAnalysisPage';
 import StockAnalysisPage from './StockAnalysisPage';
 import ThreeSixtyReportsPage from './ThreeSixtyReportsPage';
@@ -28,11 +29,22 @@ function AccountingReportsRoute({ children }: { children: React.ReactNode }) {
   return <Navigate to={getFallbackPathForRole(role)} replace />;
 }
 
+// Reorder config writes inventory_policies, so it is gated to the roles allowed
+// to POST/DELETE overrides on the API: ADMIN and PLANNER (incl. FORECAST_PLANNER).
+function ReorderConfigRoute({ children }: { children: React.ReactNode }) {
+  const role = useAuthStore((state) => state.user?.role);
+  if (isSuperAdmin(role) || roleMatches(role, 'ADMIN', 'PLANNER')) {
+    return <>{children}</>;
+  }
+  return <Navigate to={getFallbackPathForRole(role)} replace />;
+}
+
 export default function PharmaReportsRoutes() {
   return (
     <Routes>
       <Route index element={<Navigate to="/dashboard" replace />} />
       <Route path="inventory" element={<InventoryReportsPage />} />
+      <Route path="reorder-config" element={<ReorderConfigRoute><ReorderConfigPage /></ReorderConfigRoute>} />
       <Route path="expiry" element={<ExpiryManagementPage />} />
       <Route path="analysis" element={<StockAnalysisPage />} />
       <Route path="sales-purchase" element={<SalesPurchaseAnalysisPage />} />

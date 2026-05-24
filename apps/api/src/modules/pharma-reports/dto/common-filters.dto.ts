@@ -117,15 +117,78 @@ export class StockAgeingFilterDto extends InventoryBaseFilterDto {
 
 export class ReorderFilterDto extends InventoryBaseFilterDto {
   @ApiPropertyOptional({
-    description: 'Number of days to compute average daily sales',
-    default: 30,
+    description:
+      'Demand window — number of trailing days of net sales used to compute ' +
+      'average daily demand. Larger windows smooth out spikes. Alias: avgSalesDays.',
+    default: 90,
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(7)
+  @Max(730)
+  lookbackDays?: number = 90;
+
+  @ApiPropertyOptional({
+    description:
+      'Coverage horizon — number of days of demand the reorder should cover ' +
+      '(i.e. "stock me up for the next N days"). The order-up-to / max level ' +
+      'is computed for lead time + this horizon.',
+    default: 30,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(730)
+  coverageDays?: number = 30;
+
+  @ApiPropertyOptional({
+    description:
+      'Default supplier lead time in days, used when a product has no ' +
+      'per-product lead time configured in its inventory policy.',
+    default: 7,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
   @Max(365)
-  avgSalesDays?: number = 30;
+  leadTimeDays?: number = 7;
+
+  @ApiPropertyOptional({
+    description:
+      'Default safety-stock cover in days, used when a product has no ' +
+      'safety-stock qty/days configured. Safety stock = safetyDays × avg daily demand.',
+    default: 7,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  safetyDays?: number = 7;
+
+  @ApiPropertyOptional({
+    description:
+      'When true, return every product×location (with its computed numbers); ' +
+      'when false (default) return only items that need reordering ' +
+      '(on hand at or below the reorder point, or a positive suggested qty).',
+    default: false,
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  includeAll?: boolean = false;
+
+  /** @deprecated alias of lookbackDays, kept for API backward compatibility. */
+  @ApiPropertyOptional({ description: 'Deprecated alias of lookbackDays.', deprecated: true })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(7)
+  @Max(730)
+  avgSalesDays?: number;
 }
 
 export class ExpiryFilterDto extends InventoryBaseFilterDto {
