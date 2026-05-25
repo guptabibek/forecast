@@ -89,6 +89,30 @@ export interface TenantDomainResetResult {
   deletedDomainMappings: number;
 }
 
+export interface ForecastModelConfig {
+  id: string;
+  tenantId: string;
+  enabledModels: string[];
+  defaultModel: string;
+  defaultConfidenceLevel: number;
+  defaultHistoryMonths: number;
+  defaultSeasonLength: number;
+  defaultHorizon: number;
+  autoSelectBest: boolean;
+  provisionedAt: string;
+  availableModels: string[];
+}
+
+export interface UpdateForecastConfigPayload {
+  enabledModels?: string[];
+  defaultModel?: string;
+  defaultConfidenceLevel?: number;
+  defaultHistoryMonths?: number;
+  defaultSeasonLength?: number;
+  defaultHorizon?: number;
+  autoSelectBest?: boolean;
+}
+
 export const platformService = {
   // ─── Stats ──────────────────────────────────────────
   async getStats(): Promise<PlatformStats> {
@@ -214,6 +238,33 @@ export const platformService = {
       { params },
     );
     return data;
+  },
+
+  // ─── Forecasting Defaults ──────────────────────────
+  async getForecastConfig(tenantId: string): Promise<ForecastModelConfig> {
+    const { data } = await apiClient.get<{ data: ForecastModelConfig }>(
+      `/platform/tenants/${tenantId}/forecast-config`,
+    );
+    return data.data;
+  },
+
+  async updateForecastConfig(
+    tenantId: string,
+    payload: UpdateForecastConfigPayload,
+  ): Promise<ForecastModelConfig> {
+    const { data } = await apiClient.put<{ data: ForecastModelConfig }>(
+      `/platform/tenants/${tenantId}/forecast-config`,
+      payload,
+    );
+    return data.data;
+  },
+
+  async provisionDefaults(tenantId: string, reset = false): Promise<ForecastModelConfig> {
+    const { data } = await apiClient.post<{ data: ForecastModelConfig }>(
+      `/platform/tenants/${tenantId}/provision-defaults`,
+      { reset },
+    );
+    return data.data;
   },
 
   // ─── My Modules (for current tenant sidebar) ──────

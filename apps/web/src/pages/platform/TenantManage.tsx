@@ -1,4 +1,5 @@
 import {
+    type ForecastModelConfig,
     platformService,
     type TenantDetail,
     type TenantDomainResetResult,
@@ -58,24 +59,74 @@ export default function TenantManage() {
     lastName: '',
     role: 'ADMIN',
   });
+  const [forecastConfig, setForecastConfig] = useState<ForecastModelConfig | null>(null);
+  const [fcSaving, setFcSaving] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!id) return;
     try {
-      const [t, m, u] = await Promise.all([
+      const [t, m, u, fc] = await Promise.all([
         platformService.getTenant(id),
         platformService.getModules(id),
         platformService.listTenantUsers(id, { limit: 100 }),
+        platformService.getForecastConfig(id).catch(() => null),
       ]);
       setTenant(t);
       setModules(m);
       setUsers(u.data);
+      setForecastConfig(fc);
     } catch {
       setMessage({ type: 'error', text: 'Failed to load tenant data' });
     } finally {
       setLoading(false);
     }
   }, [id]);
+
+  const saveForecastConfig = async (patch: Parameters<typeof platformService.updateForecastConfig>[1]) => {
+    if (!id) return;
+    setFcSaving(true);
+    try {
+      const updated = await platformService.updateForecastConfig(id, patch);
+      setForecastConfig(updated);
+      setMessage({ type: 'success', text: 'Forecasting defaults updated' });
+    } catch (error) {
+      setMessage({ type: 'error', text: getErrorMessage(error, 'Failed to update forecasting defaults') });
+    } finally {
+      setFcSaving(false);
+      setTimeout(() => setMessage(null), 3000);
+    }
+  };
+
+  const handleToggleModel = (model: string) => {
+    if (!forecastConfig) return;
+    const enabled = forecastConfig.enabledModels.includes(model)
+      ? forecastConfig.enabledModels.filter((m) => m !== model)
+      : [...forecastConfig.enabledModels, model];
+    if (enabled.length === 0) {
+      setMessage({ type: 'error', text: 'At least one model must remain enabled' });
+      setTimeout(() => setMessage(null), 3000);
+      return;
+    }
+    saveForecastConfig({ enabledModels: enabled });
+  };
+
+  const handleProvisionDefaults = async (reset: boolean) => {
+    if (!id) return;
+    setFcSaving(true);
+    try {
+      const updated = await platformService.provisionDefaults(id, reset);
+      setForecastConfig({ ...updated, availableModels: forecastConfig?.availableModels ?? updated.enabledModels });
+      // Refresh to pick up availableModels from a clean read.
+      const fresh = await platformService.getForecastConfig(id);
+      setForecastConfig(fresh);
+      setMessage({ type: 'success', text: reset ? 'Forecasting defaults reset' : 'Defaults provisioned' });
+    } catch (error) {
+      setMessage({ type: 'error', text: getErrorMessage(error, 'Failed to provision defaults') });
+    } finally {
+      setFcSaving(false);
+      setTimeout(() => setMessage(null), 3000);
+    }
+  };
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -437,6 +488,163 @@ export default function TenantManage() {
                 );
               })}
             </div>
+          </div>
+
+          {/* Forecasting Defaults */}
+          <div className="bg-white dark:bg-secondary-800 rounded-xl border border-secondary-200 dark:border-secondary-700 p-5">
+            <div className="flex items-start justify-between mb-1">
+              <h2 className="font-semibold text-secondary-900 dark:text-secondary-100">
+                Forecasting Defaults
+              </h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleProvisionDefaults(false)}
+                  disabled={fcSaving}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-secondary-300 dark:border-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-700 disabled:opacity-50"
+                >
+                  Provision
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm('Reset this tenant’s forecasting defaults to the engine defaults? Enabled models and parameters will be overwritten.')) {
+                      handleProvisionDefaults(true);
+                    }
+                  }}
+                  disabled={fcSaving}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-amber-300 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50"
+                >
+                  Reset to defaults
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-secondary-500 dark:text-secondary-400 mb-4">
+              Control which forecast models this tenant can run and the default parameters applied when generating forecasts.
+            </p>
+
+            {!forecastConfig ? (
+              <div className="text-sm text-secondary-500 dark:text-secondary-400 py-4 text-center">
+                No forecasting configuration found.{' '}
+                <button onClick={() => handleProvisionDefaults(false)} disabled={fcSaving} className="text-primary-600 hover:underline">
+                  Provision defaults
+                </button>
+                .
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {/* Enabled models */}
+                <div>
+                  <p className="text-xs font-medium text-secondary-700 dark:text-secondary-300 mb-2">Enabled Models</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {forecastConfig.availableModels.map((model) => {
+                      const enabled = forecastConfig.enabledModels.includes(model);
+                      const isDefault = forecastConfig.defaultModel === model;
+                      return (
+                        <div
+                          key={model}
+                          className="flex items-center justify-between p-2.5 rounded-lg border border-secondary-200 dark:border-secondary-700"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-sm text-secondary-900 dark:text-secondary-100 truncate">
+                              {model.replace(/_/g, ' ')}
+                            </span>
+                            {isDefault && (
+                              <span className="text-[10px] uppercase tracking-wide bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded">
+                                Default
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {enabled && !isDefault && (
+                              <button
+                                onClick={() => saveForecastConfig({ defaultModel: model })}
+                                disabled={fcSaving}
+                                className="text-[11px] text-secondary-500 hover:text-primary-600"
+                                title="Set as default model"
+                              >
+                                Set default
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleToggleModel(model)}
+                              disabled={fcSaving}
+                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                                enabled ? 'bg-primary-600' : 'bg-secondary-300 dark:bg-secondary-600'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-3.5 w-3.5 rounded-full bg-white transform transition-transform ${
+                                  enabled ? 'translate-x-5' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Default parameters */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <label className="block">
+                    <span className="text-xs text-secondary-600 dark:text-secondary-400">Confidence %</span>
+                    <input
+                      type="number"
+                      min={50}
+                      max={99}
+                      defaultValue={forecastConfig.defaultConfidenceLevel}
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (v !== forecastConfig.defaultConfidenceLevel) saveForecastConfig({ defaultConfidenceLevel: v });
+                      }}
+                      className="mt-1 w-full rounded-lg border border-secondary-300 dark:border-secondary-600 bg-transparent px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs text-secondary-600 dark:text-secondary-400">History (months)</span>
+                    <input
+                      type="number"
+                      min={3}
+                      max={120}
+                      defaultValue={forecastConfig.defaultHistoryMonths}
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (v !== forecastConfig.defaultHistoryMonths) saveForecastConfig({ defaultHistoryMonths: v });
+                      }}
+                      className="mt-1 w-full rounded-lg border border-secondary-300 dark:border-secondary-600 bg-transparent px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs text-secondary-600 dark:text-secondary-400">Season length</span>
+                    <input
+                      type="number"
+                      min={2}
+                      max={52}
+                      defaultValue={forecastConfig.defaultSeasonLength}
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (v !== forecastConfig.defaultSeasonLength) saveForecastConfig({ defaultSeasonLength: v });
+                      }}
+                      className="mt-1 w-full rounded-lg border border-secondary-300 dark:border-secondary-600 bg-transparent px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs text-secondary-600 dark:text-secondary-400">Horizon</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      defaultValue={forecastConfig.defaultHorizon}
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (v !== forecastConfig.defaultHorizon) saveForecastConfig({ defaultHorizon: v });
+                      }}
+                      className="mt-1 w-full rounded-lg border border-secondary-300 dark:border-secondary-600 bg-transparent px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Users */}

@@ -317,7 +317,51 @@ export class StockOutFilterDto extends InventoryBaseFilterDto {}
 
 export class SuggestedPurchaseFilterDto extends InventoryBaseFilterDto {
   @ApiPropertyOptional({
-    description: 'Safety stock multiplier for demand variability',
+    description: 'Demand window — trailing days of net sales used for average daily demand.',
+    default: 90,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(7)
+  @Max(730)
+  lookbackDays?: number = 90;
+
+  @ApiPropertyOptional({
+    description: 'Coverage horizon — days of demand the purchase should cover (order-up-to = lead time + this).',
+    default: 30,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(730)
+  coverageDays?: number = 30;
+
+  @ApiPropertyOptional({
+    description: 'Default supplier lead time in days when a product has no per-product lead time configured.',
+    default: 7,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  leadTimeDays?: number = 7;
+
+  @ApiPropertyOptional({
+    description: 'Default safety-stock cover in days when none is configured. Safety stock = safetyDays × avg daily demand.',
+    default: 7,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  safetyDays?: number = 7;
+
+  @ApiPropertyOptional({
+    description: 'Deprecated. Retained for backward compatibility; superseded by safetyDays / policy safety stock.',
     default: 1.5,
   })
   @IsOptional()

@@ -20,16 +20,24 @@ import {
     parsePharmaFilters,
 } from '../pharma-filter.helper';
 
+// Suggested Purchase shares the Reorder engine: everything is computed in a CTE
+// (`sp`) and the outer SELECT reads bare column names, so these expressions are
+// plain output-column names (valid in the outer WHERE / ORDER BY).
 const SUGGESTED_PURCHASE_COLUMNS: AllowedSqlColumns = {
-  sku: { expression: 'p.code', type: 'string' },
-  product_name: { expression: 'p.name', type: 'string' },
-  category: { expression: 'p.category', type: 'string' },
-  location_code: { expression: 'l.code', type: 'string' },
-  current_stock: { expression: 'COALESCE(il.on_hand_qty, 0)', type: 'number' },
-  available_stock: { expression: 'COALESCE(il.available_qty, 0)', type: 'number' },
-  on_order_qty: { expression: 'COALESCE(il.on_order_qty, 0)', type: 'number' },
-  abc_class: { expression: 'ip.abc_class', type: 'string' },
-  lead_time_days: { expression: 'COALESCE(ip.lead_time_days, 7)', type: 'number' },
+  sku: { expression: 'sku', type: 'string' },
+  product_name: { expression: 'product_name', type: 'string' },
+  location_code: { expression: 'location_code', type: 'string' },
+  current_stock: { expression: 'current_stock', type: 'number' },
+  available_stock: { expression: 'available_stock', type: 'number' },
+  on_order_qty: { expression: 'on_order_qty', type: 'number' },
+  avg_daily_demand: { expression: 'avg_daily_demand', type: 'number' },
+  lead_time_days: { expression: 'lead_time_days', type: 'number' },
+  safety_stock: { expression: 'safety_stock', type: 'number' },
+  reorder_point: { expression: 'reorder_point', type: 'number' },
+  demand_during_lead_time: { expression: 'demand_during_lead_time', type: 'number' },
+  suggested_purchase_qty: { expression: 'suggested_purchase_qty', type: 'number' },
+  estimated_cost: { expression: 'estimated_cost', type: 'number' },
+  abc_class: { expression: 'abc_class', type: 'string' },
 };
 
 const SUPPLIER_PERFORMANCE_COLUMNS: AllowedSqlColumns = {
@@ -296,29 +304,26 @@ export class ProcurementReportsService {
   // ─────────────────────────────────────────────────────────────────────────
   // A. SUGGESTED PURCHASE
   //
-  // Formula:
-  //   Avg Daily Demand = SUM(issues over last 90 days) / 90
-  //   Demand During Lead Time = Avg Daily Demand × Lead Time Days
-  //   Suggested Purchase Qty =
-  //     MAX(0,
-  //       Demand During Lead Time
-  //       + Safety Stock
-  //       − Current Stock
-  //       − On Order Qty
-  //     )
+  // Shares the exact engine as the inventory Reorder report (getReorderReport)
+  // so the two screens never disagree, then enriches each row with the
+  // procurement-only columns (preferred supplier, estimated cost).
   //
-  // Uses inventory_policies for lead_time, safety_stock, reorder_point.
-  // Falls back to product.standard_cost for estimation when policy missing.
+  //   Avg Daily Demand = NET sales from `actuals` (ActualType=SALES) / lookback
+  //                      — excludes challans / transfers / replacements that raw
+  //                        inventory ISSUE would over-count.
+  //   Order-up-to      = Avg Daily Demand × (lead time + coverage) + safety stock
+  //   Need             = MAX(0, order-up-to − on hand − on order)
+  //   Suggested Qty    = need, then policy lot logic applied:
+  //                      reorder lot → min-order → pack multiple → max-order → ceil
+  //   Estimated Cost   = suggested qty × COALESCE(average_cost, standard_cost)
+  //
+  // Gating (mirrors Reorder): ACTIVE products only, and suggested_qty > 0 — which
+  // keeps fees / non-stock / discontinued items out of the suggestion list.
   //
   // Edge cases:
-  //   • No demand history → suggested_qty = safety_stock − current_stock
-  //   • No policy → lead_time default 7 days, safety 0
-  //   • Negative suggested qty → clamped to 0
-  //   • Already sufficient stock → excluded from results
-  //
-  // Performance:
-  //   • CTE for avg daily demand (bounded 90-day window)
-  //   • Filters to only items needing purchase
+  //   • No sales history → avg daily demand 0 → suggested qty driven by safety only
+  //   • No policy → lead time = leadTimeDays default, safety = safetyDays × demand
+  //   • Already sufficient stock → suggested qty 0 → excluded by the gate
   // ─────────────────────────────────────────────────────────────────────────
   async getSuggestedPurchase(
     tenantId: string,
@@ -326,148 +331,161 @@ export class ProcurementReportsService {
   ): Promise<{ data: SuggestedPurchaseRow[]; total: number }> {
     const limit = filters.limit ?? 50;
     const offset = filters.offset ?? 0;
+    // Same horizon controls as the inventory Reorder report (keeps the two
+    // screens consistent).
+    const lookbackDays = Math.max(1, filters.lookbackDays ?? 90);
+    const coverageDays = Math.max(1, filters.coverageDays ?? 30);
+    const leadTimeDays = Math.max(0, filters.leadTimeDays ?? 7);
+    const safetyDays = Math.max(0, filters.safetyDays ?? 7);
 
-    const extraConds: Prisma.Sql[] = [];
-    if (filters.productIds?.length) {
-      extraConds.push(Prisma.sql`p.id = ANY(${filters.productIds}::uuid[])`);
-    }
-    if (filters.locationIds?.length) {
-      extraConds.push(Prisma.sql`l.id = ANY(${filters.locationIds}::uuid[])`);
-    }
-    if (filters.category) {
-      extraConds.push(Prisma.sql`p.category = ${filters.category}`);
-    }
+    // Inner (CTE-level) filters operate on base tables.
+    const innerConds: Prisma.Sql[] = [];
+    if (filters.productIds?.length) innerConds.push(Prisma.sql`il.product_id = ANY(${filters.productIds}::uuid[])`);
+    if (filters.locationIds?.length) innerConds.push(Prisma.sql`il.location_id = ANY(${filters.locationIds}::uuid[])`);
+    if (filters.category) innerConds.push(Prisma.sql`p.category = ${filters.category}`);
+    const innerWhere = innerConds.length ? Prisma.sql`AND ${Prisma.join(innerConds, ' AND ')}` : Prisma.empty;
 
+    // Outer filters/sort operate on the computed `sp` columns (bare names).
     const columnFilters = parsePharmaFilters(filters.filters);
     const filterConds = buildPharmaFilterSql(columnFilters, SUGGESTED_PURCHASE_COLUMNS);
+    const filterWhere = filterConds.length ? Prisma.sql`AND ${Prisma.join(filterConds, ' AND ')}` : Prisma.empty;
 
-    const baseCond = Prisma.sql`il.tenant_id = ${tenantId}::uuid`;
-    const allConds = [...extraConds, ...filterConds];
-    const where = allConds.length
-      ? Prisma.sql`${baseCond} AND ${Prisma.join(allConds, ' AND ')}`
-      : baseCond;
     const orderBy = buildPharmaOrderBySql(
       filters.sortBy, filters.sortDir, SUGGESTED_PURCHASE_COLUMNS,
-      Prisma.sql`CASE ip.abc_class WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 ELSE 4 END, suggested_purchase_qty DESC`,
+      Prisma.sql`CASE abc_class WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 ELSE 4 END,
+                 suggested_purchase_qty DESC`,
     );
 
-    const rows = await this.prisma.$queryRaw<SuggestedPurchaseRow[]>(
-      Prisma.sql`
-        WITH demand_90d AS (
-          SELECT
-            it.product_id,
-            it.location_id,
-            SUM(it.quantity)::float8 AS total_demand,
-            (SUM(it.quantity)::float8 / 90.0) AS avg_daily_demand
-          FROM inventory_transactions it
-          WHERE it.tenant_id = ${tenantId}::uuid
-            AND it.transaction_type IN ('ISSUE', 'PRODUCTION_ISSUE')
-            AND it.transaction_date >= (CURRENT_DATE - 90)
-          GROUP BY it.product_id, it.location_id
-        ),
-        preferred_supplier AS (
-          SELECT DISTINCT ON (pol.product_id)
-            pol.product_id,
-            s.name AS supplier_name
-          FROM purchase_order_lines pol
-          JOIN purchase_orders po ON po.id = pol.purchase_order_id
-          JOIN suppliers s ON s.id = po.supplier_id
-          WHERE po.tenant_id = ${tenantId}::uuid
-            AND po.status NOT IN ('CANCELLED', 'DRAFT')
-          ORDER BY pol.product_id, po.order_date DESC
-        )
+    // Demand, gating and order policy mirror getReorderReport():
+    //   • Demand = NET sales from `actuals` (ActualType=SALES) — excludes
+    //     challans / transfers / replacements that raw inventory ISSUE includes.
+    //   • Only ACTIVE products (no discontinued/inactive SKUs).
+    //   • Full policy lot logic: reorder lot, min-order, pack multiple, max-order,
+    //     order-up-to over (lead time + coverage).
+    //   • Gate `suggested_purchase_qty > 0` suppresses fees / non-stock noise.
+    // Enriched with the procurement-only columns: preferred supplier + estimated cost.
+    const cte = Prisma.sql`
+      WITH demand AS (
+        SELECT a.product_id, a.location_id,
+          GREATEST(COALESCE(SUM(a.quantity), 0), 0)::float8 / ${lookbackDays}::float8 AS avg_daily_demand
+        FROM actuals a
+        WHERE a.tenant_id = ${tenantId}::uuid
+          AND a.actual_type = 'SALES'::"ActualType"
+          AND a.period_date >= (CURRENT_DATE - ${lookbackDays}::int)
+        GROUP BY a.product_id, a.location_id
+      ),
+      on_order AS (
+        SELECT pol.product_id, po.location_id,
+          COALESCE(SUM(GREATEST(pol.quantity - pol.received_qty, 0)), 0)::float8 AS on_order_qty
+        FROM purchase_order_lines pol
+        JOIN purchase_orders po ON po.id = pol.purchase_order_id AND po.tenant_id = ${tenantId}::uuid
+        WHERE po.status NOT IN ('DRAFT', 'CLOSED', 'CANCELLED')
+        GROUP BY pol.product_id, po.location_id
+      ),
+      preferred_supplier AS (
+        SELECT DISTINCT ON (pol.product_id)
+          pol.product_id, s.name AS supplier_name
+        FROM purchase_order_lines pol
+        JOIN purchase_orders po ON po.id = pol.purchase_order_id
+        JOIN suppliers s ON s.id = po.supplier_id
+        WHERE po.tenant_id = ${tenantId}::uuid
+          AND po.status NOT IN ('CANCELLED', 'DRAFT')
+        ORDER BY pol.product_id, po.order_date DESC
+      ),
+      base AS (
         SELECT
-          p.id                AS product_id,
-          p.code              AS sku,
-          p.name              AS product_name,
-          l.id                AS location_id,
-          l.code              AS location_code,
-          COALESCE(il.on_hand_qty, 0)::float8        AS current_stock,
-          COALESCE(il.available_qty, 0)::float8       AS available_stock,
-          COALESCE(il.on_order_qty, 0)::float8        AS on_order_qty,
-          COALESCE(d.avg_daily_demand, 0)::float8     AS avg_daily_demand,
-          COALESCE(ip.lead_time_days, 7)::int         AS lead_time_days,
-          COALESCE(ip.safety_stock_qty, 0)::float8    AS safety_stock,
-          COALESCE(ip.reorder_point, 0)::float8       AS reorder_point,
-          (COALESCE(d.avg_daily_demand, 0) * COALESCE(ip.lead_time_days, 7))::float8
-            AS demand_during_lead_time,
+          p.id AS product_id, p.code AS sku, p.name AS product_name,
+          l.id AS location_id, l.code AS location_code, ip.abc_class,
+          COALESCE(il.on_hand_qty, 0)::float8 AS on_hand_qty,
+          COALESCE(il.available_qty, 0)::float8 AS available_qty,
+          COALESCE(oo.on_order_qty, 0)::float8 AS on_order_qty,
+          COALESCE(d.avg_daily_demand, 0)::float8 AS avg_daily_sales,
+          COALESCE(NULLIF(ip.lead_time_days, 0), ${leadTimeDays})::float8 AS lead_time_days,
+          COALESCE(ip.safety_stock_qty, COALESCE(ip.safety_stock_days, ${safetyDays})::float8 * COALESCE(d.avg_daily_demand, 0))::float8 AS safety_stock_qty,
+          COALESCE(il.average_cost, p.standard_cost, 0)::float8 AS unit_cost_src,
+          ip.reorder_point::float8 AS cfg_reorder_point,
+          ip.reorder_qty::float8 AS cfg_reorder_qty,
+          ip.min_order_qty::float8 AS cfg_min_order,
+          ip.multiple_order_qty::float8 AS cfg_multiple,
+          ip.max_order_qty::float8 AS cfg_max_order
+        FROM inventory_levels il
+        JOIN products p ON p.id = il.product_id AND p.tenant_id = il.tenant_id AND p.status = 'ACTIVE'::"DimensionStatus"
+        JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
+        LEFT JOIN inventory_policies ip ON ip.tenant_id = il.tenant_id AND ip.product_id = il.product_id AND ip.location_id = il.location_id
+        LEFT JOIN demand d ON d.product_id = il.product_id AND d.location_id = il.location_id
+        LEFT JOIN on_order oo ON oo.product_id = il.product_id AND oo.location_id = il.location_id
+        WHERE il.tenant_id = ${tenantId}::uuid ${innerWhere}
+      ),
+      calc AS (
+        SELECT base.*,
+          COALESCE(cfg_reorder_point, avg_daily_sales * lead_time_days + safety_stock_qty)::float8 AS reorder_point,
           GREATEST(
-            (COALESCE(d.avg_daily_demand, 0) * COALESCE(ip.lead_time_days, 7))
-            + COALESCE(ip.safety_stock_qty, 0)
-            - COALESCE(il.on_hand_qty, 0)
-            - COALESCE(il.on_order_qty, 0),
-            0
-          )::float8 AS suggested_purchase_qty,
-          ip.abc_class,
-          ps.supplier_name    AS preferred_supplier,
-          (
-            GREATEST(
-              (COALESCE(d.avg_daily_demand, 0) * COALESCE(ip.lead_time_days, 7))
-              + COALESCE(ip.safety_stock_qty, 0)
-              - COALESCE(il.on_hand_qty, 0)
-              - COALESCE(il.on_order_qty, 0),
-              0
-            )
-            * COALESCE(il.average_cost, p.standard_cost, 0)
-          )::float8 AS estimated_cost
-        FROM inventory_levels il
-        JOIN products p  ON p.id = il.product_id AND p.tenant_id = il.tenant_id
-        JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
-        LEFT JOIN inventory_policies ip
-          ON ip.tenant_id = il.tenant_id
-          AND ip.product_id = il.product_id
-          AND ip.location_id = il.location_id
-        LEFT JOIN demand_90d d
-          ON d.product_id = il.product_id
-          AND d.location_id = il.location_id
-        LEFT JOIN preferred_supplier ps
-          ON ps.product_id = il.product_id
-        WHERE ${where}
-          AND (
-            COALESCE(il.on_hand_qty, 0) + COALESCE(il.on_order_qty, 0)
-            <
-            (COALESCE(d.avg_daily_demand, 0) * COALESCE(ip.lead_time_days, 7))
-            + COALESCE(ip.safety_stock_qty, 0)
-          )
-        ORDER BY ${orderBy}
-        LIMIT ${limit} OFFSET ${offset}
-      `,
-    );
+            (avg_daily_sales * (lead_time_days + ${coverageDays}::float8) + safety_stock_qty)
+            - on_hand_qty - on_order_qty, 0
+          )::float8 AS need_raw
+        FROM base
+      ),
+      r1 AS (
+        SELECT calc.*,
+          CASE WHEN cfg_reorder_qty IS NOT NULL AND cfg_reorder_qty > 0 AND need_raw > 0
+               THEN cfg_reorder_qty ELSE need_raw END::float8 AS s1
+        FROM calc
+      ),
+      r2 AS (
+        SELECT r1.*,
+          CASE WHEN s1 > 0 THEN GREATEST(s1, COALESCE(cfg_min_order, 0)) ELSE 0 END::float8 AS s2
+        FROM r1
+      ),
+      r3 AS (
+        SELECT r2.*,
+          CASE WHEN cfg_multiple IS NOT NULL AND cfg_multiple > 0 AND s2 > 0
+               THEN CEIL(s2 / cfg_multiple) * cfg_multiple ELSE s2 END::float8 AS s3
+        FROM r2
+      ),
+      rr AS (
+        SELECT r3.*,
+          CEIL(
+            CASE WHEN cfg_max_order IS NOT NULL AND cfg_max_order > 0 THEN LEAST(s3, cfg_max_order) ELSE s3 END
+          )::float8 AS suggested_order_qty
+        FROM r3
+      ),
+      sp AS (
+        SELECT
+          rr.product_id, rr.sku, rr.product_name, rr.location_id, rr.location_code,
+          rr.on_hand_qty           AS current_stock,
+          rr.available_qty         AS available_stock,
+          rr.on_order_qty,
+          rr.avg_daily_sales       AS avg_daily_demand,
+          rr.lead_time_days,
+          rr.safety_stock_qty      AS safety_stock,
+          rr.reorder_point,
+          (rr.avg_daily_sales * rr.lead_time_days)::float8 AS demand_during_lead_time,
+          rr.suggested_order_qty   AS suggested_purchase_qty,
+          rr.abc_class,
+          ps.supplier_name         AS preferred_supplier,
+          (rr.suggested_order_qty * rr.unit_cost_src)::float8 AS estimated_cost
+        FROM rr
+        LEFT JOIN preferred_supplier ps ON ps.product_id = rr.product_id
+      )
+    `;
 
-    const countResult = await this.prisma.$queryRaw<[{ cnt: bigint }]>(
-      Prisma.sql`
-        WITH demand_90d AS (
-          SELECT
-            it.product_id,
-            it.location_id,
-            SUM(it.quantity)::float8 AS total_demand,
-            (SUM(it.quantity)::float8 / 90.0) AS avg_daily_demand
-          FROM inventory_transactions it
-          WHERE it.tenant_id = ${tenantId}::uuid
-            AND it.transaction_type IN ('ISSUE', 'PRODUCTION_ISSUE')
-            AND it.transaction_date >= (CURRENT_DATE - 90)
-          GROUP BY it.product_id, it.location_id
-        )
-        SELECT COUNT(*)::bigint AS cnt
-        FROM inventory_levels il
-        JOIN products p  ON p.id = il.product_id AND p.tenant_id = il.tenant_id
-        JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
-        LEFT JOIN inventory_policies ip
-          ON ip.tenant_id = il.tenant_id
-          AND ip.product_id = il.product_id
-          AND ip.location_id = il.location_id
-        LEFT JOIN demand_90d d
-          ON d.product_id = il.product_id
-          AND d.location_id = il.location_id
-        WHERE ${where}
-          AND (
-            COALESCE(il.on_hand_qty, 0) + COALESCE(il.on_order_qty, 0)
-            <
-            (COALESCE(d.avg_daily_demand, 0) * COALESCE(ip.lead_time_days, 7))
-            + COALESCE(ip.safety_stock_qty, 0)
-          )
-      `,
-    );
+    const countResult = await this.prisma.$queryRaw<[{ cnt: bigint }]>(Prisma.sql`
+      ${cte}
+      SELECT COUNT(*)::bigint AS cnt FROM sp WHERE suggested_purchase_qty > 0 ${filterWhere}
+    `);
+
+    const rows = await this.prisma.$queryRaw<SuggestedPurchaseRow[]>(Prisma.sql`
+      ${cte}
+      SELECT
+        product_id, sku, product_name, location_id, location_code,
+        current_stock, available_stock, on_order_qty, avg_daily_demand,
+        lead_time_days, safety_stock, reorder_point, demand_during_lead_time,
+        suggested_purchase_qty, abc_class, preferred_supplier, estimated_cost
+      FROM sp
+      WHERE suggested_purchase_qty > 0 ${filterWhere}
+      ORDER BY ${orderBy}
+      LIMIT ${limit} OFFSET ${offset}
+    `);
 
     return { data: rows, total: Number(countResult[0]?.cnt ?? 0) };
   }

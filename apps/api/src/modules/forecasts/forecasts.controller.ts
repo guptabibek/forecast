@@ -44,9 +44,9 @@ export class ForecastsController {
 
   @Get('models')
   @Roles('ADMIN', 'PLANNER', 'VIEWER')
-  @ApiOperation({ summary: 'Get available forecast models' })
-  async getModels() {
-    return this.forecastsService.getAvailableModels();
+  @ApiOperation({ summary: 'Get available forecast models for the current tenant' })
+  async getModels(@CurrentUser() user: any) {
+    return this.forecastsService.getAvailableModelsForTenant(user.tenantId);
   }
 
   @Get('models/explainability')

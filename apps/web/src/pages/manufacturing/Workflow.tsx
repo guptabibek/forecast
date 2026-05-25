@@ -16,12 +16,29 @@ const safeFormat = (dateVal: any, fmt: string, fallback = '—') => {
   } catch { return fallback; }
 };
 
-const ENTITY_TYPES = ['FORECAST', 'PLAN', 'SCENARIO', 'PURCHASE_ORDER', 'BOM', 'PROMOTION'];
-const APPROVER_TYPES = ['SPECIFIC_USER', 'ROLE', 'MANAGER', 'DEPARTMENT_HEAD'];
+// Values must match the Prisma WorkflowEntityType enum exactly; labels are display-only.
+const ENTITY_TYPES = [
+  { value: 'PLAN_VERSION', label: 'Plan' },
+  { value: 'SCENARIO', label: 'Scenario' },
+  { value: 'FORECAST', label: 'Forecast' },
+  { value: 'FORECAST_OVERRIDE', label: 'Forecast Override' },
+  { value: 'FORECAST_RECONCILIATION', label: 'Forecast Reconciliation' },
+  { value: 'PLANNED_ORDER', label: 'Planned Order' },
+  { value: 'BOM', label: 'Bill of Materials' },
+  { value: 'PROMOTION', label: 'Promotion' },
+  { value: 'PRICE_CHANGE', label: 'Price Change' },
+];
+// Values must match the Prisma ApproverType enum exactly.
+const APPROVER_TYPES = [
+  { value: 'ROLE', label: 'Role' },
+  { value: 'USER', label: 'Specific User' },
+  { value: 'MANAGER', label: 'Manager' },
+  { value: 'DYNAMIC', label: 'Dynamic' },
+];
 const USER_ROLES = ['ADMIN'];
 const statusVariant: Record<string, any> = { PENDING: 'secondary', IN_PROGRESS: 'warning', APPROVED: 'success', REJECTED: 'error', CANCELLED: 'error' };
 
-const emptyTemplate = { name: '', description: '', entityType: 'FORECAST', thresholdAmount: 0, isActive: true };
+const emptyTemplate = { name: '', description: '', entityType: 'PLAN_VERSION', thresholdAmount: 0, isActive: true };
 const emptyStep = { stepOrder: 1, name: '', approverType: 'ROLE', approverRole: '', timeoutHours: 48 };
 
 type Tab = 'templates' | 'instances' | 'pending';
@@ -280,7 +297,7 @@ export default function WorkflowPage() {
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={templateForm.name} onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })} /></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={templateForm.description} onChange={(e) => setTemplateForm({ ...templateForm, description: e.target.value })} rows={2} /></div>
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">Entity Type *</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={templateForm.entityType} onChange={(e) => setTemplateForm({ ...templateForm, entityType: e.target.value })}>{ENTITY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Entity Type *</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={templateForm.entityType} onChange={(e) => setTemplateForm({ ...templateForm, entityType: e.target.value })}>{ENTITY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}</select></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Threshold (INR)</label><input type="number" className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={templateForm.thresholdAmount} onChange={(e) => setTemplateForm({ ...templateForm, thresholdAmount: +e.target.value })} /></div>
           </div>
           <div className="flex justify-end gap-3 pt-4 border-t">
@@ -296,7 +313,7 @@ export default function WorkflowPage() {
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={templateForm.name} onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })} /></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={templateForm.description} onChange={(e) => setTemplateForm({ ...templateForm, description: e.target.value })} rows={2} /></div>
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">Entity Type</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={templateForm.entityType} onChange={(e) => setTemplateForm({ ...templateForm, entityType: e.target.value })}>{ENTITY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Entity Type</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={templateForm.entityType} onChange={(e) => setTemplateForm({ ...templateForm, entityType: e.target.value })}>{ENTITY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}</select></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Threshold (INR)</label><input type="number" className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={templateForm.thresholdAmount} onChange={(e) => setTemplateForm({ ...templateForm, thresholdAmount: +e.target.value })} /></div>
           </div>
           <div className="flex justify-end gap-3 pt-4 border-t">
@@ -357,7 +374,7 @@ export default function WorkflowPage() {
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input type="text" className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={stepForm.name} onChange={(e) => setStepForm({ ...stepForm, name: e.target.value })} placeholder="Manager Approval" /></div>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">Approver Type *</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={stepForm.approverType} onChange={(e) => setStepForm({ ...stepForm, approverType: e.target.value, approverRole: e.target.value === 'ROLE' ? stepForm.approverRole : '' })}>{APPROVER_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Approver Type *</label><select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500" value={stepForm.approverType} onChange={(e) => setStepForm({ ...stepForm, approverType: e.target.value, approverRole: e.target.value === 'ROLE' ? stepForm.approverRole : '' })}>{APPROVER_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}</select></div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">System Role</label>
               <select className="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 disabled:bg-gray-50 disabled:text-gray-400" value={stepForm.approverRole} disabled={stepForm.approverType !== 'ROLE'} onChange={(e) => setStepForm({ ...stepForm, approverRole: e.target.value })}>

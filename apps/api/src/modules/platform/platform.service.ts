@@ -8,6 +8,7 @@ import {
 import { Prisma, TenantLicenseStatus, TenantStatus, TenantTier, UserRole, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../core/database/prisma.service';
 import { TenantAccessService } from '../../core/database/tenant-access.service';
+import { ForecastModelRegistry } from '../../forecast-engine/model-registry';
 import { RolesService } from '../roles/roles.service';
 import { ModuleGuard } from './module.guard';
 import {
@@ -36,7 +37,11 @@ export class PlatformService {
     private readonly moduleGuard: ModuleGuard,
     private readonly rolesService: RolesService,
     private readonly tenantAccessService: TenantAccessService,
+    private readonly modelRegistry: ForecastModelRegistry,
   ) {}
+
+  // Preferred default model when available, in order of preference.
+  private static readonly PREFERRED_DEFAULT_MODELS = ['AI_HYBRID', 'HOLT_WINTERS', 'MOVING_AVERAGE'];
 
   // ─── Tenant CRUD ──────────────────────────────────────────────
 
@@ -202,6 +207,10 @@ export class PlatformService {
 
     // Initialize default modules
     await this.initializeDefaultModules(tenant.id);
+
+    // Provision forecasting defaults (enabled models + default parameters) so
+    // the tenant can run forecasts immediately after creation.
+    await this.provisionForecastDefaults(tenant.id);
 
     return this.getTenant(tenant.id);
   }
@@ -401,6 +410,138 @@ export class PlatformService {
         enabled: DEFAULT_ENABLED_MODULES.includes(mod),
       })),
     });
+  }
+
+  // ─── Forecasting Defaults (provisioned by platform admins) ────
+
+  /** All forecast model names registered in the engine. */
+  private getRegisteredModelNames(): string[] {
+    return this.modelRegistry.getModelNames();
+  }
+
+  private pickDefaultModel(enabled: string[]): string {
+    const preferred = PlatformService.PREFERRED_DEFAULT_MODELS.find((m) => enabled.includes(m));
+    return preferred ?? enabled[0];
+  }
+
+  /**
+   * Provision (or re-provision) a tenant's forecasting defaults. Idempotent:
+   * creates the config if missing. When `reset` is true, an existing config is
+   * overwritten with engine defaults. Otherwise an existing config is preserved
+   * but any newly-released models are added to its enabled set so the tenant is
+   * never silently missing capabilities.
+   */
+  async provisionForecastDefaults(tenantId: string, options?: { reset?: boolean }) {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
+    if (!tenant) throw new NotFoundException('Tenant not found');
+
+    const allModels = this.getRegisteredModelNames();
+    if (allModels.length === 0) {
+      throw new BadRequestException('No forecast models are registered in the engine');
+    }
+
+    const existing = await this.prisma.forecastModelConfig.findUnique({ where: { tenantId } });
+
+    if (!existing || options?.reset) {
+      const enabled = allModels;
+      return this.prisma.forecastModelConfig.upsert({
+        where: { tenantId },
+        create: {
+          tenantId,
+          enabledModels: enabled,
+          defaultModel: this.pickDefaultModel(enabled),
+          provisionedAt: new Date(),
+        },
+        update: {
+          enabledModels: enabled,
+          defaultModel: this.pickDefaultModel(enabled),
+          defaultConfidenceLevel: 95,
+          defaultHistoryMonths: 24,
+          defaultSeasonLength: 12,
+          defaultHorizon: 12,
+          autoSelectBest: false,
+          provisionedAt: new Date(),
+        },
+      });
+    }
+
+    // Preserve config but backfill any models added since it was provisioned.
+    const missing = allModels.filter((m) => !existing.enabledModels.includes(m));
+    if (missing.length === 0) return existing;
+    return this.prisma.forecastModelConfig.update({
+      where: { tenantId },
+      data: { enabledModels: Array.from(new Set([...existing.enabledModels, ...missing])) },
+    });
+  }
+
+  /** Return a tenant's forecasting config, lazily provisioning it if absent. */
+  async getForecastConfig(tenantId: string) {
+    const config = await this.prisma.forecastModelConfig.findUnique({ where: { tenantId } });
+    if (config) {
+      return { ...config, availableModels: this.getRegisteredModelNames() };
+    }
+    const provisioned = await this.provisionForecastDefaults(tenantId);
+    return { ...provisioned, availableModels: this.getRegisteredModelNames() };
+  }
+
+  /** Update a tenant's forecasting defaults (super-admin editable). */
+  async updateForecastConfig(
+    tenantId: string,
+    dto: {
+      enabledModels?: string[];
+      defaultModel?: string;
+      defaultConfidenceLevel?: number;
+      defaultHistoryMonths?: number;
+      defaultSeasonLength?: number;
+      defaultHorizon?: number;
+      autoSelectBest?: boolean;
+    },
+  ) {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
+    if (!tenant) throw new NotFoundException('Tenant not found');
+
+    const allModels = this.getRegisteredModelNames();
+
+    let enabledModels = dto.enabledModels;
+    if (enabledModels) {
+      const invalid = enabledModels.filter((m) => !allModels.includes(m));
+      if (invalid.length) {
+        throw new BadRequestException(`Unknown forecast models: ${invalid.join(', ')}`);
+      }
+      if (enabledModels.length === 0) {
+        throw new BadRequestException('At least one forecast model must be enabled');
+      }
+      enabledModels = Array.from(new Set(enabledModels));
+    }
+
+    // Ensure the config exists first.
+    await this.getForecastConfig(tenantId);
+
+    const current = await this.prisma.forecastModelConfig.findUnique({ where: { tenantId } });
+    const resolvedEnabled = enabledModels ?? current!.enabledModels;
+
+    if (dto.defaultModel && !resolvedEnabled.includes(dto.defaultModel)) {
+      throw new BadRequestException('Default model must be one of the enabled models');
+    }
+
+    if (dto.defaultConfidenceLevel !== undefined && (dto.defaultConfidenceLevel < 50 || dto.defaultConfidenceLevel > 99)) {
+      throw new BadRequestException('Confidence level must be between 50 and 99');
+    }
+
+    const updated = await this.prisma.forecastModelConfig.update({
+      where: { tenantId },
+      data: {
+        ...(enabledModels && { enabledModels }),
+        ...(dto.defaultModel && { defaultModel: dto.defaultModel }),
+        ...(dto.defaultConfidenceLevel !== undefined && { defaultConfidenceLevel: dto.defaultConfidenceLevel }),
+        ...(dto.defaultHistoryMonths !== undefined && { defaultHistoryMonths: dto.defaultHistoryMonths }),
+        ...(dto.defaultSeasonLength !== undefined && { defaultSeasonLength: dto.defaultSeasonLength }),
+        ...(dto.defaultHorizon !== undefined && { defaultHorizon: dto.defaultHorizon }),
+        ...(dto.autoSelectBest !== undefined && { autoSelectBest: dto.autoSelectBest }),
+      },
+    });
+
+    return { ...updated, availableModels: allModels };
   }
 
   // ─── Tenant Users (cross-tenant view) ─────────────────────────

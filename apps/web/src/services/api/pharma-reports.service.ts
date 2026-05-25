@@ -1094,7 +1094,7 @@ export const pharmaReportsService = {
     apiClient.get<PaginatedResponse<TurnoverRow>>(`${BASE}/analysis/turnover`, { params: toParams(filters ?? {}) }).then((r) => r.data),
 
   // ── Procurement ────────────────────────────────────────────────────────
-  getSuggestedPurchase: (filters?: PharmaFilters) =>
+  getSuggestedPurchase: (filters?: PharmaFilters & ReorderParams) =>
     apiClient.get<PaginatedResponse<SuggestedPurchaseRow>>(`${BASE}/procurement/suggested-purchase`, { params: toParams(filters ?? {}) }).then((r) => r.data),
 
   getSupplierPerformance: (filters?: PharmaFilters & { supplierIds?: string[] }) =>

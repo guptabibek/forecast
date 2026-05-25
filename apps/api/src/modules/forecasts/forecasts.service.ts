@@ -92,7 +92,27 @@ export class ForecastsService {
       throw new BadRequestException('Scenario is locked');
     }
 
-    const periodType = (generateDto.periodType as PeriodType) || planVersion.periodType || PeriodType.MONTHLY;
+    // Enforce the tenant's provisioned forecasting configuration: only models
+    // enabled for the tenant may be run. Tenants without a config (legacy) are
+    // unrestricted for backward compatibility.
+    const forecastConfig = await this.prisma.forecastModelConfig.findUnique({
+      where: { tenantId: user.tenantId },
+    });
+    if (forecastConfig && Array.isArray(models) && models.length) {
+      const disallowed = models.filter((m) => !forecastConfig.enabledModels.includes(m));
+      if (disallowed.length) {
+        throw new BadRequestException(
+          `These models are not enabled for your organization: ${disallowed.join(', ')}. Contact your administrator.`,
+        );
+      }
+    }
+
+    if (!models || models.length === 0) {
+      throw new BadRequestException('At least one forecast model must be specified');
+    }
+
+    const requestedPeriodType =
+      (generateDto.periodType as PeriodType) || planVersion.periodType || PeriodType.MONTHLY;
 
     let startDate: Date;
     if (generateDto.rolling) {
@@ -104,37 +124,9 @@ export class ForecastsService {
       startDate = planVersion.startDate;
     }
 
-    let endDate: Date;
-    if (generateDto.endDate) {
-      endDate = new Date(generateDto.endDate);
-    } else {
-      const tempEnd = new Date(startDate);
-      switch (periodType) {
-        case PeriodType.DAILY:
-          tempEnd.setDate(tempEnd.getDate() + periods - 1);
-          break;
-        case PeriodType.WEEKLY:
-          tempEnd.setDate(tempEnd.getDate() + (periods - 1) * 7);
-          break;
-        case PeriodType.QUARTERLY:
-          tempEnd.setMonth(tempEnd.getMonth() + (periods - 1) * 3);
-          break;
-        case PeriodType.YEARLY:
-          tempEnd.setFullYear(tempEnd.getFullYear() + periods - 1);
-          break;
-        case PeriodType.MONTHLY:
-        default:
-          tempEnd.setMonth(tempEnd.getMonth() + periods - 1);
-          break;
-      }
-      endDate = tempEnd;
-    }
-
-    if (!startDate || !endDate) {
+    if (!startDate) {
       throw new BadRequestException('Forecast period range is invalid');
     }
-
-    await this.validateTimeBuckets(user.tenantId, startDate, endDate, periodType);
 
     const dimensions = generateDto.dimensions?.length
       ? generateDto.dimensions
@@ -142,37 +134,126 @@ export class ForecastsService {
 
     const assumptions = await this.prisma.assumption.findMany({
       where: { tenantId: user.tenantId, planVersionId, scenarioId, isActive: true },
-      select: { id: true, name: true, assumptionType: true, value: true, valueType: true },
+      select: {
+        id: true,
+        name: true,
+        assumptionType: true,
+        value: true,
+        valueType: true,
+        productId: true,
+        locationId: true,
+        customerId: true,
+        accountId: true,
+        startDate: true,
+        endDate: true,
+        priority: true,
+      },
+      orderBy: { priority: 'asc' },
     });
 
-    const historyMonths = generateDto.historyMonths ?? this.computeDefaultHistoryMonths(periodType);
-    const historyStart = new Date(startDate);
-    if (periodType === PeriodType.DAILY) {
-      historyStart.setDate(historyStart.getDate() - historyMonths * 30);
-    } else if (periodType === PeriodType.YEARLY) {
-      historyStart.setFullYear(historyStart.getFullYear() - Math.max(historyMonths / 12, 5));
-    } else {
-      historyStart.setMonth(historyStart.getMonth() - historyMonths);
-    }
+    const filterIds = {
+      productIds: generateDto.productIds,
+      locationIds: generateDto.locationIds,
+      customerIds: generateDto.customerIds,
+    };
 
-    const historicalData = await this.prisma.actual.findMany({
+    const historyMonths =
+      generateDto.historyMonths ??
+      forecastConfig?.defaultHistoryMonths ??
+      this.computeDefaultHistoryMonths(requestedPeriodType);
+
+    // Anchor the history window to the most recent actual that exists for this
+    // tenant + filters, not just the plan start date. Tenants whose ERP sync
+    // only holds recent data — or whose plan begins at the start of the
+    // available data — would otherwise match zero history. We train on the
+    // latest `historyMonths` of data that actually exists.
+    const latestActual = await this.prisma.actual.findFirst({
       where: {
         tenantId: user.tenantId,
-        periodDate: { gte: historyStart, lt: startDate },
-        ...(generateDto.productIds?.length ? { productId: { in: generateDto.productIds } } : {}),
-        ...(generateDto.locationIds?.length ? { locationId: { in: generateDto.locationIds } } : {}),
-        ...(generateDto.customerIds?.length ? { customerId: { in: generateDto.customerIds } } : {}),
+        ...(filterIds.productIds?.length ? { productId: { in: filterIds.productIds } } : {}),
+        ...(filterIds.locationIds?.length ? { locationId: { in: filterIds.locationIds } } : {}),
+        ...(filterIds.customerIds?.length ? { customerId: { in: filterIds.customerIds } } : {}),
       },
-      orderBy: { periodDate: 'asc' },
-      take: 100000,
+      orderBy: { periodDate: 'desc' },
+      select: { periodDate: true },
     });
 
-    if (models.length === 0) {
-      throw new BadRequestException('At least one forecast model must be specified');
+    // History ends at the later of the plan start and the latest actual.
+    const historyEnd =
+      latestActual?.periodDate && latestActual.periodDate > startDate
+        ? latestActual.periodDate
+        : startDate;
+
+    // Choose the effective forecast grain. If the requested grain lacks enough
+    // history for any selected model, fall back to the coarsest finer grain
+    // that does — so short-history tenants still get a usable forecast instead
+    // of an empty one. The lowest model minimum sets the bar.
+    const minRequired = Math.min(
+      ...models.map((m) => this.modelRegistry.get(m)?.minDataPoints ?? Number.POSITIVE_INFINITY),
+    );
+    let periodType = requestedPeriodType;
+    let maxPeriodsAvailable = 0;
+    let requestedGrainAvailable = 0;
+    let grainAutoSelected = false;
+    for (const grain of this.finerGrainLadder(requestedPeriodType)) {
+      const candidateStart = this.historyStartFor(grain, historyEnd, historyMonths);
+      const avail = await this.countAvailablePeriods({
+        tenantId: user.tenantId,
+        dimensions,
+        periodType: grain,
+        start: candidateStart,
+        end: historyEnd,
+        ...filterIds,
+      });
+      if (grain === requestedPeriodType) requestedGrainAvailable = avail;
+      if (Number.isFinite(minRequired) && avail >= minRequired) {
+        periodType = grain;
+        maxPeriodsAvailable = avail;
+        grainAutoSelected = grain !== requestedPeriodType;
+        break;
+      }
+    }
+    if (maxPeriodsAvailable === 0) {
+      // Nothing met the bar — stay on the requested grain and report honestly.
+      periodType = requestedPeriodType;
+      maxPeriodsAvailable = requestedGrainAvailable;
     }
 
+    const historyStart = this.historyStartFor(periodType, historyEnd, historyMonths);
+
+    // Preserve the intended calendar horizon even when the grain fell back: a
+    // 12-month plan forecast at weekly grain should still span ~12 months
+    // (~52 weekly buckets), not 12 weeks.
+    let endDate: Date;
+    if (generateDto.endDate) {
+      endDate = new Date(generateDto.endDate);
+    } else {
+      endDate = this.addPeriods(startDate, periods, requestedPeriodType);
+    }
+
+    if (!endDate) {
+      throw new BadRequestException('Forecast period range is invalid');
+    }
+
+    await this.validateTimeBuckets(user.tenantId, startDate, endDate, periodType);
+
+    // Aggregate actuals to the forecast period grain (per dimension) in the
+    // database. Actuals are transaction/line level, so feeding them raw would
+    // give models many same-date points; aggregation yields a proper time
+    // series and avoids pulling hundreds of thousands of rows into memory.
+    const historicalData = await this.fetchAggregatedActuals({
+      tenantId: user.tenantId,
+      dimensions,
+      periodType,
+      start: historyStart,
+      end: historyEnd,
+      ...filterIds,
+    });
+
     if (historicalData.length === 0) {
-      this.logger.warn(`No historical data found for tenant ${user.tenantId} in range ${historyStart.toISOString()} to ${startDate.toISOString()}`);
+      this.logger.warn(
+        `No historical data found for tenant ${user.tenantId} in range ${historyStart.toISOString()} to ${historyEnd.toISOString()}`,
+      );
     }
 
     const adjustment = SCENARIO_ADJUSTMENTS[scenario.scenarioType] || SCENARIO_ADJUSTMENTS.BASE;
@@ -243,6 +324,14 @@ export class ForecastsService {
         const adjustedForecasts = rawForecasts.map((f) => {
           let adjustedAmount = Number(f.amount) * adjustment.multiplier;
           let adjustedQuantity = f.quantity != null ? Number(f.quantity) * adjustment.multiplier : undefined;
+
+          // Apply user-defined planning assumptions (growth, price, volume,
+          // promotion, discontinuation) scoped by dimension and date window.
+          const effect = this.computeAssumptionEffect(f, assumptions, startDate);
+          adjustedAmount = adjustedAmount * effect.amountFactor + effect.amountAddend;
+          if (adjustedQuantity != null) {
+            adjustedQuantity = adjustedQuantity * effect.quantityFactor;
+          }
 
           if (generateDto.externalSignals?.length) {
             for (const signal of generateDto.externalSignals) {
@@ -372,14 +461,152 @@ export class ForecastsService {
       );
     }
 
+    const totalResults = runs.reduce((sum, r) => sum + r.resultCount, 0);
+    let message: string | undefined;
+    if (historicalData.length === 0) {
+      message =
+        `No historical sales actuals were found in the last ${historyMonths} months ` +
+        `(searched ${historyStart.toISOString().slice(0, 10)} to ${historyEnd.toISOString().slice(0, 10)}). ` +
+        `Import or sync sales history before generating forecasts.`;
+    } else if (totalResults === 0) {
+      message =
+        `Found ${maxPeriodsAvailable} period(s) of history, but the selected model(s) need more ` +
+        `to produce a forecast. Add more history, switch to a finer period (e.g. weekly), or pick a simpler model.`;
+    } else if (grainAutoSelected) {
+      message =
+        `Not enough ${requestedPeriodType.toLowerCase()} history for the selected model(s); ` +
+        `forecast was generated at ${periodType.toLowerCase()} grain instead (${maxPeriodsAvailable} periods available).`;
+    }
+
     return {
       status: 'completed',
       runs,
+      requestedPeriodType,
       periodType,
+      grainAutoSelected,
       startDate,
       endDate,
+      historyPeriods: maxPeriodsAvailable,
+      historyRange: { start: historyStart, end: historyEnd },
+      ...(message ? { message } : {}),
       forecasts: allForecasts,
     };
+  }
+
+  /**
+   * Compute the combined effect of planning assumptions on a single forecast row.
+   *
+   * Assumptions are scoped by dimension (product/location/customer/account) and an
+   * optional date window. A null dimension on the assumption means "applies to all".
+   * Effects compound multiplicatively (in priority order) except ABSOLUTE values,
+   * which are added to the amount.
+   *
+   * Type semantics:
+   *  - GROWTH_RATE: annual growth compounded by months elapsed since forecast start.
+   *  - PRICE_CHANGE: amount-only multiplier (price does not change unit volume).
+   *  - VOLUME_CHANGE / PROMOTION / NEW_PRODUCT: amount + quantity multiplier.
+   *  - DISCONTINUATION: zeroes the row once its phase-out date is reached.
+   *  - COST_INFLATION / SEASONALITY / CUSTOM: not applied to demand here (no-op).
+   */
+  private computeAssumptionEffect(
+    forecastRow: { periodDate: Date | string; productId?: string; locationId?: string; customerId?: string; accountId?: string },
+    assumptions: Array<{
+      assumptionType: string;
+      value: any;
+      valueType: string;
+      productId?: string | null;
+      locationId?: string | null;
+      customerId?: string | null;
+      accountId?: string | null;
+      startDate?: Date | string | null;
+      endDate?: Date | string | null;
+    }>,
+    forecastStart: Date,
+  ): { amountFactor: number; amountAddend: number; quantityFactor: number } {
+    let amountFactor = 1;
+    let amountAddend = 0;
+    let quantityFactor = 1;
+
+    if (!assumptions?.length) {
+      return { amountFactor, amountAddend, quantityFactor };
+    }
+
+    const period = new Date(forecastRow.periodDate);
+
+    const dimensionMatches = (a: { productId?: string | null; locationId?: string | null; customerId?: string | null; accountId?: string | null }) =>
+      (!a.productId || a.productId === forecastRow.productId) &&
+      (!a.locationId || a.locationId === forecastRow.locationId) &&
+      (!a.customerId || a.customerId === forecastRow.customerId) &&
+      (!a.accountId || a.accountId === forecastRow.accountId);
+
+    const inWindow = (a: { startDate?: Date | string | null; endDate?: Date | string | null }) =>
+      (!a.startDate || period >= new Date(a.startDate)) &&
+      (!a.endDate || period <= new Date(a.endDate));
+
+    for (const a of assumptions) {
+      if (!dimensionMatches(a) || !inWindow(a)) continue;
+
+      const raw = Number(a.value);
+      if (!isFinite(raw)) continue;
+
+      // Resolve the assumption value into a per-period multiplier (or addend).
+      let factor: number;
+      switch (a.valueType) {
+        case 'PERCENTAGE':
+          factor = 1 + raw / 100;
+          break;
+        case 'MULTIPLIER':
+          factor = raw;
+          break;
+        case 'INDEX':
+          factor = raw === 0 ? 1 : raw / 100;
+          break;
+        case 'ABSOLUTE':
+        default:
+          factor = NaN; // handled per-type below
+          break;
+      }
+
+      switch (a.assumptionType) {
+        case 'GROWTH_RATE': {
+          // Compound the annual rate over months elapsed since the forecast start.
+          const monthsElapsed = Math.max(
+            0,
+            (period.getFullYear() - forecastStart.getFullYear()) * 12 +
+              (period.getMonth() - forecastStart.getMonth()),
+          );
+          const annualRate = a.valueType === 'PERCENTAGE' ? raw / 100 : raw - 1;
+          const compounded = Math.pow(1 + annualRate, monthsElapsed / 12);
+          amountFactor *= compounded;
+          quantityFactor *= compounded;
+          break;
+        }
+        case 'PRICE_CHANGE':
+          if (a.valueType === 'ABSOLUTE') amountAddend += raw;
+          else if (isFinite(factor)) amountFactor *= factor;
+          break;
+        case 'VOLUME_CHANGE':
+        case 'PROMOTION':
+        case 'NEW_PRODUCT':
+          if (a.valueType === 'ABSOLUTE') {
+            amountAddend += raw;
+          } else if (isFinite(factor)) {
+            amountFactor *= factor;
+            quantityFactor *= factor;
+          }
+          break;
+        case 'DISCONTINUATION':
+          // Once the phase-out begins, demand goes to zero for this row.
+          amountFactor = 0;
+          quantityFactor = 0;
+          break;
+        default:
+          // COST_INFLATION, SEASONALITY, CUSTOM: not applied to demand here.
+          break;
+      }
+    }
+
+    return { amountFactor, amountAddend, quantityFactor };
   }
 
   /**
@@ -419,6 +646,206 @@ export class ForecastsService {
 
     return Array.from(periodMap.values())
       .sort((a, b) => a.periodDate.getTime() - b.periodDate.getTime());
+  }
+
+  /** Postgres date_trunc unit for a forecast period type (validated constant). */
+  private periodTruncUnit(periodType: PeriodType): string {
+    switch (periodType) {
+      case PeriodType.DAILY:
+        return 'day';
+      case PeriodType.WEEKLY:
+        return 'week';
+      case PeriodType.QUARTERLY:
+        return 'quarter';
+      case PeriodType.YEARLY:
+        return 'year';
+      case PeriodType.MONTHLY:
+      default:
+        return 'month';
+    }
+  }
+
+  /** Allowlist mapping forecast dimension keys to actuals columns (never user input). */
+  private static readonly ACTUAL_DIMENSION_COLUMNS: Record<string, string> = {
+    productId: 'product_id',
+    locationId: 'location_id',
+    customerId: 'customer_id',
+    accountId: 'account_id',
+    costCenterId: 'cost_center_id',
+  };
+
+  private actualDimColumns(dimensions: string[]): string[] {
+    return dimensions
+      .map((d) => ForecastsService.ACTUAL_DIMENSION_COLUMNS[d])
+      .filter((c): c is string => Boolean(c));
+  }
+
+  /** Parameterised WHERE clause for the actuals table (tenant + window + id filters). */
+  private actualsWhereSql(p: {
+    tenantId: string;
+    start: Date;
+    end: Date;
+    productIds?: string[];
+    locationIds?: string[];
+    customerIds?: string[];
+  }): Prisma.Sql {
+    const filters: Prisma.Sql[] = [
+      Prisma.sql`tenant_id = ${p.tenantId}::uuid`,
+      Prisma.sql`period_date >= ${p.start}`,
+      Prisma.sql`period_date <= ${p.end}`,
+    ];
+    if (p.productIds?.length) {
+      filters.push(Prisma.sql`product_id IN (${Prisma.join(p.productIds.map((id) => Prisma.sql`${id}::uuid`))})`);
+    }
+    if (p.locationIds?.length) {
+      filters.push(Prisma.sql`location_id IN (${Prisma.join(p.locationIds.map((id) => Prisma.sql`${id}::uuid`))})`);
+    }
+    if (p.customerIds?.length) {
+      filters.push(Prisma.sql`customer_id IN (${Prisma.join(p.customerIds.map((id) => Prisma.sql`${id}::uuid`))})`);
+    }
+    return Prisma.join(filters, ' AND ');
+  }
+
+  /**
+   * Grain ladder from the requested period type toward finer grains (requested
+   * first). Auto-fallback never descends to DAILY — daily SKU-level forecasts
+   * over a planning horizon explode row counts and are rarely meaningful — so
+   * DAILY is only honoured when it is the grain the caller explicitly requested.
+   */
+  private finerGrainLadder(periodType: PeriodType): PeriodType[] {
+    const order: PeriodType[] = [
+      PeriodType.YEARLY,
+      PeriodType.QUARTERLY,
+      PeriodType.MONTHLY,
+      PeriodType.WEEKLY,
+      PeriodType.DAILY,
+    ];
+    const idx = order.indexOf(periodType);
+    if (idx === -1) return [periodType];
+    const ladder = order.slice(idx);
+    return periodType === PeriodType.DAILY ? ladder : ladder.filter((g) => g !== PeriodType.DAILY);
+  }
+
+  /** Start of the history window for a given grain, `historyMonths` back from the end. */
+  private historyStartFor(periodType: PeriodType, historyEnd: Date, historyMonths: number): Date {
+    const start = new Date(historyEnd);
+    if (periodType === PeriodType.DAILY) {
+      start.setDate(start.getDate() - historyMonths * 30);
+    } else if (periodType === PeriodType.YEARLY) {
+      start.setFullYear(start.getFullYear() - Math.max(Math.ceil(historyMonths / 12), 5));
+    } else {
+      start.setMonth(start.getMonth() - historyMonths);
+    }
+    return start;
+  }
+
+  /** End date for `periods` buckets at a given grain, starting at `start`. */
+  private addPeriods(start: Date, periods: number, periodType: PeriodType): Date {
+    const end = new Date(start);
+    switch (periodType) {
+      case PeriodType.DAILY:
+        end.setDate(end.getDate() + periods - 1);
+        break;
+      case PeriodType.WEEKLY:
+        end.setDate(end.getDate() + (periods - 1) * 7);
+        break;
+      case PeriodType.QUARTERLY:
+        end.setMonth(end.getMonth() + (periods - 1) * 3);
+        break;
+      case PeriodType.YEARLY:
+        end.setFullYear(end.getFullYear() + periods - 1);
+        break;
+      case PeriodType.MONTHLY:
+      default:
+        end.setMonth(end.getMonth() + periods - 1);
+        break;
+    }
+    return end;
+  }
+
+  /**
+   * Number of distinct period buckets available for the densest dimension group
+   * at a given grain. Drives the automatic grain-fallback decision: if the
+   * densest series can't satisfy a model's minimum, finer grains are tried.
+   */
+  private async countAvailablePeriods(params: {
+    tenantId: string;
+    dimensions: string[];
+    periodType: PeriodType;
+    start: Date;
+    end: Date;
+    productIds?: string[];
+    locationIds?: string[];
+    customerIds?: string[];
+  }): Promise<number> {
+    const unit = this.periodTruncUnit(params.periodType);
+    const cols = this.actualDimColumns(params.dimensions);
+    const where = this.actualsWhereSql(params);
+
+    let rows: Array<{ max: number }>;
+    if (cols.length) {
+      const groupCols = Prisma.raw(cols.join(', '));
+      rows = await this.prisma.$queryRaw<Array<{ max: number }>>(Prisma.sql`
+        SELECT COALESCE(MAX(c), 0)::int AS "max" FROM (
+          SELECT COUNT(DISTINCT date_trunc(${unit}, period_date)) AS c
+          FROM actuals
+          WHERE ${where}
+          GROUP BY ${groupCols}
+        ) t
+      `);
+    } else {
+      rows = await this.prisma.$queryRaw<Array<{ max: number }>>(Prisma.sql`
+        SELECT COUNT(DISTINCT date_trunc(${unit}, period_date))::int AS "max"
+        FROM actuals
+        WHERE ${where}
+      `);
+    }
+    return Number(rows?.[0]?.max ?? 0);
+  }
+
+  /**
+   * Aggregate transaction/line-level actuals to the forecast period grain, per
+   * dimension combination, directly in Postgres. Returns one row per
+   * (dimension combo, period bucket) with summed amount and quantity, shaped
+   * for the forecast engine (camelCase dimension keys + periodDate/amount/quantity).
+   *
+   * Dimension column names come from a fixed allowlist (never user input), so
+   * the dynamic SQL fragments are safe; all values are parameterised.
+   */
+  private async fetchAggregatedActuals(params: {
+    tenantId: string;
+    dimensions: string[];
+    periodType: PeriodType;
+    start: Date;
+    end: Date;
+    productIds?: string[];
+    locationIds?: string[];
+    customerIds?: string[];
+  }): Promise<Array<Record<string, any>>> {
+    const dims = params.dimensions.filter((d) => ForecastsService.ACTUAL_DIMENSION_COLUMNS[d]);
+    const unit = this.periodTruncUnit(params.periodType);
+
+    const selectDims = dims.length
+      ? Prisma.raw(dims.map((d) => `${ForecastsService.ACTUAL_DIMENSION_COLUMNS[d]} AS "${d}"`).join(', ') + ',')
+      : Prisma.empty;
+    const groupDims = dims.length
+      ? Prisma.raw(', ' + dims.map((d) => ForecastsService.ACTUAL_DIMENSION_COLUMNS[d]).join(', '))
+      : Prisma.empty;
+
+    const whereSql = this.actualsWhereSql(params);
+
+    const rows = await this.prisma.$queryRaw<Array<Record<string, any>>>(Prisma.sql`
+      SELECT date_trunc(${unit}, period_date) AS "periodDate",
+             ${selectDims}
+             SUM(amount)::float8 AS "amount",
+             SUM(COALESCE(quantity, 0))::float8 AS "quantity"
+      FROM actuals
+      WHERE ${whereSql}
+      GROUP BY 1${groupDims}
+      ORDER BY 1 ASC
+    `);
+
+    return rows;
   }
 
   async create(createDto: CreateForecastDto, user: any) {
@@ -884,6 +1311,22 @@ export class ForecastsService {
     return this.modelRegistry.getModelMetadata();
   }
 
+  /**
+   * Models available to a tenant: the full registry filtered to the tenant's
+   * enabled set, each flagged with whether it is the tenant default. Tenants
+   * without a provisioned config see all models (backward compatible).
+   */
+  async getAvailableModelsForTenant(tenantId: string) {
+    const all = this.modelRegistry.getModelMetadata();
+    const config = await this.prisma.forecastModelConfig.findUnique({ where: { tenantId } });
+    if (!config) {
+      return all.map((m) => ({ ...m, enabled: true, isDefault: false }));
+    }
+    return all
+      .filter((m) => config.enabledModels.includes(m.name))
+      .map((m) => ({ ...m, enabled: true, isDefault: m.name === config.defaultModel }));
+  }
+
   private calculateAccuracyMetrics(forecasts: any[], actuals: any[]) {
     // Create map of actuals by period + dimensions
     const actualMap = new Map<string, number>();
@@ -974,13 +1417,7 @@ export class ForecastsService {
       },
     });
 
-    await this.workflowService.startWorkflow(
-      user.tenantId,
-      WorkflowEntityType.FORECAST_OVERRIDE,
-      override.id,
-      user.id,
-      updateDto.overrideReason,
-    );
+    await this.routeOverrideForApproval(override, user, updateDto.overrideReason);
 
     await this.auditService.log(
       user.tenantId,
@@ -1056,13 +1493,7 @@ export class ForecastsService {
       },
     });
 
-    await this.workflowService.startWorkflow(
-      user.tenantId,
-      WorkflowEntityType.FORECAST_OVERRIDE,
-      override.id,
-      user.id,
-      dto.reason,
-    );
+    await this.routeOverrideForApproval(override, user, dto.reason);
 
     await this.auditService.log(
       user.tenantId,
@@ -1106,9 +1537,18 @@ export class ForecastsService {
       return { status: workflow.status };
     }
 
+    return this.applyApprovedOverride(override.id, user, notes);
+  }
+
+  /**
+   * Marks an override APPROVED and applies its values to the matching forecast
+   * rows. Shared by the workflow-approval path and the auto-approve path used
+   * when no approval workflow is configured.
+   */
+  private async applyApprovedOverride(overrideId: string, user: any, notes?: string) {
     const approved = await this.prisma.$transaction(async (tx) => {
       const updatedOverride = await tx.forecastOverride.update({
-        where: { id: override.id },
+        where: { id: overrideId },
         data: {
           status: OverrideStatus.APPROVED,
           approvedById: user.id,
@@ -1119,14 +1559,14 @@ export class ForecastsService {
 
       await tx.forecast.updateMany({
         where: {
-          tenantId: user.tenantId,
-          forecastRunId: override.forecastRunId,
-          periodDate: override.periodDate,
-          productId: override.productId,
-          locationId: override.locationId,
-          customerId: override.customerId,
-          accountId: override.accountId,
-          costCenterId: override.costCenterId,
+          tenantId: updatedOverride.tenantId,
+          forecastRunId: updatedOverride.forecastRunId,
+          periodDate: updatedOverride.periodDate,
+          productId: updatedOverride.productId,
+          locationId: updatedOverride.locationId,
+          customerId: updatedOverride.customerId,
+          accountId: updatedOverride.accountId,
+          costCenterId: updatedOverride.costCenterId,
         },
         data: {
           forecastAmount: updatedOverride.overrideAmount,
@@ -1143,13 +1583,36 @@ export class ForecastsService {
       user.id,
       AuditAction.APPROVE,
       'ForecastOverride',
-      override.id,
+      overrideId,
       null,
       { status: 'APPROVED' },
       ['status'],
     );
 
     return approved;
+  }
+
+  /**
+   * Routes a freshly created override through approval. Starts a workflow when
+   * one is configured for the tenant; otherwise auto-approves and applies it.
+   */
+  private async routeOverrideForApproval(override: { id: string }, user: any, reason?: string) {
+    const hasWorkflow = await this.workflowService.hasActiveTemplate(
+      user.tenantId,
+      WorkflowEntityType.FORECAST_OVERRIDE,
+    );
+
+    if (hasWorkflow) {
+      await this.workflowService.startWorkflow(
+        user.tenantId,
+        WorkflowEntityType.FORECAST_OVERRIDE,
+        override.id,
+        user.id,
+        reason,
+      );
+    } else {
+      await this.applyApprovedOverride(override.id, user, 'Auto-approved: no workflow configured');
+    }
   }
 
   async rejectOverride(id: string, notes: string | undefined, user: any) {
@@ -1306,18 +1769,31 @@ export class ForecastsService {
       });
     }
 
-    for (const row of pendingRows) {
-      const created = await this.prisma.forecastReconciliation.create({
-        data: row,
-      });
+    // Variance rows only require review when a workflow is configured.
+    // Otherwise they are recorded as approved directly.
+    const hasReconWorkflow = await this.workflowService.hasActiveTemplate(
+      user.tenantId,
+      WorkflowEntityType.FORECAST_RECONCILIATION,
+    );
 
-      await this.workflowService.startWorkflow(
-        user.tenantId,
-        WorkflowEntityType.FORECAST_RECONCILIATION,
-        created.id,
-        user.id,
-        'Variance requires approval',
-      );
+    for (const row of pendingRows) {
+      if (hasReconWorkflow) {
+        const created = await this.prisma.forecastReconciliation.create({
+          data: row,
+        });
+
+        await this.workflowService.startWorkflow(
+          user.tenantId,
+          WorkflowEntityType.FORECAST_RECONCILIATION,
+          created.id,
+          user.id,
+          'Variance requires approval',
+        );
+      } else {
+        await this.prisma.forecastReconciliation.create({
+          data: { ...row, status: ReconciliationStatus.APPROVED },
+        });
+      }
     }
 
     await this.auditService.log(

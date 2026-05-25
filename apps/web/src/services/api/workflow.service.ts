@@ -8,7 +8,17 @@ export interface WorkflowTemplate {
   id: string;
   name: string;
   description?: string;
-  entityType: 'FORECAST' | 'PLAN' | 'SCENARIO' | 'PURCHASE_ORDER' | 'BOM' | 'PROMOTION';
+  entityType:
+    | 'PLAN_VERSION'
+    | 'SCENARIO'
+    | 'FORECAST'
+    | 'FORECAST_RUN'
+    | 'FORECAST_OVERRIDE'
+    | 'FORECAST_RECONCILIATION'
+    | 'PLANNED_ORDER'
+    | 'BOM'
+    | 'PROMOTION'
+    | 'PRICE_CHANGE';
   thresholdAmount?: number;
   isActive: boolean;
   steps?: WorkflowStep[];
@@ -19,7 +29,7 @@ export interface WorkflowStep {
   templateId: string;
   stepOrder: number;
   name: string;
-  approverType: 'SPECIFIC_USER' | 'ROLE' | 'MANAGER' | 'DEPARTMENT_HEAD';
+  approverType: 'USER' | 'ROLE' | 'MANAGER' | 'DYNAMIC';
   approverRole?: string;
   approverId?: string;
   autoApproveBelow?: number;

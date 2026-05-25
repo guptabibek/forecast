@@ -76,7 +76,13 @@
       "Bash(break)",
       "Bash(python -c \"import json,sys; s=json.load\\(sys.stdin\\)['scripts']; print\\('\\\\n'.join\\(f'{k}: {v}' for k,v in s.items\\(\\)\\)\\)\")",
       "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('eslintConfig','NONE'\\)\\)\\)\")",
-      "Bash(awk '/vw_ai_stock_summary AS/,/;/' prisma/migrations/20260512120000_add_ai_reporting_views/migration.sql)"
+      "Bash(awk '/vw_ai_stock_summary AS/,/;/' prisma/migrations/20260512120000_add_ai_reporting_views/migration.sql)",
+      "Bash(find apps/api/prisma -iname \"*seed*\")",
+      "Bash(find apps/api/src -iname \"*seed*\")",
+      "Bash(grep -rn \"db:seed\\\\|prisma db seed\\\\|\\\\\"seed\\\\\":\" apps/api/package.json scripts/docker-entrypoint.sh)",
+      "Bash(node -e \"const p=require\\('./apps/api/package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\); console.log\\('PRISMA:',JSON.stringify\\(p.prisma\\)\\)\")",
+      "Bash(grep -i \"\\\\.tsx\\\\?$\")",
+      "Bash(npm run *)"
     ]
   }
 }

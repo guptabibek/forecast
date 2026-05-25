@@ -55,6 +55,11 @@ export interface GenerateForecastResponse {
   periodType: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
   startDate: string;
   endDate: string;
+  historyPeriods?: number;
+  historyRange?: { start: string; end: string };
+  requestedPeriodType?: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
+  grainAutoSelected?: boolean;
+  message?: string;
   forecasts: Array<{
     forecastModel: ForecastModel;
     periodDate: string;

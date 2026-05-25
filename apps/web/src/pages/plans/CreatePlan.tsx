@@ -20,6 +20,63 @@ const scenarioTypeOptions = [
   { value: 'CUSTOM', label: 'Custom', description: 'Custom scenario' },
 ];
 
+// Standard enterprise plan templates. Selecting one prefills plan type, period
+// granularity and horizon so users start from a recognised planning cadence.
+type PlanTemplate = {
+  id: string;
+  label: string;
+  description: string;
+  planType: 'BUDGET' | 'FORECAST' | 'STRATEGIC' | 'WHAT_IF';
+  periodType: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
+  // Horizon resolver returns the [start, end] dates given the chosen fiscal year.
+  range: (fiscalYear: number) => { start: Date; end: Date };
+  nameSuffix: string;
+};
+
+const PLAN_TEMPLATES: PlanTemplate[] = [
+  {
+    id: 'annual-operating',
+    label: 'Annual Operating Plan',
+    description: 'Monthly budget across one fiscal year',
+    planType: 'BUDGET',
+    periodType: 'MONTHLY',
+    range: (fy) => ({ start: new Date(fy, 0, 1), end: new Date(fy, 11, 31) }),
+    nameSuffix: 'Annual Operating Plan',
+  },
+  {
+    id: 'rolling-18',
+    label: 'Rolling 18-Month Forecast',
+    description: 'Monthly demand forecast, 18 months from today',
+    planType: 'FORECAST',
+    periodType: 'MONTHLY',
+    range: () => {
+      const start = new Date();
+      const end = new Date();
+      end.setMonth(end.getMonth() + 18);
+      return { start, end };
+    },
+    nameSuffix: 'Rolling 18-Month Forecast',
+  },
+  {
+    id: 'quarterly-sop',
+    label: 'Quarterly S&OP',
+    description: 'Quarterly sales & operations plan over a fiscal year',
+    planType: 'FORECAST',
+    periodType: 'QUARTERLY',
+    range: (fy) => ({ start: new Date(fy, 0, 1), end: new Date(fy, 11, 31) }),
+    nameSuffix: 'Quarterly S&OP',
+  },
+  {
+    id: 'strategic-3yr',
+    label: 'Strategic 3-Year Plan',
+    description: 'Yearly long-range plan across three fiscal years',
+    planType: 'STRATEGIC',
+    periodType: 'YEARLY',
+    range: (fy) => ({ start: new Date(fy, 0, 1), end: new Date(fy + 2, 11, 31) }),
+    nameSuffix: 'Strategic 3-Year Plan',
+  },
+];
+
 // Type for additional scenarios to create
 interface AdditionalScenario {
   id: string;
@@ -60,6 +117,7 @@ export default function CreatePlan() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [additionalScenarios, setAdditionalScenarios] = useState<AdditionalScenario[]>([]);
   const [isCreatingScenarios, setIsCreatingScenarios] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
 
   const currentYear = new Date().getFullYear();
 
@@ -206,6 +264,20 @@ export default function CreatePlan() {
     );
   };
 
+  const applyTemplate = (template: PlanTemplate) => {
+    setSelectedTemplate(template.id);
+    const { start, end } = template.range(fiscalYear);
+    setValue('planType', template.planType);
+    setValue('periodType', template.periodType);
+    setValue('startDate', format(start, 'yyyy-MM-dd'));
+    setValue('endDate', format(end, 'yyyy-MM-dd'));
+    // Suggest a name only when the user hasn't typed one yet.
+    if (!name?.trim()) {
+      setValue('name', `FY${fiscalYear} ${template.nameSuffix}`);
+    }
+    trigger(['startDate', 'endDate', 'name']);
+  };
+
   const handleFiscalYearChange = (year: number) => {
     setValue('fiscalYear', year);
     setValue('startDate', format(new Date(year, 0, 1), 'yyyy-MM-dd'));
@@ -293,6 +365,30 @@ export default function CreatePlan() {
           {step === 1 && (
             <div className="p-6 space-y-6">
               <h2 className="text-lg font-semibold">Basic Information</h2>
+
+              <div>
+                <label className="label">Start from a Template <span className="text-secondary-400 font-normal">(optional)</span></label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {PLAN_TEMPLATES.map((tpl) => (
+                    <button
+                      key={tpl.id}
+                      type="button"
+                      onClick={() => applyTemplate(tpl)}
+                      className={`text-left p-3 rounded-lg border-2 transition-colors ${
+                        selectedTemplate === tpl.id
+                          ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30'
+                          : 'border-secondary-200 hover:border-secondary-300 dark:border-secondary-700'
+                      }`}
+                    >
+                      <p className="font-medium text-sm">{tpl.label}</p>
+                      <p className="text-xs text-secondary-500 mt-0.5">{tpl.description}</p>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-secondary-400 mt-1">
+                  Templates set the plan type, period granularity and horizon. You can adjust everything in the next steps.
+                </p>
+              </div>
 
               <div>
                 <label htmlFor="name" className="label">
@@ -574,22 +670,35 @@ export default function CreatePlan() {
             <div className="p-6 space-y-6">
               <h2 className="text-lg font-semibold">Define Scenarios</h2>
               <p className="text-secondary-500">
-                A "Base Scenario" will be created automatically. Add more scenarios below if needed.
+                Three standard scenarios — Base, Optimistic, and Pessimistic — are created
+                automatically. Add more below if needed.
               </p>
 
-              {/* Default Base Scenario (always created) */}
-              <div className="p-4 border-2 border-primary-200 bg-primary-50 dark:bg-primary-900/20 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-primary-700 dark:text-primary-300">Base Scenario</p>
-                    <p className="text-sm text-primary-600 dark:text-primary-400">
-                      Default baseline scenario (created automatically)
-                    </p>
+              {/* Standard scenarios (always created by the backend) */}
+              <div className="space-y-2">
+                {[
+                  { name: 'Base Scenario', desc: 'Baseline forecast (no adjustment)', dot: 'bg-primary-500' },
+                  { name: 'Optimistic', desc: 'Best case (+15% uplift)', dot: 'bg-success-500' },
+                  { name: 'Pessimistic', desc: 'Worst case (-15% reduction)', dot: 'bg-error-500' },
+                ].map((s) => (
+                  <div
+                    key={s.name}
+                    className="p-4 border-2 border-primary-200 bg-primary-50 dark:bg-primary-900/20 rounded-lg"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className={`w-2.5 h-2.5 rounded-full ${s.dot}`} />
+                        <div>
+                          <p className="font-medium text-primary-700 dark:text-primary-300">{s.name}</p>
+                          <p className="text-sm text-primary-600 dark:text-primary-400">{s.desc}</p>
+                        </div>
+                      </div>
+                      <span className="text-xs bg-primary-100 text-primary-700 px-2 py-1 rounded-full">
+                        Standard
+                      </span>
+                    </div>
                   </div>
-                  <span className="text-xs bg-primary-100 text-primary-700 px-2 py-1 rounded-full">
-                    Required
-                  </span>
-                </div>
+                ))}
               </div>
 
               {/* Additional Scenarios */}
@@ -658,30 +767,6 @@ export default function CreatePlan() {
                     onClick={() => {
                       setAdditionalScenarios(prev => [
                         ...prev,
-                        { id: crypto.randomUUID(), name: 'Optimistic', type: 'OPTIMISTIC' }
-                      ]);
-                    }}
-                    className="btn-secondary btn-sm"
-                  >
-                    + Optimistic
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAdditionalScenarios(prev => [
-                        ...prev,
-                        { id: crypto.randomUUID(), name: 'Pessimistic', type: 'PESSIMISTIC' }
-                      ]);
-                    }}
-                    className="btn-secondary btn-sm"
-                  >
-                    + Pessimistic
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAdditionalScenarios(prev => [
-                        ...prev,
                         { id: crypto.randomUUID(), name: 'Conservative', type: 'CONSERVATIVE' }
                       ]);
                     }}
@@ -707,14 +792,14 @@ export default function CreatePlan() {
               {/* Summary */}
               <div className="text-sm text-secondary-500 text-center">
                 {additionalScenarios.length === 0 ? (
-                  <p>Your plan will be created with 1 scenario (Base Scenario).</p>
+                  <p>Your plan will be created with 3 standard scenarios (Base, Optimistic, Pessimistic).</p>
                 ) : (
                   <p>
                     Your plan will be created with{' '}
                     <strong className="text-secondary-700 dark:text-secondary-300">
-                      {additionalScenarios.length + 1} scenarios
+                      {additionalScenarios.length + 3} scenarios
                     </strong>{' '}
-                    (Base Scenario + {additionalScenarios.length} additional).
+                    (3 standard + {additionalScenarios.length} additional).
                   </p>
                 )}
               </div>
@@ -770,7 +855,7 @@ export default function CreatePlan() {
                       {isCreatingScenarios ? 'Creating Scenarios...' : 'Creating Plan...'}
                     </div>
                   ) : additionalScenarios.length > 0 ? (
-                    `Create Plan with ${additionalScenarios.length + 1} Scenarios`
+                    `Create Plan with ${additionalScenarios.length + 3} Scenarios`
                   ) : (
                     'Create Plan'
                   )}

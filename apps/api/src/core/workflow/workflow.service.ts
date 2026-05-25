@@ -8,6 +8,19 @@ export class WorkflowService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Returns true when the tenant has an active approval workflow configured for
+   * the given entity type. Approval is optional: callers use this to decide
+   * whether to route an entity through review or auto-approve it directly.
+   */
+  async hasActiveTemplate(tenantId: string, entityType: WorkflowEntityType): Promise<boolean> {
+    const template = await this.prisma.workflowTemplate.findFirst({
+      where: { tenantId, entityType, isActive: true },
+      select: { id: true },
+    });
+    return Boolean(template);
+  }
+
   async startWorkflow(
     tenantId: string,
     entityType: WorkflowEntityType,

@@ -84,18 +84,42 @@ export class PlansService {
         },
       });
 
-      // Create default baseline scenario for new plans
-      await tx.scenario.create({
-        data: {
-          name: 'Base Scenario',
-          description: 'Default baseline scenario',
-          tenant: { connect: { id: user.tenantId } },
-          planVersion: { connect: { id: plan.id } },
-          scenarioType: 'BASE',
-          isBaseline: true,
-          color: '#3b82f6',
-          sortOrder: 0,
-        },
+      // Seed the standard S&OP scenario set for new plans: Base, Optimistic,
+      // Pessimistic. The forecast engine applies the matching ±% adjustments
+      // (see SCENARIO_ADJUSTMENTS in forecasts.service).
+      await tx.scenario.createMany({
+        data: [
+          {
+            name: 'Base Scenario',
+            description: 'Default baseline scenario',
+            tenantId: user.tenantId,
+            planVersionId: plan.id,
+            scenarioType: 'BASE',
+            isBaseline: true,
+            color: '#3b82f6',
+            sortOrder: 0,
+          },
+          {
+            name: 'Optimistic',
+            description: 'Best-case assumptions (+15% uplift)',
+            tenantId: user.tenantId,
+            planVersionId: plan.id,
+            scenarioType: 'OPTIMISTIC',
+            isBaseline: false,
+            color: '#10b981',
+            sortOrder: 1,
+          },
+          {
+            name: 'Pessimistic',
+            description: 'Worst-case assumptions (-15% reduction)',
+            tenantId: user.tenantId,
+            planVersionId: plan.id,
+            scenarioType: 'PESSIMISTIC',
+            isBaseline: false,
+            color: '#ef4444',
+            sortOrder: 2,
+          },
+        ],
       });
 
       return plan;
@@ -364,31 +388,61 @@ export class PlansService {
       throw new BadRequestException('Plan must have at least one scenario');
     }
 
-    await this.workflowService.startWorkflow(
+    // Approval is optional. If the tenant has configured an active workflow for
+    // plans, route through review; otherwise auto-approve on submit.
+    const hasWorkflow = await this.workflowService.hasActiveTemplate(
       user.tenantId,
       WorkflowEntityType.PLAN_VERSION,
-      id,
-      user.id,
-      'Plan submitted for approval',
     );
 
-    await this.prisma.planVersion.update({
-      where: { id },
-      data: {
-        status: PlanStatus.IN_REVIEW,
-      },
-    });
+    if (hasWorkflow) {
+      await this.workflowService.startWorkflow(
+        user.tenantId,
+        WorkflowEntityType.PLAN_VERSION,
+        id,
+        user.id,
+        'Plan submitted for approval',
+      );
 
-    await this.auditService.log(
-      user.tenantId,
-      user.id,
-      AuditAction.UPDATE,
-      'PlanVersion',
-      id,
-      { status: PlanStatus.DRAFT },
-      { status: PlanStatus.IN_REVIEW },
-      ['status'],
-    );
+      await this.prisma.planVersion.update({
+        where: { id },
+        data: {
+          status: PlanStatus.IN_REVIEW,
+        },
+      });
+
+      await this.auditService.log(
+        user.tenantId,
+        user.id,
+        AuditAction.UPDATE,
+        'PlanVersion',
+        id,
+        { status: PlanStatus.DRAFT },
+        { status: PlanStatus.IN_REVIEW },
+        ['status'],
+      );
+    } else {
+      // No workflow configured: submit approves the plan directly.
+      await this.prisma.planVersion.update({
+        where: { id },
+        data: {
+          status: PlanStatus.APPROVED,
+          approvedAt: new Date(),
+          approvedBy: { connect: { id: user.id } },
+        },
+      });
+
+      await this.auditService.log(
+        user.tenantId,
+        user.id,
+        AuditAction.APPROVE,
+        'PlanVersion',
+        id,
+        { status: PlanStatus.DRAFT },
+        { status: PlanStatus.APPROVED },
+        ['status'],
+      );
+    }
 
     // Return full plan data
     return this.findOne(id, user);
@@ -499,11 +553,15 @@ export class PlansService {
       throw new BadRequestException('Only approved plans can be locked');
     }
 
-    await this.workflowService.ensureApproved(
-      user.tenantId,
-      WorkflowEntityType.PLAN_VERSION,
-      id,
-    );
+    // When a workflow is configured, require the workflow instance to be
+    // approved. Without a workflow the APPROVED status check above is sufficient.
+    if (await this.workflowService.hasActiveTemplate(user.tenantId, WorkflowEntityType.PLAN_VERSION)) {
+      await this.workflowService.ensureApproved(
+        user.tenantId,
+        WorkflowEntityType.PLAN_VERSION,
+        id,
+      );
+    }
 
     await this.prisma.planVersion.update({
       where: { id },

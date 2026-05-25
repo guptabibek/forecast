@@ -14,7 +14,8 @@ import {
     PaperAirplaneIcon,
     PlayIcon,
     PlusIcon,
-    TableCellsIcon
+    TableCellsIcon,
+    XMarkIcon
 } from '@heroicons/react/24/outline';
 import { forecastService, planService, scenarioService } from '@services/api';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -190,11 +191,20 @@ export default function PlanDetail() {
     }
   }, [id, queryClient, refetchPlan, refetchScenarios]);
 
-  // Fetch available models
+  // Fetch available models (already filtered to the tenant's enabled set)
   const { data: models } = useQuery({
     queryKey: ['forecast-models'],
     queryFn: forecastService.getModels,
   });
+
+  // Keep the selected model valid for this tenant: if the current selection
+  // isn't in the enabled list, fall back to the tenant default or first model.
+  useEffect(() => {
+    if (!models || models.length === 0) return;
+    if (models.some((m) => m.name === selectedModel)) return;
+    const fallback = (models.find((m) => (m as { isDefault?: boolean }).isDefault) ?? models[0]).name;
+    setSelectedModel(fallback as ForecastModel);
+  }, [models, selectedModel]);
 
   // Generate forecast mutation - uses the generate method which runs models on historical Actuals data
   const generateMutation = useMutation({
@@ -213,7 +223,20 @@ export default function PlanDetail() {
       refetchPlan();
       const completed = data.runs.filter(r => r.status === 'completed');
       const total = completed.reduce((sum, r) => sum + r.resultCount, 0);
-      toast.success(`Generated ${total} forecast results`);
+      if (total === 0) {
+        // No results — surface the engine's diagnostic (e.g. insufficient history).
+        toast.error(
+          data.message ||
+            'No forecast could be generated. There may be too little sales history for the selected model.',
+          { duration: 7000 },
+        );
+      } else if (data.grainAutoSelected && data.message) {
+        // Forecast produced, but at a finer grain than requested — tell the user why.
+        toast.success(`Generated ${total} forecast results`);
+        toast(data.message, { icon: 'ℹ️', duration: 7000 });
+      } else {
+        toast.success(`Generated ${total} forecast results`);
+      }
     },
     onError: (error: unknown) => {
       const message = getErrorMessage(error, 'Failed to generate forecast');
@@ -261,9 +284,14 @@ export default function PlanDetail() {
   // Submit for review mutation
   const submitMutation = useMutation({
     mutationFn: () => planService.submitForReview(id!),
-    onSuccess: () => {
+    onSuccess: (updated) => {
       refetchPlan();
-      toast.success('Plan submitted for review');
+      // When no approval workflow is configured, submit approves directly.
+      if (updated?.status === 'APPROVED') {
+        toast.success('Plan approved (no review workflow configured)');
+      } else {
+        toast.success('Plan submitted for review');
+      }
     },
     onError: (error: unknown) => {
       toast.error(getErrorMessage(error, 'Failed to submit plan'));
@@ -273,14 +301,37 @@ export default function PlanDetail() {
   // Approve mutation
   const approveMutation = useMutation({
     mutationFn: () => planService.approve(id!),
-    onSuccess: () => {
+    onSuccess: (updated) => {
       refetchPlan();
-      toast.success('Plan approved');
+      // A multi-step workflow may only advance a step rather than fully approve.
+      if (updated?.status === 'APPROVED') {
+        toast.success('Plan approved');
+      } else {
+        toast.success('Approval recorded — awaiting further approvals');
+      }
     },
     onError: (error: unknown) => {
       toast.error(getErrorMessage(error, 'Failed to approve plan'));
     },
   });
+
+  // Reject mutation — returns the plan to draft
+  const rejectMutation = useMutation({
+    mutationFn: (reason: string) => planService.reject(id!, reason),
+    onSuccess: () => {
+      refetchPlan();
+      toast.success('Plan returned to draft');
+    },
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, 'Failed to reject plan'));
+    },
+  });
+
+  const handleReject = useCallback(() => {
+    const reason = window.prompt('Reason for returning this plan to draft?');
+    if (reason === null) return; // cancelled
+    rejectMutation.mutate(reason.trim() || 'Returned for revision');
+  }, [rejectMutation]);
 
   // Lock/unlock mutation
   const lockMutation = useMutation({
@@ -484,6 +535,14 @@ export default function PlanDetail() {
           )}
           {plan.status === 'IN_REVIEW' && (
             <>
+              <button
+                onClick={handleReject}
+                disabled={rejectMutation.isPending}
+                className="btn-secondary"
+              >
+                <XMarkIcon className="w-5 h-5 mr-2" />
+                Reject
+              </button>
               <button
                 onClick={() => approveMutation.mutate()}
                 disabled={approveMutation.isPending}

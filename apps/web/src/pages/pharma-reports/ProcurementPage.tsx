@@ -122,6 +122,14 @@ function openPath(path: string | null | undefined) {
 export default function ProcurementPage() {
   const [activeTab, setActiveTab] = useState<Tab>('purchase');
   const [drilldown, setDrilldown] = useState<SupplierDrilldownState>(null);
+  // Demand/coverage horizon controls — kept in sync with the inventory Reorder
+  // screen so both use the same net-sales-driven replenishment logic.
+  const [purchaseParams, setPurchaseParams] = useState({
+    lookbackDays: 90,
+    coverageDays: 30,
+    leadTimeDays: 7,
+    safetyDays: 7,
+  });
 
   const purchaseGrid = usePharmaGrid({ initialSortBy: 'sku' });
   const supplierGrid = usePharmaGrid({ initialSortBy: 'supplier_name' });
@@ -129,7 +137,7 @@ export default function ProcurementPage() {
   const poDrilldownGrid = usePharmaGrid({ initialSortBy: 'document_date', initialSortOrder: 'desc', initialPageSize: 25 });
   const piDrilldownGrid = usePharmaGrid({ initialSortBy: 'document_date', initialSortOrder: 'desc', initialPageSize: 25 });
 
-  const purchase = useSuggestedPurchase(purchaseGrid.pharmaParams, activeTab === 'purchase');
+  const purchase = useSuggestedPurchase({ ...purchaseGrid.pharmaParams, ...purchaseParams }, activeTab === 'purchase');
   const supplier = useSupplierPerformance(supplierGrid.pharmaParams, activeTab === 'supplier');
   const stockouts = useStockOuts(stockoutGrid.pharmaParams, activeTab === 'stockouts');
   const supplierContextFilters = pickReportContextFilters(supplierGrid.pharmaParams);
@@ -460,9 +468,28 @@ export default function ProcurementPage() {
           <Card padding="none">
             <CardHeader
               title="Suggested Purchase Orders"
-              description="Items below reorder point with auto-calculated quantities"
+              description="Net-sales-driven replenishment — same demand logic as the inventory Reorder screen, with preferred supplier and estimated cost"
               className="px-6 pt-6"
             />
+            <div className="px-6 pb-4 flex flex-wrap items-end gap-3 border-b border-gray-100">
+              {([
+                ['lookbackDays', 'Demand window (days)', 'Trailing days of net sales used for average daily demand'],
+                ['coverageDays', 'Cover next (days)', 'Days of demand the order should cover'],
+                ['leadTimeDays', 'Lead time (days)', 'Default supplier lead time (per-product config overrides this)'],
+                ['safetyDays', 'Safety (days)', 'Buffer days of cover (per-product config overrides this)'],
+              ] as const).map(([k, label, hint]) => (
+                <label key={k} className="flex flex-col gap-1" title={hint}>
+                  <span className="text-xs font-medium text-gray-500">{label}</span>
+                  <input
+                    type="number"
+                    min={k === 'coverageDays' || k === 'lookbackDays' ? 1 : 0}
+                    value={purchaseParams[k]}
+                    onChange={(e) => setPurchaseParams((p) => ({ ...p, [k]: Math.max(0, Number(e.target.value) || 0) }))}
+                    className="w-28 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                  />
+                </label>
+              ))}
+            </div>
             <DataTable<SuggestedPurchaseRow>
               data={purchase.data?.data ?? []}
               columns={purchaseCols}

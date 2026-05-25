@@ -279,7 +279,7 @@ export function useInventoryTurnover(filters?: PharmaFilters, enabled = true) {
 
 // ── Procurement ──────────────────────────────────────────────────────────
 
-export function useSuggestedPurchase(filters?: PharmaFilters, enabled = true) {
+export function useSuggestedPurchase(filters?: PharmaFilters & ReorderParams, enabled = true) {
   return useQuery({
     queryKey: pharmaKeys.suggestedPurchase(filters),
     queryFn: () => pharmaReportsService.getSuggestedPurchase(filters),

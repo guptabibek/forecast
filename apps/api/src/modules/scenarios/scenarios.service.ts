@@ -167,29 +167,54 @@ export class ScenariosService {
       throw new BadRequestException('Only draft scenarios can be submitted');
     }
 
-    await this.workflowService.startWorkflow(
+    // Approval is optional. Route through review only when a workflow exists;
+    // otherwise submit approves the scenario directly.
+    const hasWorkflow = await this.workflowService.hasActiveTemplate(
       user.tenantId,
       WorkflowEntityType.SCENARIO,
-      id,
-      user.id,
-      'Scenario submitted for approval',
     );
 
-    await this.prisma.scenario.update({
-      where: { id },
-      data: { status: PlanStatus.IN_REVIEW },
-    });
+    if (hasWorkflow) {
+      await this.workflowService.startWorkflow(
+        user.tenantId,
+        WorkflowEntityType.SCENARIO,
+        id,
+        user.id,
+        'Scenario submitted for approval',
+      );
 
-    await this.auditService.log(
-      user.tenantId,
-      user.id,
-      AuditAction.UPDATE,
-      'Scenario',
-      id,
-      { status: PlanStatus.DRAFT },
-      { status: PlanStatus.IN_REVIEW },
-      ['status'],
-    );
+      await this.prisma.scenario.update({
+        where: { id },
+        data: { status: PlanStatus.IN_REVIEW },
+      });
+
+      await this.auditService.log(
+        user.tenantId,
+        user.id,
+        AuditAction.UPDATE,
+        'Scenario',
+        id,
+        { status: PlanStatus.DRAFT },
+        { status: PlanStatus.IN_REVIEW },
+        ['status'],
+      );
+    } else {
+      await this.prisma.scenario.update({
+        where: { id },
+        data: { status: PlanStatus.APPROVED },
+      });
+
+      await this.auditService.log(
+        user.tenantId,
+        user.id,
+        AuditAction.APPROVE,
+        'Scenario',
+        id,
+        { status: PlanStatus.DRAFT },
+        { status: PlanStatus.APPROVED },
+        ['status'],
+      );
+    }
 
     return this.findOne(id, user);
   }
@@ -287,11 +312,13 @@ export class ScenariosService {
       throw new BadRequestException('Only approved scenarios can be locked');
     }
 
-    await this.workflowService.ensureApproved(
-      user.tenantId,
-      WorkflowEntityType.SCENARIO,
-      id,
-    );
+    if (await this.workflowService.hasActiveTemplate(user.tenantId, WorkflowEntityType.SCENARIO)) {
+      await this.workflowService.ensureApproved(
+        user.tenantId,
+        WorkflowEntityType.SCENARIO,
+        id,
+      );
+    }
 
     await this.prisma.scenario.update({
       where: { id },

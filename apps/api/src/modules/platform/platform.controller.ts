@@ -9,6 +9,7 @@ import {
     ParseUUIDPipe,
     Patch,
     Post,
+    Put,
     Query,
     UseGuards,
 } from '@nestjs/common';
@@ -148,6 +149,41 @@ export class PlatformController {
     @Body() body: { enabled: boolean },
   ) {
     return { data: await this.platformService.toggleModule(id, module, body.enabled) };
+  }
+
+  // ─── Forecasting Defaults ─────────────────────────────────────
+
+  @Get('tenants/:id/forecast-config')
+  @ApiOperation({ summary: 'Get a tenant forecasting configuration (enabled models + defaults)' })
+  async getForecastConfig(@Param('id', ParseUUIDPipe) id: string) {
+    return { data: await this.platformService.getForecastConfig(id) };
+  }
+
+  @Put('tenants/:id/forecast-config')
+  @ApiOperation({ summary: 'Update a tenant forecasting configuration' })
+  async updateForecastConfig(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body()
+    body: {
+      enabledModels?: string[];
+      defaultModel?: string;
+      defaultConfidenceLevel?: number;
+      defaultHistoryMonths?: number;
+      defaultSeasonLength?: number;
+      defaultHorizon?: number;
+      autoSelectBest?: boolean;
+    },
+  ) {
+    return { data: await this.platformService.updateForecastConfig(id, body) };
+  }
+
+  @Post('tenants/:id/provision-defaults')
+  @ApiOperation({ summary: 'Provision (or reset) a tenant default forecast models and dependencies' })
+  async provisionDefaults(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { reset?: boolean },
+  ) {
+    return { data: await this.platformService.provisionForecastDefaults(id, { reset: body?.reset }) };
   }
 
   // ─── Tenant Users ─────────────────────────────────────────────

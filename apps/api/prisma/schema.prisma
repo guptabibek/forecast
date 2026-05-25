@@ -58,8 +58,30 @@ model Tenant {
   channels             Channel[]            @relation("TenantChannels")
   tenantModules        TenantModule[]
   tenantRoles          TenantRole[]
+  forecastModelConfig  ForecastModelConfig?
 
   @@map("tenants")
+}
+
+/// Per-tenant forecasting defaults provisioned by platform (super) admins.
+/// Controls which forecast models a tenant may use and the default parameters
+/// applied when a forecast is generated.
+model ForecastModelConfig {
+  id                     String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId               String   @unique @map("tenant_id") @db.Uuid
+  enabledModels          String[] @map("enabled_models")
+  defaultModel           String   @map("default_model") @db.VarChar(50)
+  defaultConfidenceLevel Int      @default(95) @map("default_confidence_level")
+  defaultHistoryMonths   Int      @default(24) @map("default_history_months")
+  defaultSeasonLength    Int      @default(12) @map("default_season_length")
+  defaultHorizon         Int      @default(12) @map("default_horizon")
+  autoSelectBest         Boolean  @default(false) @map("auto_select_best")
+  provisionedAt          DateTime @default(now()) @map("provisioned_at")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+  tenant                 Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("forecast_model_configs")
 }
 
 model Report {
