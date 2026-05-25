@@ -1076,6 +1076,7 @@ export interface AccountLedgerResponse {
 // ── API Service ────────────────────────────────────────────────────────────
 
 const BASE = '/pharma-reports';
+const THREE_SIXTY_REPORT_TIMEOUT_MS = 300000;
 
 function toParams(filters: Record<string, unknown>): Record<string, string> {
   const params: Record<string, string> = {};
@@ -1104,13 +1105,22 @@ export const pharmaReportsService = {
     apiClient.get<InventoryValueTrendPoint[]>(`${BASE}/dashboard/inventory-value-trend`).then((r) => r.data),
 
   getItem360: (filters?: { search?: string; period?: ThreeSixtyPeriod; locationId?: string }) =>
-    apiClient.get<Item360Report>(`${BASE}/360/item`, { params: toParams(filters ?? {}) }).then((r) => r.data),
+    apiClient.get<Item360Report>(`${BASE}/360/item`, {
+      params: toParams(filters ?? {}),
+      timeout: THREE_SIXTY_REPORT_TIMEOUT_MS,
+    }).then((r) => r.data),
 
   getCustomer360: (filters?: { search?: string; period?: ThreeSixtyPeriod; locationId?: string }) =>
-    apiClient.get<Customer360Report>(`${BASE}/360/customer`, { params: toParams(filters ?? {}) }).then((r) => r.data),
+    apiClient.get<Customer360Report>(`${BASE}/360/customer`, {
+      params: toParams(filters ?? {}),
+      timeout: THREE_SIXTY_REPORT_TIMEOUT_MS,
+    }).then((r) => r.data),
 
   getSupplier360: (filters?: { search?: string; period?: ThreeSixtyPeriod; locationId?: string }) =>
-    apiClient.get<Supplier360Report>(`${BASE}/360/supplier`, { params: toParams(filters ?? {}) }).then((r) => r.data),
+    apiClient.get<Supplier360Report>(`${BASE}/360/supplier`, {
+      params: toParams(filters ?? {}),
+      timeout: THREE_SIXTY_REPORT_TIMEOUT_MS,
+    }).then((r) => r.data),
 
   search360Options: (filters: { type: ThreeSixtySearchType; search?: string; limit?: number }) =>
     apiClient.get<ThreeSixtySearchOption[]>(`${BASE}/360/search`, { params: toParams(filters) }).then((r) => r.data),

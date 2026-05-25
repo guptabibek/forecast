@@ -66,6 +66,17 @@ describe('pharmaReportsService procurement reports', () => {
     });
   });
 
+  it('uses an extended timeout for 360 report loads', async () => {
+    get.mockResolvedValueOnce({ data: { profile: {}, kpis: {}, charts: {}, tables: {}, insights: [] } });
+
+    await pharmaReportsService.getCustomer360({ search: 'ABC', period: 'fy' });
+
+    expect(get).toHaveBeenCalledWith('/pharma-reports/360/customer', {
+      params: { search: 'ABC', period: 'fy' },
+      timeout: 300000,
+    });
+  });
+
   it('requests party outstanding detail with encoded party code', async () => {
     get.mockResolvedValueOnce({ data: { invoices: [], totals: {} } });
 

@@ -11,6 +11,8 @@ interface ChatMessage {
 
 type AiProviderCallType = 'semantic_parse' | 'summary' | 'config_test' | 'text';
 
+const LEGACY_DEFAULT_TIMEOUT_MS = 30000;
+
 interface ProviderConfigRow {
   id: string;
   tenant_id: string;
@@ -65,7 +67,7 @@ export interface AiTenantOperationalConfig {
 
 export const AI_OPERATIONAL_DEFAULTS: AiTenantOperationalConfig = {
   enabled: false,
-  timeoutMs: 30000,
+  timeoutMs: 120000,
   maxResultRows: 500,
   maxSummaryRows: 50,
   dailyUserCallLimit: 100,
@@ -78,6 +80,12 @@ export const AI_OPERATIONAL_DEFAULTS: AiTenantOperationalConfig = {
   maxConcurrentPerUser: 2,
   maxConcurrentPerTenant: 20,
 };
+
+function effectiveTimeoutMs(timeoutMs: number | null | undefined): number {
+  return timeoutMs && timeoutMs !== LEGACY_DEFAULT_TIMEOUT_MS
+    ? timeoutMs
+    : AI_OPERATIONAL_DEFAULTS.timeoutMs;
+}
 
 interface ResolvedProviderConfig {
   provider: 'openai';
@@ -209,18 +217,18 @@ export class AiProviderService {
         monthlyCostLimitCents: row.monthly_cost_limit_cents,
         inputTokenCostPer1mCents: row.input_token_cost_per_1m_cents,
         outputTokenCostPer1mCents: row.output_token_cost_per_1m_cents,
-        timeoutMs: row.timeout_ms,
-        maxResultRows: row.max_result_rows,
-        maxSummaryRows: row.max_summary_rows,
-        dailyUserCallLimit: row.daily_user_call_limit,
-        dailyTenantCallLimit: row.daily_tenant_call_limit,
-        monthlyCompanyCallLimit: row.monthly_company_call_limit,
-        maskSensitiveFields: row.mask_sensitive_fields,
-        summariesEnabled: row.summaries_enabled,
-        ratePerUserPerMinute: row.rate_per_user_per_minute,
-        ratePerTenantPerHour: row.rate_per_tenant_per_hour,
-        maxConcurrentPerUser: row.max_concurrent_per_user,
-        maxConcurrentPerTenant: row.max_concurrent_per_tenant,
+        timeoutMs: effectiveTimeoutMs(row.timeout_ms),
+        maxResultRows: row.max_result_rows ?? AI_OPERATIONAL_DEFAULTS.maxResultRows,
+        maxSummaryRows: row.max_summary_rows ?? AI_OPERATIONAL_DEFAULTS.maxSummaryRows,
+        dailyUserCallLimit: row.daily_user_call_limit ?? AI_OPERATIONAL_DEFAULTS.dailyUserCallLimit,
+        dailyTenantCallLimit: row.daily_tenant_call_limit ?? AI_OPERATIONAL_DEFAULTS.dailyTenantCallLimit,
+        monthlyCompanyCallLimit: row.monthly_company_call_limit ?? AI_OPERATIONAL_DEFAULTS.monthlyCompanyCallLimit,
+        maskSensitiveFields: row.mask_sensitive_fields ?? AI_OPERATIONAL_DEFAULTS.maskSensitiveFields,
+        summariesEnabled: row.summaries_enabled ?? AI_OPERATIONAL_DEFAULTS.summariesEnabled,
+        ratePerUserPerMinute: row.rate_per_user_per_minute ?? AI_OPERATIONAL_DEFAULTS.ratePerUserPerMinute,
+        ratePerTenantPerHour: row.rate_per_tenant_per_hour ?? AI_OPERATIONAL_DEFAULTS.ratePerTenantPerHour,
+        maxConcurrentPerUser: row.max_concurrent_per_user ?? AI_OPERATIONAL_DEFAULTS.maxConcurrentPerUser,
+        maxConcurrentPerTenant: row.max_concurrent_per_tenant ?? AI_OPERATIONAL_DEFAULTS.maxConcurrentPerTenant,
         lastTestedAt: this.isoOrNull(row.last_tested_at),
         lastTestStatus: row.last_test_status,
         lastTestError: row.last_test_error,
@@ -275,18 +283,18 @@ export class AiProviderService {
     if (!row) return AI_OPERATIONAL_DEFAULTS;
     return {
       enabled: row.enabled,
-      timeoutMs: row.timeout_ms,
-      maxResultRows: row.max_result_rows,
-      maxSummaryRows: row.max_summary_rows,
-      dailyUserCallLimit: row.daily_user_call_limit,
-      dailyTenantCallLimit: row.daily_tenant_call_limit,
-      monthlyCompanyCallLimit: row.monthly_company_call_limit,
-      maskSensitiveFields: row.mask_sensitive_fields,
-      summariesEnabled: row.summaries_enabled,
-      ratePerUserPerMinute: row.rate_per_user_per_minute,
-      ratePerTenantPerHour: row.rate_per_tenant_per_hour,
-      maxConcurrentPerUser: row.max_concurrent_per_user,
-      maxConcurrentPerTenant: row.max_concurrent_per_tenant,
+      timeoutMs: effectiveTimeoutMs(row.timeout_ms),
+      maxResultRows: row.max_result_rows ?? AI_OPERATIONAL_DEFAULTS.maxResultRows,
+      maxSummaryRows: row.max_summary_rows ?? AI_OPERATIONAL_DEFAULTS.maxSummaryRows,
+      dailyUserCallLimit: row.daily_user_call_limit ?? AI_OPERATIONAL_DEFAULTS.dailyUserCallLimit,
+      dailyTenantCallLimit: row.daily_tenant_call_limit ?? AI_OPERATIONAL_DEFAULTS.dailyTenantCallLimit,
+      monthlyCompanyCallLimit: row.monthly_company_call_limit ?? AI_OPERATIONAL_DEFAULTS.monthlyCompanyCallLimit,
+      maskSensitiveFields: row.mask_sensitive_fields ?? AI_OPERATIONAL_DEFAULTS.maskSensitiveFields,
+      summariesEnabled: row.summaries_enabled ?? AI_OPERATIONAL_DEFAULTS.summariesEnabled,
+      ratePerUserPerMinute: row.rate_per_user_per_minute ?? AI_OPERATIONAL_DEFAULTS.ratePerUserPerMinute,
+      ratePerTenantPerHour: row.rate_per_tenant_per_hour ?? AI_OPERATIONAL_DEFAULTS.ratePerTenantPerHour,
+      maxConcurrentPerUser: row.max_concurrent_per_user ?? AI_OPERATIONAL_DEFAULTS.maxConcurrentPerUser,
+      maxConcurrentPerTenant: row.max_concurrent_per_tenant ?? AI_OPERATIONAL_DEFAULTS.maxConcurrentPerTenant,
     };
   }
 
@@ -667,7 +675,7 @@ export class AiProviderService {
       organizationId: row.organization_id,
       maxTokens: maxTokensOverride ?? row.max_tokens ?? 1500,
       temperature: this.numberOrNull(row.temperature) ?? 0,
-      timeoutMs: row.timeout_ms,
+      timeoutMs: effectiveTimeoutMs(row.timeout_ms),
       monthlyTokenLimit: row.monthly_token_limit,
       monthlyCostLimitCents: row.monthly_cost_limit_cents,
       inputTokenCostPer1mCents: row.input_token_cost_per_1m_cents,

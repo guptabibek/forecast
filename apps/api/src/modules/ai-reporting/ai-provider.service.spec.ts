@@ -120,4 +120,29 @@ describe('AiProviderService', () => {
       'AI reporting requires a tenant context',
     );
   });
+
+  it('treats legacy 30 second tenant timeouts as the current default', async () => {
+    const provider = service(
+      { JWT_SECRET: JWT_SECRET_32 },
+      tenantRow({ timeout_ms: 30000 }),
+    );
+
+    await expect(provider.getTenantOperationalConfig(TEST_TENANT_ID)).resolves.toEqual(
+      expect.objectContaining({ timeoutMs: 120000 }),
+    );
+    await expect(provider.getPublicTenantProviderSettings(TEST_TENANT_ID)).resolves.toEqual(
+      expect.objectContaining({ timeoutMs: 120000 }),
+    );
+  });
+
+  it('keeps custom tenant timeouts that differ from the legacy default', async () => {
+    const provider = service(
+      { JWT_SECRET: JWT_SECRET_32 },
+      tenantRow({ timeout_ms: 180000 }),
+    );
+
+    await expect(provider.getTenantOperationalConfig(TEST_TENANT_ID)).resolves.toEqual(
+      expect.objectContaining({ timeoutMs: 180000 }),
+    );
+  });
 });

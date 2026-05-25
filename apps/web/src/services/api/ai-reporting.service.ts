@@ -1,5 +1,7 @@
 import { apiClient } from './client';
 
+const AI_REPORTING_REQUEST_TIMEOUT_MS = 600000;
+
 export type AiReportStatus = 'success' | 'clarification_required' | 'unsupported' | 'error';
 export type AiVisualizationType = 'table' | 'kpi' | 'bar' | 'line' | 'pie' | 'dashboard';
 
@@ -249,12 +251,16 @@ export interface AiProviderTestResult {
 
 export const aiReportingService = {
   async query(request: AiReportRequest): Promise<AiReportResponse> {
-    const { data } = await apiClient.post<AiReportResponse>('/ai-reporting/query', request);
+    const { data } = await apiClient.post<AiReportResponse>('/ai-reporting/query', request, {
+      timeout: AI_REPORTING_REQUEST_TIMEOUT_MS,
+    });
     return data;
   },
 
   async dashboard(request: AiReportRequest): Promise<AiReportResponse> {
-    const { data } = await apiClient.post<AiReportResponse>('/ai-reporting/dashboard', request);
+    const { data } = await apiClient.post<AiReportResponse>('/ai-reporting/dashboard', request, {
+      timeout: AI_REPORTING_REQUEST_TIMEOUT_MS,
+    });
     return data;
   },
 

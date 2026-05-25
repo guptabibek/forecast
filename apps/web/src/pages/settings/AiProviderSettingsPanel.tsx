@@ -444,7 +444,7 @@ export function AiProviderSettingsPanel() {
                 label="Request timeout (ms)"
                 value={form.timeoutMs}
                 onChange={(value) => updateField('timeoutMs', value)}
-                placeholder="30000"
+                placeholder="120000"
               />
               <NumberInput
                 label="Max rows per AI report"

@@ -4865,7 +4865,7 @@ model AiTenantProviderConfig {
   inputTokenCostPer1mCents  Int?      @map("input_token_cost_per_1m_cents")
   outputTokenCostPer1mCents Int?      @map("output_token_cost_per_1m_cents")
   configuredById            String?   @map("configured_by_id") @db.Uuid
-  timeoutMs                 Int       @default(30000) @map("timeout_ms")
+  timeoutMs                 Int       @default(120000) @map("timeout_ms")
   maxResultRows             Int       @default(500) @map("max_result_rows")
   maxSummaryRows            Int       @default(50) @map("max_summary_rows")
   dailyUserCallLimit        Int       @default(100) @map("daily_user_call_limit")

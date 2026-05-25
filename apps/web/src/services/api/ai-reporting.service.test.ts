@@ -24,7 +24,7 @@ describe('aiReportingService', () => {
       question: 'Show top selling products this month',
       outputMode: 'auto',
       includeSummary: true,
-    });
+    }, { timeout: 600000 });
     expect(result).toEqual({ status: 'success', rows: [] });
   });
 
@@ -36,7 +36,7 @@ describe('aiReportingService', () => {
     expect(post).toHaveBeenCalledWith('/ai-reporting/dashboard', {
       question: 'Generate sales dashboard for this month',
       includeSummary: true,
-    });
+    }, { timeout: 600000 });
   });
 
   it('loads safe catalog metadata and history through authenticated API client', async () => {
