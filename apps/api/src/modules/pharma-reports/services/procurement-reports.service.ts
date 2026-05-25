@@ -26,6 +26,17 @@ import {
 const SUGGESTED_PURCHASE_COLUMNS: AllowedSqlColumns = {
   sku: { expression: 'sku', type: 'string' },
   product_name: { expression: 'product_name', type: 'string' },
+  product_company: { expression: 'product_company', type: 'string' },
+  product_company_display: { expression: 'product_company_display', type: 'string' },
+  salt: { expression: 'salt', type: 'string' },
+  salt_display: { expression: 'salt_display', type: 'string' },
+  product_group: { expression: 'product_group', type: 'string' },
+  product_group_display: { expression: 'product_group_display', type: 'string' },
+  hsn_code: { expression: 'hsn_code', type: 'string' },
+  supplier_code: { expression: 'supplier_code', type: 'string' },
+  supplier_name: { expression: 'supplier_name', type: 'string' },
+  policy_source: { expression: 'policy_source', type: 'enum' },
+  policy_scope_type: { expression: 'policy_scope_type', type: 'enum' },
   location_code: { expression: 'location_code', type: 'string' },
   current_stock: { expression: 'current_stock', type: 'number' },
   available_stock: { expression: 'available_stock', type: 'number' },
@@ -118,6 +129,17 @@ export interface SuggestedPurchaseRow {
   product_id: string;
   sku: string;
   product_name: string;
+  product_company: string | null;
+  product_company_display: string | null;
+  salt: string | null;
+  salt_display: string | null;
+  product_group: string | null;
+  product_group_display: string | null;
+  hsn_code: string | null;
+  supplier_id: string | null;
+  supplier_code: string | null;
+  supplier_name: string | null;
+  supplier_display: string | null;
   location_id: string;
   location_code: string;
   current_stock: number;
@@ -131,6 +153,9 @@ export interface SuggestedPurchaseRow {
   suggested_purchase_qty: number;
   abc_class: string | null;
   preferred_supplier: string | null;
+  policy_source: 'PRODUCT_LOCATION' | 'SCOPED' | 'COMPUTED';
+  policy_scope_type: string | null;
+  policy_scope_label: string | null;
   estimated_cost: number;
 }
 
@@ -343,6 +368,11 @@ export class ProcurementReportsService {
     if (filters.productIds?.length) innerConds.push(Prisma.sql`il.product_id = ANY(${filters.productIds}::uuid[])`);
     if (filters.locationIds?.length) innerConds.push(Prisma.sql`il.location_id = ANY(${filters.locationIds}::uuid[])`);
     if (filters.category) innerConds.push(Prisma.sql`p.category = ${filters.category}`);
+    if (filters.productCompany) innerConds.push(Prisma.sql`NULLIF(TRIM(p.product_company), '') = ${filters.productCompany.trim()}`);
+    if (filters.hsnCode) innerConds.push(Prisma.sql`NULLIF(TRIM(p.hsn_code), '') = ${filters.hsnCode.trim()}`);
+    if (filters.salt) innerConds.push(Prisma.sql`NULLIF(TRIM(p.salt), '') = ${filters.salt.trim()}`);
+    if (filters.productGroup) innerConds.push(Prisma.sql`NULLIF(TRIM(p.product_group), '') = ${filters.productGroup.trim()}`);
+    if (filters.supplierIds?.length) innerConds.push(Prisma.sql`supplier_match.supplier_id = ANY(${filters.supplierIds}::uuid[])`);
     const innerWhere = innerConds.length ? Prisma.sql`AND ${Prisma.join(innerConds, ' AND ')}` : Prisma.empty;
 
     // Outer filters/sort operate on the computed `sp` columns (bare names).
@@ -382,35 +412,110 @@ export class ProcurementReportsService {
         WHERE po.status NOT IN ('DRAFT', 'CLOSED', 'CANCELLED')
         GROUP BY pol.product_id, po.location_id
       ),
-      preferred_supplier AS (
-        SELECT DISTINCT ON (pol.product_id)
-          pol.product_id, s.name AS supplier_name
-        FROM purchase_order_lines pol
-        JOIN purchase_orders po ON po.id = pol.purchase_order_id
-        JOIN suppliers s ON s.id = po.supplier_id
-        WHERE po.tenant_id = ${tenantId}::uuid
-          AND po.status NOT IN ('CANCELLED', 'DRAFT')
-        ORDER BY pol.product_id, po.order_date DESC
-      ),
       base AS (
         SELECT
           p.id AS product_id, p.code AS sku, p.name AS product_name,
-          l.id AS location_id, l.code AS location_code, ip.abc_class,
+          NULLIF(TRIM(p.product_company), '') AS product_company,
+          CASE WHEN NULLIF(TRIM(p.product_company), '') IS NULL THEN NULL ELSE TRIM(p.product_company) || ' - ' || COALESCE(pc.name, 'Unknown company (' || TRIM(p.product_company) || ')') END AS product_company_display,
+          NULLIF(TRIM(p.salt), '') AS salt,
+          CASE WHEN NULLIF(TRIM(p.salt), '') IS NULL THEN NULL ELSE TRIM(p.salt) || ' - ' || COALESCE(ps.name, 'Unknown salt (' || TRIM(p.salt) || ')') END AS salt_display,
+          NULLIF(TRIM(p.product_group), '') AS product_group,
+          CASE WHEN NULLIF(TRIM(p.product_group), '') IS NULL THEN NULL ELSE TRIM(p.product_group) || ' - ' || COALESCE(pg.name, 'Unknown group (' || TRIM(p.product_group) || ')') END AS product_group_display,
+          NULLIF(TRIM(p.hsn_code), '') AS hsn_code,
+          supplier_match.supplier_id,
+          supplier_match.supplier_code,
+          supplier_match.supplier_name,
+          CASE WHEN supplier_match.supplier_id IS NULL THEN NULL ELSE COALESCE(supplier_match.supplier_code || ' - ', '') || supplier_match.supplier_name END AS supplier_display,
+          l.id AS location_id, l.code AS location_code,
+          COALESCE(ip.abc_class, scope_policy.abc_class) AS abc_class,
+          CASE
+            WHEN ip.id IS NOT NULL THEN 'PRODUCT_LOCATION'
+            WHEN scope_policy.id IS NOT NULL THEN 'SCOPED'
+            ELSE 'COMPUTED'
+          END AS policy_source,
+          scope_policy.scope_type::text AS policy_scope_type,
+          scope_policy.scope_label AS policy_scope_label,
           COALESCE(il.on_hand_qty, 0)::float8 AS on_hand_qty,
           COALESCE(il.available_qty, 0)::float8 AS available_qty,
           COALESCE(oo.on_order_qty, 0)::float8 AS on_order_qty,
           COALESCE(d.avg_daily_demand, 0)::float8 AS avg_daily_sales,
-          COALESCE(NULLIF(ip.lead_time_days, 0), ${leadTimeDays})::float8 AS lead_time_days,
-          COALESCE(ip.safety_stock_qty, COALESCE(ip.safety_stock_days, ${safetyDays})::float8 * COALESCE(d.avg_daily_demand, 0))::float8 AS safety_stock_qty,
+          COALESCE(NULLIF(ip.lead_time_days, 0), scope_policy.lead_time_days, ${leadTimeDays})::float8 AS lead_time_days,
+          COALESCE(ip.safety_stock_qty, scope_policy.safety_stock_qty, COALESCE(ip.safety_stock_days, scope_policy.safety_stock_days, ${safetyDays})::float8 * COALESCE(d.avg_daily_demand, 0))::float8 AS safety_stock_qty,
           COALESCE(il.average_cost, p.standard_cost, 0)::float8 AS unit_cost_src,
-          ip.reorder_point::float8 AS cfg_reorder_point,
-          ip.reorder_qty::float8 AS cfg_reorder_qty,
-          ip.min_order_qty::float8 AS cfg_min_order,
-          ip.multiple_order_qty::float8 AS cfg_multiple,
-          ip.max_order_qty::float8 AS cfg_max_order
+          COALESCE(ip.reorder_point, scope_policy.reorder_point)::float8 AS cfg_reorder_point,
+          COALESCE(ip.reorder_qty, scope_policy.reorder_qty)::float8 AS cfg_reorder_qty,
+          COALESCE(ip.min_order_qty, scope_policy.min_order_qty)::float8 AS cfg_min_order,
+          COALESCE(ip.multiple_order_qty, scope_policy.multiple_order_qty)::float8 AS cfg_multiple,
+          COALESCE(ip.max_order_qty, scope_policy.max_order_qty)::float8 AS cfg_max_order
         FROM inventory_levels il
         JOIN products p ON p.id = il.product_id AND p.tenant_id = il.tenant_id AND p.status = 'ACTIVE'::"DimensionStatus"
         JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
+        LEFT JOIN product_companies pc ON pc.tenant_id = p.tenant_id AND pc.code = NULLIF(TRIM(p.product_company), '')
+        LEFT JOIN product_salts ps ON ps.tenant_id = p.tenant_id AND ps.code = NULLIF(TRIM(p.salt), '')
+        LEFT JOIN product_categories pg ON pg.tenant_id = p.tenant_id AND pg.code = NULLIF(TRIM(p.product_group), '')
+        LEFT JOIN LATERAL (
+          SELECT candidate.supplier_id, candidate.supplier_code, candidate.supplier_name
+          FROM (
+            SELECT
+              sp.supplier_id,
+              s.code AS supplier_code,
+              s.name AS supplier_name,
+              0 AS source_rank,
+              CASE WHEN sp.is_primary THEN 0 ELSE 1 END AS primary_rank,
+              sp.priority,
+              NULL::date AS activity_date
+            FROM supplier_products sp
+            JOIN suppliers s ON s.id = sp.supplier_id AND s.tenant_id = il.tenant_id AND s.status = 'ACTIVE'::"DimensionStatus"
+            WHERE sp.product_id = il.product_id
+
+            UNION ALL
+
+            SELECT
+              po.supplier_id,
+              s.code AS supplier_code,
+              s.name AS supplier_name,
+              1 AS source_rank,
+              1 AS primary_rank,
+              999999 AS priority,
+              po.order_date AS activity_date
+            FROM purchase_order_lines pol
+            JOIN purchase_orders po ON po.id = pol.purchase_order_id AND po.tenant_id = il.tenant_id
+            JOIN suppliers s ON s.id = po.supplier_id AND s.tenant_id = il.tenant_id
+            WHERE pol.product_id = il.product_id
+              AND po.status NOT IN ('CANCELLED', 'DRAFT')
+          ) candidate
+          ORDER BY candidate.source_rank, candidate.primary_rank, candidate.priority, candidate.activity_date DESC NULLS LAST
+          LIMIT 1
+        ) supplier_match ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            ips.*,
+            CASE ips.scope_type
+              WHEN 'PRODUCT_COMPANY' THEN ips.scope_code || ' - ' || COALESCE((SELECT pc2.name FROM product_companies pc2 WHERE pc2.tenant_id = ips.tenant_id AND pc2.code = ips.scope_code LIMIT 1), 'Unknown company (' || ips.scope_code || ')')
+              WHEN 'SALT' THEN ips.scope_code || ' - ' || COALESCE((SELECT ps2.name FROM product_salts ps2 WHERE ps2.tenant_id = ips.tenant_id AND ps2.code = ips.scope_code LIMIT 1), 'Unknown salt (' || ips.scope_code || ')')
+              WHEN 'PRODUCT_GROUP' THEN ips.scope_code || ' - ' || COALESCE((SELECT pg2.name FROM product_categories pg2 WHERE pg2.tenant_id = ips.tenant_id AND pg2.code = ips.scope_code LIMIT 1), 'Unknown group (' || ips.scope_code || ')')
+              WHEN 'HSN_CODE' THEN ips.scope_code
+              WHEN 'SUPPLIER' THEN COALESCE((SELECT COALESCE(s2.code || ' - ', '') || s2.name FROM suppliers s2 WHERE s2.tenant_id = ips.tenant_id AND s2.id = ips.scope_id LIMIT 1), 'Supplier ' || ips.scope_id::text)
+              ELSE ips.scope_type::text
+            END AS scope_label
+          FROM inventory_policy_scopes ips
+          WHERE ips.tenant_id = il.tenant_id
+            AND (ips.location_id IS NULL OR ips.location_id = il.location_id)
+            AND CURRENT_DATE >= ips.effective_from
+            AND (ips.effective_to IS NULL OR CURRENT_DATE <= ips.effective_to)
+            AND (
+              (ips.scope_type = 'PRODUCT_COMPANY' AND ips.scope_code = NULLIF(TRIM(p.product_company), ''))
+              OR (ips.scope_type = 'HSN_CODE' AND ips.scope_code = NULLIF(TRIM(p.hsn_code), ''))
+              OR (ips.scope_type = 'SALT' AND ips.scope_code = NULLIF(TRIM(p.salt), ''))
+              OR (ips.scope_type = 'PRODUCT_GROUP' AND ips.scope_code = NULLIF(TRIM(p.product_group), ''))
+              OR (ips.scope_type = 'SUPPLIER' AND ips.scope_id = supplier_match.supplier_id)
+            )
+          ORDER BY
+            CASE WHEN ips.location_id = il.location_id THEN 1 ELSE 0 END DESC,
+            ips.priority DESC,
+            ips.updated_at DESC
+          LIMIT 1
+        ) scope_policy ON TRUE
         LEFT JOIN inventory_policies ip ON ip.tenant_id = il.tenant_id AND ip.product_id = il.product_id AND ip.location_id = il.location_id
         LEFT JOIN demand d ON d.product_id = il.product_id AND d.location_id = il.location_id
         LEFT JOIN on_order oo ON oo.product_id = il.product_id AND oo.location_id = il.location_id
@@ -452,6 +557,9 @@ export class ProcurementReportsService {
       sp AS (
         SELECT
           rr.product_id, rr.sku, rr.product_name, rr.location_id, rr.location_code,
+          rr.product_company, rr.product_company_display, rr.salt, rr.salt_display,
+          rr.product_group, rr.product_group_display, rr.hsn_code,
+          rr.supplier_id, rr.supplier_code, rr.supplier_name, rr.supplier_display,
           rr.on_hand_qty           AS current_stock,
           rr.available_qty         AS available_stock,
           rr.on_order_qty,
@@ -462,10 +570,12 @@ export class ProcurementReportsService {
           (rr.avg_daily_sales * rr.lead_time_days)::float8 AS demand_during_lead_time,
           rr.suggested_order_qty   AS suggested_purchase_qty,
           rr.abc_class,
-          ps.supplier_name         AS preferred_supplier,
+          rr.supplier_name         AS preferred_supplier,
+          rr.policy_source,
+          rr.policy_scope_type,
+          rr.policy_scope_label,
           (rr.suggested_order_qty * rr.unit_cost_src)::float8 AS estimated_cost
         FROM rr
-        LEFT JOIN preferred_supplier ps ON ps.product_id = rr.product_id
       )
     `;
 
@@ -477,10 +587,16 @@ export class ProcurementReportsService {
     const rows = await this.prisma.$queryRaw<SuggestedPurchaseRow[]>(Prisma.sql`
       ${cte}
       SELECT
-        product_id, sku, product_name, location_id, location_code,
+        product_id, sku, product_name,
+        product_company, product_company_display, salt, salt_display,
+        product_group, product_group_display, hsn_code,
+        supplier_id, supplier_code, supplier_name, supplier_display,
+        location_id, location_code,
         current_stock, available_stock, on_order_qty, avg_daily_demand,
         lead_time_days, safety_stock, reorder_point, demand_during_lead_time,
-        suggested_purchase_qty, abc_class, preferred_supplier, estimated_cost
+        suggested_purchase_qty, abc_class, preferred_supplier,
+        policy_source, policy_scope_type, policy_scope_label,
+        estimated_cost
       FROM sp
       WHERE suggested_purchase_qty > 0 ${filterWhere}
       ORDER BY ${orderBy}

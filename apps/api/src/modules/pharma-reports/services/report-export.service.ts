@@ -13,6 +13,7 @@ import { MargEdeService } from '../../marg-ede/marg-ede.service';
 import { AccountingReportsService } from './accounting-reports.service';
 import { ExpiryReportsService } from './expiry-reports.service';
 import { InventoryAlertsService } from './inventory-alerts.service';
+import { InventoryReportsService } from './inventory-reports.service';
 import { ProcurementReportsService } from './procurement-reports.service';
 import { SalesPurchaseAnalysisService } from './sales-purchase-analysis.service';
 
@@ -47,6 +48,7 @@ export class ReportExportService {
     private readonly accountingReports: AccountingReportsService,
     private readonly expiryReports: ExpiryReportsService,
     private readonly inventoryAlerts: InventoryAlertsService,
+    private readonly inventoryReports: InventoryReportsService,
     private readonly procurementReports: ProcurementReportsService,
     private readonly salesPurchaseAnalysis: SalesPurchaseAnalysisService,
   ) {}
@@ -330,6 +332,10 @@ export class ReportExportService {
         return this.getExpiryRiskExportData(tenantId, filters);
       case 'alerts':
         return this.getAlertsExportData(tenantId, filters);
+      case 'reorder':
+        return this.getReorderExportData(tenantId, filters);
+      case 'suggested-purchase':
+        return this.getSuggestedPurchaseExportData(tenantId, filters);
       case 'supplier-performance':
         return this.getSupplierPerformanceExportData(tenantId, filters);
       case 'stock-out':
@@ -472,6 +478,84 @@ export class ReportExportService {
         { key: 'value_at_risk', header: 'Value at Risk', width: 16 },
       ],
       rows,
+    };
+  }
+
+  private async getReorderExportData(
+    tenantId: string,
+    filters: Record<string, unknown>,
+  ): Promise<ExportDataSet> {
+    const report = await this.inventoryReports.getReorderReport(
+      tenantId,
+      this.toReorderServiceFilters(filters),
+    );
+
+    return {
+      sheetName: 'Reorder',
+      columns: [
+        { key: 'sku', header: 'SKU', width: 15 },
+        { key: 'product_name', header: 'Product', width: 32 },
+        { key: 'product_company_display', header: 'Company', width: 28 },
+        { key: 'salt_display', header: 'Salt', width: 28 },
+        { key: 'product_group_display', header: 'Product Group', width: 24 },
+        { key: 'hsn_code', header: 'HSN', width: 14 },
+        { key: 'supplier_display', header: 'Supplier', width: 28 },
+        { key: 'location_code', header: 'Location', width: 15 },
+        { key: 'on_hand_qty', header: 'On Hand', width: 12 },
+        { key: 'available_qty', header: 'Available', width: 12 },
+        { key: 'on_order_qty', header: 'On Order', width: 12 },
+        { key: 'avg_daily_sales', header: 'Avg Daily Sales', width: 16 },
+        { key: 'lead_time_days', header: 'Lead Time', width: 12 },
+        { key: 'safety_stock_qty', header: 'Safety Stock', width: 14 },
+        { key: 'reorder_point', header: 'Reorder Point', width: 14 },
+        { key: 'order_up_to_qty', header: 'Order Up To', width: 14 },
+        { key: 'suggested_order_qty', header: 'Suggested Qty', width: 14 },
+        { key: 'days_of_stock', header: 'Days of Stock', width: 14 },
+        { key: 'reorder_status', header: 'Status', width: 16 },
+        { key: 'policy_source', header: 'Policy Source', width: 18 },
+        { key: 'policy_scope_label', header: 'Policy Scope', width: 30 },
+        { key: 'abc_class', header: 'ABC Class', width: 12 },
+      ],
+      rows: report.data as unknown as Record<string, unknown>[],
+    };
+  }
+
+  private async getSuggestedPurchaseExportData(
+    tenantId: string,
+    filters: Record<string, unknown>,
+  ): Promise<ExportDataSet> {
+    const report = await this.procurementReports.getSuggestedPurchase(
+      tenantId,
+      this.toSuggestedPurchaseServiceFilters(filters),
+    );
+
+    return {
+      sheetName: 'Suggested Purchase',
+      columns: [
+        { key: 'sku', header: 'SKU', width: 15 },
+        { key: 'product_name', header: 'Product', width: 32 },
+        { key: 'product_company_display', header: 'Company', width: 28 },
+        { key: 'salt_display', header: 'Salt', width: 28 },
+        { key: 'product_group_display', header: 'Product Group', width: 24 },
+        { key: 'hsn_code', header: 'HSN', width: 14 },
+        { key: 'supplier_display', header: 'Supplier', width: 28 },
+        { key: 'location_code', header: 'Location', width: 15 },
+        { key: 'current_stock', header: 'Current Stock', width: 14 },
+        { key: 'available_stock', header: 'Available', width: 12 },
+        { key: 'on_order_qty', header: 'On Order', width: 12 },
+        { key: 'avg_daily_demand', header: 'Avg Daily Demand', width: 18 },
+        { key: 'lead_time_days', header: 'Lead Time', width: 12 },
+        { key: 'safety_stock', header: 'Safety Stock', width: 14 },
+        { key: 'reorder_point', header: 'Reorder Point', width: 14 },
+        { key: 'demand_during_lead_time', header: 'Lead-Time Demand', width: 18 },
+        { key: 'suggested_purchase_qty', header: 'Suggested Qty', width: 14 },
+        { key: 'estimated_cost', header: 'Estimated Cost', width: 16 },
+        { key: 'preferred_supplier', header: 'Preferred Supplier', width: 24 },
+        { key: 'policy_source', header: 'Policy Source', width: 18 },
+        { key: 'policy_scope_label', header: 'Policy Scope', width: 30 },
+        { key: 'abc_class', header: 'ABC Class', width: 12 },
+      ],
+      rows: report.data as unknown as Record<string, unknown>[],
     };
   }
 
@@ -1650,9 +1734,68 @@ export class ReportExportService {
     return rest as Record<string, any>;
   }
 
+  private toReorderServiceFilters(filters: Record<string, unknown>): Record<string, any> {
+    return {
+      productIds: this.stringArrayFilter(filters, 'productIds'),
+      locationIds: this.stringArrayFilter(filters, 'locationIds'),
+      category: this.stringFilter(filters, 'category'),
+      startDate: this.stringFilter(filters, 'startDate'),
+      endDate: this.stringFilter(filters, 'endDate'),
+      sortBy: this.stringFilter(filters, 'sortBy'),
+      sortDir: this.sortDirFilter(filters),
+      filters: this.stringFilter(filters, 'filters'),
+      lookbackDays: this.numberFilter(filters, 'lookbackDays'),
+      avgSalesDays: this.numberFilter(filters, 'avgSalesDays'),
+      coverageDays: this.numberFilter(filters, 'coverageDays'),
+      leadTimeDays: this.numberFilter(filters, 'leadTimeDays'),
+      safetyDays: this.numberFilter(filters, 'safetyDays'),
+      includeAll: this.booleanFilter(filters, 'includeAll'),
+      productCompany: this.stringFilter(filters, 'productCompany'),
+      hsnCode: this.stringFilter(filters, 'hsnCode'),
+      salt: this.stringFilter(filters, 'salt'),
+      productGroup: this.stringFilter(filters, 'productGroup'),
+      supplierIds: this.stringArrayFilter(filters, 'supplierIds'),
+      limit: 100000,
+      offset: 0,
+    };
+  }
+
+  private toSuggestedPurchaseServiceFilters(filters: Record<string, unknown>): Record<string, any> {
+    return {
+      productIds: this.stringArrayFilter(filters, 'productIds'),
+      locationIds: this.stringArrayFilter(filters, 'locationIds'),
+      category: this.stringFilter(filters, 'category'),
+      startDate: this.stringFilter(filters, 'startDate'),
+      endDate: this.stringFilter(filters, 'endDate'),
+      sortBy: this.stringFilter(filters, 'sortBy'),
+      sortDir: this.sortDirFilter(filters),
+      filters: this.stringFilter(filters, 'filters'),
+      lookbackDays: this.numberFilter(filters, 'lookbackDays') ?? this.numberFilter(filters, 'avgSalesDays'),
+      coverageDays: this.numberFilter(filters, 'coverageDays'),
+      leadTimeDays: this.numberFilter(filters, 'leadTimeDays'),
+      safetyDays: this.numberFilter(filters, 'safetyDays'),
+      safetyMultiplier: this.numberFilter(filters, 'safetyMultiplier'),
+      productCompany: this.stringFilter(filters, 'productCompany'),
+      hsnCode: this.stringFilter(filters, 'hsnCode'),
+      salt: this.stringFilter(filters, 'salt'),
+      productGroup: this.stringFilter(filters, 'productGroup'),
+      supplierIds: this.stringArrayFilter(filters, 'supplierIds'),
+      limit: 100000,
+      offset: 0,
+    };
+  }
+
   private rawFilterValue(filters: Record<string, unknown>, key: string): unknown {
     const value = filters[key];
     return Array.isArray(value) ? value[0] : value;
+  }
+
+  private stringArrayFilter(filters: Record<string, unknown>, key: string): string[] | undefined {
+    const value = filters[key];
+    if (value === undefined || value === null || value === '') return undefined;
+    const raw = Array.isArray(value) ? value : String(value).split(',');
+    const parsed = raw.map((item) => String(item).trim()).filter(Boolean);
+    return parsed.length ? parsed : undefined;
   }
 
   private stringFilter(filters: Record<string, unknown>, key: string): string | undefined {

@@ -3,6 +3,8 @@ import {
   PharmaFilters,
   type ReorderParams,
   type ReorderPolicyInput,
+  type ReorderPolicyScopeInput,
+  type ReorderPolicyScopeType,
   SalesPurchaseAnalysisKind,
   type SalesPurchaseDimension,
   ThreeSixtyPeriod,
@@ -33,6 +35,9 @@ export const pharmaKeys = {
   movementLedger: (f?: PharmaFilters) => [...pharmaKeys.inventory(), 'ledger', f] as const,
   reorder: (f?: PharmaFilters) => [...pharmaKeys.inventory(), 'reorder', f] as const,
   reorderConfig: (f?: PharmaFilters) => [...pharmaKeys.inventory(), 'reorder-config', f] as const,
+  reorderPolicyScopes: (f?: PharmaFilters) => [...pharmaKeys.inventory(), 'reorder-config-scopes', f] as const,
+  reorderScopeOptions: (f: { scopeType: ReorderPolicyScopeType; search?: string; limit?: number }) =>
+    [...pharmaKeys.inventory(), 'reorder-scope-options', f] as const,
   ageing: (f?: PharmaFilters) => [...pharmaKeys.inventory(), 'ageing', f] as const,
 
   expiry: () => [...pharmaKeys.all, 'expiry'] as const,
@@ -172,6 +177,29 @@ export function useReorderConfig(filters?: PharmaFilters, enabled = true) {
   });
 }
 
+export function useReorderPolicyScopes(
+  filters?: PharmaFilters & { scopeType?: ReorderPolicyScopeType },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: pharmaKeys.reorderPolicyScopes(filters),
+    queryFn: () => pharmaReportsService.getReorderPolicyScopes(filters),
+    enabled,
+  });
+}
+
+export function useReorderScopeOptions(
+  filters: { scopeType: ReorderPolicyScopeType; search?: string; limit?: number },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: pharmaKeys.reorderScopeOptions(filters),
+    queryFn: () => pharmaReportsService.getReorderScopeOptions(filters),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
 export function useUpsertReorderConfig() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -184,6 +212,17 @@ export function useUpsertReorderConfig() {
   });
 }
 
+export function useUpsertReorderPolicyScopes() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (rows: ReorderPolicyScopeInput[]) => pharmaReportsService.upsertReorderPolicyScopes(rows),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: pharmaKeys.inventory() });
+      void queryClient.invalidateQueries({ queryKey: pharmaKeys.procurement() });
+    },
+  });
+}
+
 export function useDeleteReorderConfig() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -191,6 +230,17 @@ export function useDeleteReorderConfig() {
       pharmaReportsService.deleteReorderConfig(productId, locationId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: pharmaKeys.inventory() });
+    },
+  });
+}
+
+export function useDeleteReorderPolicyScope() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => pharmaReportsService.deleteReorderPolicyScope(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: pharmaKeys.inventory() });
+      void queryClient.invalidateQueries({ queryKey: pharmaKeys.procurement() });
     },
   });
 }

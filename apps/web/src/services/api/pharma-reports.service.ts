@@ -109,6 +109,17 @@ export interface ReorderRow {
   product_id: string;
   sku: string;
   product_name: string;
+  product_company: string | null;
+  product_company_display: string | null;
+  salt: string | null;
+  salt_display: string | null;
+  product_group: string | null;
+  product_group_display: string | null;
+  hsn_code: string | null;
+  supplier_id: string | null;
+  supplier_code: string | null;
+  supplier_name: string | null;
+  supplier_display: string | null;
   location_id: string;
   location_code: string;
   on_hand_qty: number;
@@ -123,6 +134,9 @@ export interface ReorderRow {
   suggested_order_qty: number;
   reorder_status: 'OUT_OF_STOCK' | 'BELOW_REORDER' | 'OK';
   is_configured: boolean;
+  policy_source: 'PRODUCT_LOCATION' | 'SCOPED' | 'COMPUTED';
+  policy_scope_type: string | null;
+  policy_scope_label: string | null;
   abc_class: string | null;
   days_of_stock: number | null;
   lookback_days: number;
@@ -190,6 +204,60 @@ export interface ReorderPolicyInput {
   safetyStockDays?: number;
   leadTimeDays?: number;
   abcClass?: string;
+}
+
+export type ReorderPolicyScopeType =
+  | 'PRODUCT_COMPANY'
+  | 'HSN_CODE'
+  | 'SALT'
+  | 'PRODUCT_GROUP'
+  | 'SUPPLIER';
+
+export interface ReorderPolicyScopeRow {
+  id: string;
+  scope_type: ReorderPolicyScopeType;
+  scope_code: string | null;
+  scope_id: string | null;
+  scope_label: string;
+  location_id: string | null;
+  location_code: string | null;
+  location_name: string | null;
+  priority: number;
+  reorder_point: number | null;
+  reorder_qty: number | null;
+  min_order_qty: number | null;
+  max_order_qty: number | null;
+  multiple_order_qty: number | null;
+  safety_stock_qty: number | null;
+  safety_stock_days: number | null;
+  lead_time_days: number | null;
+  abc_class: string | null;
+  updated_at: string;
+}
+
+export interface ReorderPolicyScopeInput {
+  scopeType: ReorderPolicyScopeType;
+  scopeCode?: string;
+  scopeId?: string;
+  supplierCode?: string;
+  locationId?: string;
+  locationCode?: string;
+  priority?: number;
+  reorderPoint?: number;
+  reorderQty?: number;
+  minOrderQty?: number;
+  maxOrderQty?: number;
+  multipleOrderQty?: number;
+  safetyStockQty?: number;
+  safetyStockDays?: number;
+  leadTimeDays?: number;
+  abcClass?: string;
+}
+
+export interface ReorderScopeOption {
+  value: string;
+  code: string | null;
+  label: string;
 }
 
 export interface StockAgeingRow {
@@ -327,6 +395,17 @@ export interface SuggestedPurchaseRow {
   product_id: string;
   sku: string;
   product_name: string;
+  product_company: string | null;
+  product_company_display: string | null;
+  salt: string | null;
+  salt_display: string | null;
+  product_group: string | null;
+  product_group_display: string | null;
+  hsn_code: string | null;
+  supplier_id: string | null;
+  supplier_code: string | null;
+  supplier_name: string | null;
+  supplier_display: string | null;
   location_id: string;
   location_code: string;
   current_stock: number;
@@ -340,6 +419,9 @@ export interface SuggestedPurchaseRow {
   suggested_purchase_qty: number;
   abc_class: string | null;
   preferred_supplier: string | null;
+  policy_source: 'PRODUCT_LOCATION' | 'SCOPED' | 'COMPUTED';
+  policy_scope_type: string | null;
+  policy_scope_label: string | null;
   estimated_cost: number;
 }
 
@@ -1049,9 +1131,24 @@ export const pharmaReportsService = {
   getReorderConfig: (filters?: PharmaFilters) =>
     apiClient.get<PaginatedResponse<ReorderPolicyRow>>(`${BASE}/inventory/reorder-config`, { params: toParams(filters ?? {}) }).then((r) => r.data),
 
+  getReorderPolicyScopes: (filters?: PharmaFilters & { scopeType?: ReorderPolicyScopeType }) =>
+    apiClient
+      .get<PaginatedResponse<ReorderPolicyScopeRow>>(`${BASE}/inventory/reorder-config/scopes`, { params: toParams(filters ?? {}) })
+      .then((r) => r.data),
+
+  getReorderScopeOptions: (params: { scopeType: ReorderPolicyScopeType; search?: string; limit?: number }) =>
+    apiClient
+      .get<ReorderScopeOption[]>(`${BASE}/inventory/reorder-config/scope-options`, { params: toParams(params) })
+      .then((r) => r.data),
+
   upsertReorderConfig: (rows: ReorderPolicyInput[]) =>
     apiClient
       .post<{ upserted: number; skipped: Array<{ row: number; reason: string }> }>(`${BASE}/inventory/reorder-config`, { rows })
+      .then((r) => r.data),
+
+  upsertReorderPolicyScopes: (rows: ReorderPolicyScopeInput[]) =>
+    apiClient
+      .post<{ upserted: number; skipped: Array<{ row: number; reason: string }> }>(`${BASE}/inventory/reorder-config/scopes`, { rows })
       .then((r) => r.data),
 
   getReorderConfigTemplate: (filters?: PharmaFilters) =>
@@ -1062,6 +1159,11 @@ export const pharmaReportsService = {
   deleteReorderConfig: (productId: string, locationId: string) =>
     apiClient
       .delete<{ deleted: number }>(`${BASE}/inventory/reorder-config`, { params: { productId, locationId } })
+      .then((r) => r.data),
+
+  deleteReorderPolicyScope: (id: string) =>
+    apiClient
+      .delete<{ deleted: number }>(`${BASE}/inventory/reorder-config/scopes/${id}`)
       .then((r) => r.data),
 
   getStockAgeing: (filters?: PharmaFilters & { bucketDays?: number[] }) =>

@@ -36,6 +36,7 @@ import {
     InventoryBaseFilterDto,
     ReorderFilterDto,
     ReorderPolicyBulkDto,
+    ReorderPolicyScopeBulkDto,
     SalesPurchaseAnalysisFilterDto,
     SalesPurchaseComparisonFilterDto,
     StockAgeingFilterDto,
@@ -166,6 +167,59 @@ export class PharmaReportsController {
       limit: filters.limit,
       offset: filters.offset,
     });
+  }
+
+  @Get('inventory/reorder-config/scopes')
+  @ApiOperation({ summary: 'List scoped reorder policies by company, HSN, salt, group, or supplier' })
+  @ApiResponse({ status: 200, description: 'Configured scoped reorder policies' })
+  async getReorderPolicyScopes(
+    @CurrentUser() user: any,
+    @Query('scopeType') scopeType?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.inventoryReports.getReorderPolicyScopes(user.tenantId, {
+      scopeType,
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+    });
+  }
+
+  @Get('inventory/reorder-config/scope-options')
+  @ApiOperation({ summary: 'Search supported reorder policy scope values' })
+  @ApiQuery({ name: 'scopeType', required: true, enum: ['PRODUCT_COMPANY', 'HSN_CODE', 'SALT', 'PRODUCT_GROUP', 'SUPPLIER'] })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiResponse({ status: 200, description: 'Scope value options' })
+  async getReorderScopeOptions(
+    @CurrentUser() user: any,
+    @Query('scopeType') scopeType: string,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.inventoryReports.getReorderScopeOptions(user.tenantId, scopeType, search, limit ? Number(limit) : undefined);
+  }
+
+  @Post('inventory/reorder-config/scopes')
+  @Roles('ADMIN', 'PLANNER')
+  @ApiOperation({ summary: 'Create/update scoped reorder policies in bulk' })
+  @ApiResponse({ status: 200, description: 'Upsert result: { upserted, skipped[] }' })
+  async upsertReorderPolicyScopes(
+    @CurrentUser() user: any,
+    @Body() dto: ReorderPolicyScopeBulkDto,
+  ) {
+    return this.inventoryReports.upsertReorderPolicyScopes(user.tenantId, dto.rows);
+  }
+
+  @Delete('inventory/reorder-config/scopes/:id')
+  @Roles('ADMIN', 'PLANNER')
+  @ApiOperation({ summary: 'Delete one scoped reorder policy' })
+  @ApiResponse({ status: 200, description: 'Delete result: { deleted }' })
+  async deleteReorderPolicyScope(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    return this.inventoryReports.deleteReorderPolicyScope(user.tenantId, id);
   }
 
   @Get('inventory/reorder-config/template')

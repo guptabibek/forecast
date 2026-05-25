@@ -174,6 +174,11 @@ export default function InventoryReportsPage() {
   const reorderCols: Column<ReorderRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
+    { key: 'product_company', header: 'Company', accessor: (r) => r.product_company_display ?? r.product_company ?? '-', filterType: 'text', filterField: 'product_company' },
+    ...(showSaltColumn ? [{ key: 'salt', header: 'Salt', accessor: (r: ReorderRow) => r.salt_display ?? r.salt ?? '-', filterType: 'text' as const, filterField: 'salt' }] : []),
+    { key: 'product_group', header: 'Group', accessor: (r) => r.product_group_display ?? r.product_group ?? '-', filterType: 'text', filterField: 'product_group' },
+    { key: 'hsn_code', header: 'HSN', accessor: (r) => r.hsn_code ?? '-', width: '90px', filterType: 'text', filterField: 'hsn_code' },
+    { key: 'supplier_name', header: 'Supplier', accessor: (r) => r.supplier_display ?? r.supplier_name ?? '-', filterType: 'text', filterField: 'supplier_name' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '90px', filterType: 'text', filterField: 'location_code' },
     {
       key: 'reorder_status', header: 'Status',
@@ -194,7 +199,7 @@ export default function InventoryReportsPage() {
     {
       key: 'reorder_point', header: 'Reorder Pt', align: 'right', sortable: true, filterType: 'number', filterField: 'reorder_point',
       accessor: (r) => (
-        <span title={r.is_configured ? 'From configured policy' : 'Auto-computed from demand'}>
+        <span title={r.policy_scope_label ?? (r.is_configured ? 'From configured policy' : 'Auto-computed from demand')}>
           {fmt(r.reorder_point)}{r.is_configured ? ' *' : ''}
         </span>
       ),
@@ -207,6 +212,22 @@ export default function InventoryReportsPage() {
       accessor: (r) => <Badge variant={r.abc_class === 'A' ? 'success' : r.abc_class === 'B' ? 'warning' : 'default'} size="sm">{r.abc_class ?? '—'}</Badge>,
       filterType: 'select', filterField: 'abc_class',
       filterOptions: [{ value: 'A', label: 'A' }, { value: 'B', label: 'B' }, { value: 'C', label: 'C' }],
+    },
+    {
+      key: 'policy_source',
+      header: 'Policy',
+      accessor: (r) => (
+        <Badge variant={r.policy_source === 'PRODUCT_LOCATION' ? 'success' : r.policy_source === 'SCOPED' ? 'primary' : 'default'} size="sm">
+          {r.policy_source === 'PRODUCT_LOCATION' ? 'Product' : r.policy_source === 'SCOPED' ? 'Scoped' : 'Computed'}
+        </Badge>
+      ),
+      filterType: 'select',
+      filterField: 'policy_source',
+      filterOptions: [
+        { value: 'PRODUCT_LOCATION', label: 'Product-location' },
+        { value: 'SCOPED', label: 'Scoped' },
+        { value: 'COMPUTED', label: 'Computed' },
+      ],
     },
     { key: 'days_of_stock', header: 'Days Stock', accessor: (r) => r.days_of_stock != null ? r.days_of_stock.toFixed(0) : '—', align: 'right' },
   ]);

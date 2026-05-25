@@ -50,6 +50,40 @@ describe('getReorderReport — SQL contract', () => {
     expect(joined).toContain('cfg_max_order');
   });
 
+  it('applies scoped reorder policies after exact product-location policies', async () => {
+    const { service, sqls } = buildService();
+    await service.getReorderReport(tenantId, {});
+    const joined = sqls.join('\n');
+
+    expect(joined).toContain('FROM inventory_policy_scopes ips');
+    expect(joined).toContain("ips.scope_type = 'PRODUCT_COMPANY'");
+    expect(joined).toContain("ips.scope_type = 'HSN_CODE'");
+    expect(joined).toContain("ips.scope_type = 'SALT'");
+    expect(joined).toContain("ips.scope_type = 'PRODUCT_GROUP'");
+    expect(joined).toContain("ips.scope_type = 'SUPPLIER'");
+    expect(joined).toContain('COALESCE(ip.reorder_point, scope_policy.reorder_point)');
+    expect(joined).toContain("WHEN ip.id IS NOT NULL THEN 'PRODUCT_LOCATION'");
+    expect(joined).toContain("WHEN scope_policy.id IS NOT NULL THEN 'SCOPED'");
+  });
+
+  it('filters reorder rows by policy dimensions and supplier', async () => {
+    const { service, sqls } = buildService();
+    await service.getReorderReport(tenantId, {
+      productCompany: 'ACME',
+      hsnCode: '30049099',
+      salt: 'PARA',
+      productGroup: 'TAB',
+      supplierIds: ['22222222-2222-4222-8222-222222222222'],
+    });
+    const joined = sqls.join('\n');
+
+    expect(joined).toContain('NULLIF(TRIM(p.product_company), \'\') = ?');
+    expect(joined).toContain('NULLIF(TRIM(p.hsn_code), \'\') = ?');
+    expect(joined).toContain('NULLIF(TRIM(p.salt), \'\') = ?');
+    expect(joined).toContain('NULLIF(TRIM(p.product_group), \'\') = ?');
+    expect(joined).toContain('supplier_match.supplier_id = ANY(?::uuid[])');
+  });
+
   it('default scope shows only actionable rows; includeAll bypasses the gate', async () => {
     const a = buildService();
     await a.service.getReorderReport(tenantId, {});
@@ -158,5 +192,34 @@ describe('reorder-config endpoints', () => {
     expect(res.skipped).toHaveLength(1);
     expect(res.skipped[0].reason).toMatch(/unknown product/i);
     expect(upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('upsertReorderPolicyScopes resolves location and supplier codes, upserts known rows, and skips unknown ones', async () => {
+    const executeRaw = jest.fn().mockResolvedValue(1);
+    const prisma = {
+      location: { findMany: jest.fn().mockResolvedValue([{ id: 'l1', code: 'MAIN' }]) },
+      supplier: { findMany: jest.fn().mockResolvedValue([{ id: 's1', code: 'SUP-1' }]) },
+      $executeRaw: executeRaw,
+    };
+
+    const res = await new InventoryReportsService(prisma as any).upsertReorderPolicyScopes(tenantId, [
+      { scopeType: 'PRODUCT_COMPANY', scopeCode: 'ACME', locationCode: 'MAIN', reorderPoint: 100 },
+      { scopeType: 'SUPPLIER', supplierCode: 'SUP-1', reorderQty: 25 },
+      { scopeType: 'SUPPLIER', supplierCode: 'NOPE', reorderQty: 25 },
+    ]);
+
+    expect(res.upserted).toBe(2);
+    expect(res.skipped).toHaveLength(1);
+    expect(res.skipped[0].reason).toMatch(/unknown supplier/i);
+    expect(executeRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('deleteReorderPolicyScope deletes by tenant and scoped policy id', async () => {
+    const executeRaw = jest.fn().mockResolvedValue(1);
+    const service = new InventoryReportsService({ $executeRaw: executeRaw } as any);
+    const res = await service.deleteReorderPolicyScope(tenantId, '33333333-3333-4333-8333-333333333333');
+
+    expect(res.deleted).toBe(1);
+    expect(executeRaw).toHaveBeenCalledTimes(1);
   });
 });

@@ -189,6 +189,33 @@ export class ReorderFilterDto extends InventoryBaseFilterDto {
   @Min(7)
   @Max(730)
   avgSalesDays?: number;
+
+  @ApiPropertyOptional({ description: 'Filter by product company code.' })
+  @IsOptional()
+  @IsString()
+  productCompany?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by HSN code.' })
+  @IsOptional()
+  @IsString()
+  hsnCode?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by salt code.' })
+  @IsOptional()
+  @IsString()
+  salt?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by product group/category code.' })
+  @IsOptional()
+  @IsString()
+  productGroup?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by supplier IDs.' })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  @Transform(({ value }) => (typeof value === 'string' ? [value] : value))
+  supplierIds?: string[];
 }
 
 export class ExpiryFilterDto extends InventoryBaseFilterDto {
@@ -369,6 +396,33 @@ export class SuggestedPurchaseFilterDto extends InventoryBaseFilterDto {
   @Min(1.0)
   @Max(5.0)
   safetyMultiplier?: number = 1.5;
+
+  @ApiPropertyOptional({ description: 'Filter by product company code.' })
+  @IsOptional()
+  @IsString()
+  productCompany?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by HSN code.' })
+  @IsOptional()
+  @IsString()
+  hsnCode?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by salt code.' })
+  @IsOptional()
+  @IsString()
+  salt?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by product group/category code.' })
+  @IsOptional()
+  @IsString()
+  productGroup?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by supplier IDs.' })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  @Transform(({ value }) => (typeof value === 'string' ? [value] : value))
+  supplierIds?: string[];
 }
 
 export class SalesPurchaseAnalysisFilterDto extends PaginationDto {

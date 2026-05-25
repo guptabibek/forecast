@@ -4,7 +4,7 @@
 //         Reorder / Low Stock, Stock Ageing
 // ============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/database/prisma.service';
 import {
@@ -138,6 +138,17 @@ export interface ReorderRow {
   product_id: string;
   sku: string;
   product_name: string;
+  product_company: string | null;
+  product_company_display: string | null;
+  salt: string | null;
+  salt_display: string | null;
+  product_group: string | null;
+  product_group_display: string | null;
+  hsn_code: string | null;
+  supplier_id: string | null;
+  supplier_code: string | null;
+  supplier_name: string | null;
+  supplier_display: string | null;
   location_id: string;
   location_code: string;
   on_hand_qty: number;
@@ -153,10 +164,48 @@ export interface ReorderRow {
   reorder_status: 'OUT_OF_STOCK' | 'BELOW_REORDER' | 'OK';
   /** True when the product×location has an explicit inventory_policy override. */
   is_configured: boolean;
+  policy_source: 'PRODUCT_LOCATION' | 'SCOPED' | 'COMPUTED';
+  policy_scope_type: string | null;
+  policy_scope_label: string | null;
   abc_class: string | null;
   days_of_stock: number | null;
   lookback_days: number;
   coverage_days: number;
+}
+
+export type ReorderPolicyScopeType =
+  | 'PRODUCT_COMPANY'
+  | 'HSN_CODE'
+  | 'SALT'
+  | 'PRODUCT_GROUP'
+  | 'SUPPLIER';
+
+export interface ReorderPolicyScopeRow {
+  id: string;
+  scope_type: ReorderPolicyScopeType;
+  scope_code: string | null;
+  scope_id: string | null;
+  scope_label: string;
+  location_id: string | null;
+  location_code: string | null;
+  location_name: string | null;
+  priority: number;
+  reorder_point: number | null;
+  reorder_qty: number | null;
+  min_order_qty: number | null;
+  max_order_qty: number | null;
+  multiple_order_qty: number | null;
+  safety_stock_qty: number | null;
+  safety_stock_days: number | null;
+  lead_time_days: number | null;
+  abc_class: string | null;
+  updated_at: Date;
+}
+
+export interface ReorderScopeOption {
+  value: string;
+  code: string | null;
+  label: string;
 }
 
 export interface StockAgeingRow {
@@ -297,6 +346,17 @@ export function normalizeMovementLedgerFilters(filters: PharmaColumnFilter[]): P
 const REORDER_COLUMNS: AllowedSqlColumns = {
   sku: { expression: 'sku', type: 'string' },
   product_name: { expression: 'product_name', type: 'string' },
+  product_company: { expression: 'product_company', type: 'string' },
+  product_company_display: { expression: 'product_company_display', type: 'string' },
+  salt: { expression: 'salt', type: 'string' },
+  salt_display: { expression: 'salt_display', type: 'string' },
+  product_group: { expression: 'product_group', type: 'string' },
+  product_group_display: { expression: 'product_group_display', type: 'string' },
+  hsn_code: { expression: 'hsn_code', type: 'string' },
+  supplier_code: { expression: 'supplier_code', type: 'string' },
+  supplier_name: { expression: 'supplier_name', type: 'string' },
+  policy_source: { expression: 'policy_source', type: 'enum' },
+  policy_scope_type: { expression: 'policy_scope_type', type: 'enum' },
   location_code: { expression: 'location_code', type: 'string' },
   on_hand_qty: { expression: 'on_hand_qty', type: 'number' },
   available_qty: { expression: 'available_qty', type: 'number' },
@@ -322,6 +382,37 @@ const STOCK_AGEING_COLUMNS: AllowedSqlColumns = {
   quantity: { expression: 'b.quantity', type: 'number' },
   batch_value: { expression: '(COALESCE(b.quantity, 0) * COALESCE(b.cost_per_unit, 0))', type: 'number' },
 };
+
+const REORDER_POLICY_SCOPE_TYPES = new Set<ReorderPolicyScopeType>([
+  'PRODUCT_COMPANY',
+  'HSN_CODE',
+  'SALT',
+  'PRODUCT_GROUP',
+  'SUPPLIER',
+]);
+
+const DEFAULT_SCOPE_PRIORITY: Record<ReorderPolicyScopeType, number> = {
+  SUPPLIER: 90,
+  PRODUCT_GROUP: 80,
+  PRODUCT_COMPANY: 70,
+  SALT: 60,
+  HSN_CODE: 50,
+};
+
+const NULL_UUID = '00000000-0000-0000-0000-000000000000';
+
+function normalizeScopeType(value: unknown): ReorderPolicyScopeType {
+  const scopeType = String(value || '').trim().toUpperCase() as ReorderPolicyScopeType;
+  if (!REORDER_POLICY_SCOPE_TYPES.has(scopeType)) {
+    throw new BadRequestException(`Unsupported reorder policy scope: ${String(value || '')}`);
+  }
+  return scopeType;
+}
+
+function normalizeOptionalCode(value: unknown): string | undefined {
+  const code = String(value ?? '').trim();
+  return code.length ? code : undefined;
+}
 
 @Injectable()
 export class InventoryReportsService {
@@ -657,6 +748,11 @@ export class InventoryReportsService {
     if (filters.productIds?.length) innerConds.push(Prisma.sql`il.product_id = ANY(${filters.productIds}::uuid[])`);
     if (filters.locationIds?.length) innerConds.push(Prisma.sql`il.location_id = ANY(${filters.locationIds}::uuid[])`);
     if (filters.category) innerConds.push(Prisma.sql`p.category = ${filters.category}`);
+    if (filters.productCompany) innerConds.push(Prisma.sql`NULLIF(TRIM(p.product_company), '') = ${filters.productCompany.trim()}`);
+    if (filters.hsnCode) innerConds.push(Prisma.sql`NULLIF(TRIM(p.hsn_code), '') = ${filters.hsnCode.trim()}`);
+    if (filters.salt) innerConds.push(Prisma.sql`NULLIF(TRIM(p.salt), '') = ${filters.salt.trim()}`);
+    if (filters.productGroup) innerConds.push(Prisma.sql`NULLIF(TRIM(p.product_group), '') = ${filters.productGroup.trim()}`);
+    if (filters.supplierIds?.length) innerConds.push(Prisma.sql`supplier_match.supplier_id = ANY(${filters.supplierIds}::uuid[])`);
     const innerWhere = innerConds.length ? Prisma.sql`AND ${Prisma.join(innerConds, ' AND ')}` : Prisma.empty;
 
     // Outer filters/sort operate on the computed `rr` columns (bare names).
@@ -718,22 +814,107 @@ export class InventoryReportsService {
       base AS (
         SELECT
           p.id AS product_id, p.code AS sku, p.name AS product_name,
-          l.id AS location_id, l.code AS location_code, ip.abc_class,
-          (ip.id IS NOT NULL) AS is_configured,
+          NULLIF(TRIM(p.product_company), '') AS product_company,
+          CASE WHEN NULLIF(TRIM(p.product_company), '') IS NULL THEN NULL ELSE TRIM(p.product_company) || ' - ' || COALESCE(pc.name, 'Unknown company (' || TRIM(p.product_company) || ')') END AS product_company_display,
+          NULLIF(TRIM(p.salt), '') AS salt,
+          CASE WHEN NULLIF(TRIM(p.salt), '') IS NULL THEN NULL ELSE TRIM(p.salt) || ' - ' || COALESCE(ps.name, 'Unknown salt (' || TRIM(p.salt) || ')') END AS salt_display,
+          NULLIF(TRIM(p.product_group), '') AS product_group,
+          CASE WHEN NULLIF(TRIM(p.product_group), '') IS NULL THEN NULL ELSE TRIM(p.product_group) || ' - ' || COALESCE(pg.name, 'Unknown group (' || TRIM(p.product_group) || ')') END AS product_group_display,
+          NULLIF(TRIM(p.hsn_code), '') AS hsn_code,
+          supplier_match.supplier_id,
+          supplier_match.supplier_code,
+          supplier_match.supplier_name,
+          CASE WHEN supplier_match.supplier_id IS NULL THEN NULL ELSE COALESCE(supplier_match.supplier_code || ' - ', '') || supplier_match.supplier_name END AS supplier_display,
+          l.id AS location_id, l.code AS location_code,
+          COALESCE(ip.abc_class, scope_policy.abc_class) AS abc_class,
+          (ip.id IS NOT NULL OR scope_policy.id IS NOT NULL) AS is_configured,
+          CASE
+            WHEN ip.id IS NOT NULL THEN 'PRODUCT_LOCATION'
+            WHEN scope_policy.id IS NOT NULL THEN 'SCOPED'
+            ELSE 'COMPUTED'
+          END AS policy_source,
+          scope_policy.scope_type::text AS policy_scope_type,
+          scope_policy.scope_label AS policy_scope_label,
           COALESCE(il.on_hand_qty, 0)::float8 AS on_hand_qty,
           COALESCE(il.available_qty, 0)::float8 AS available_qty,
           COALESCE(oo.on_order_qty, 0)::float8 AS on_order_qty,
           COALESCE(d.avg_daily_demand, 0)::float8 AS avg_daily_sales,
-          COALESCE(NULLIF(ip.lead_time_days, 0), ${leadTimeDays})::float8 AS lead_time_days,
-          COALESCE(ip.safety_stock_qty, COALESCE(ip.safety_stock_days, ${safetyDays})::float8 * COALESCE(d.avg_daily_demand, 0))::float8 AS safety_stock_qty,
-          ip.reorder_point::float8 AS cfg_reorder_point,
-          ip.reorder_qty::float8 AS cfg_reorder_qty,
-          ip.min_order_qty::float8 AS cfg_min_order,
-          ip.multiple_order_qty::float8 AS cfg_multiple,
-          ip.max_order_qty::float8 AS cfg_max_order
+          COALESCE(NULLIF(ip.lead_time_days, 0), scope_policy.lead_time_days, ${leadTimeDays})::float8 AS lead_time_days,
+          COALESCE(ip.safety_stock_qty, scope_policy.safety_stock_qty, COALESCE(ip.safety_stock_days, scope_policy.safety_stock_days, ${safetyDays})::float8 * COALESCE(d.avg_daily_demand, 0))::float8 AS safety_stock_qty,
+          COALESCE(ip.reorder_point, scope_policy.reorder_point)::float8 AS cfg_reorder_point,
+          COALESCE(ip.reorder_qty, scope_policy.reorder_qty)::float8 AS cfg_reorder_qty,
+          COALESCE(ip.min_order_qty, scope_policy.min_order_qty)::float8 AS cfg_min_order,
+          COALESCE(ip.multiple_order_qty, scope_policy.multiple_order_qty)::float8 AS cfg_multiple,
+          COALESCE(ip.max_order_qty, scope_policy.max_order_qty)::float8 AS cfg_max_order
         FROM inventory_levels il
         JOIN products p ON p.id = il.product_id AND p.tenant_id = il.tenant_id AND p.status = 'ACTIVE'::"DimensionStatus"
         JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
+        LEFT JOIN product_companies pc ON pc.tenant_id = p.tenant_id AND pc.code = NULLIF(TRIM(p.product_company), '')
+        LEFT JOIN product_salts ps ON ps.tenant_id = p.tenant_id AND ps.code = NULLIF(TRIM(p.salt), '')
+        LEFT JOIN product_categories pg ON pg.tenant_id = p.tenant_id AND pg.code = NULLIF(TRIM(p.product_group), '')
+        LEFT JOIN LATERAL (
+          SELECT candidate.supplier_id, candidate.supplier_code, candidate.supplier_name
+          FROM (
+            SELECT
+              sp.supplier_id,
+              s.code AS supplier_code,
+              s.name AS supplier_name,
+              0 AS source_rank,
+              CASE WHEN sp.is_primary THEN 0 ELSE 1 END AS primary_rank,
+              sp.priority,
+              NULL::date AS activity_date
+            FROM supplier_products sp
+            JOIN suppliers s ON s.id = sp.supplier_id AND s.tenant_id = il.tenant_id AND s.status = 'ACTIVE'::"DimensionStatus"
+            WHERE sp.product_id = il.product_id
+
+            UNION ALL
+
+            SELECT
+              po.supplier_id,
+              s.code AS supplier_code,
+              s.name AS supplier_name,
+              1 AS source_rank,
+              1 AS primary_rank,
+              999999 AS priority,
+              po.order_date AS activity_date
+            FROM purchase_order_lines pol
+            JOIN purchase_orders po ON po.id = pol.purchase_order_id AND po.tenant_id = il.tenant_id
+            JOIN suppliers s ON s.id = po.supplier_id AND s.tenant_id = il.tenant_id
+            WHERE pol.product_id = il.product_id
+              AND po.status NOT IN ('CANCELLED', 'DRAFT')
+          ) candidate
+          ORDER BY candidate.source_rank, candidate.primary_rank, candidate.priority, candidate.activity_date DESC NULLS LAST
+          LIMIT 1
+        ) supplier_match ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            ips.*,
+            CASE ips.scope_type
+              WHEN 'PRODUCT_COMPANY' THEN ips.scope_code || ' - ' || COALESCE((SELECT pc2.name FROM product_companies pc2 WHERE pc2.tenant_id = ips.tenant_id AND pc2.code = ips.scope_code LIMIT 1), 'Unknown company (' || ips.scope_code || ')')
+              WHEN 'SALT' THEN ips.scope_code || ' - ' || COALESCE((SELECT ps2.name FROM product_salts ps2 WHERE ps2.tenant_id = ips.tenant_id AND ps2.code = ips.scope_code LIMIT 1), 'Unknown salt (' || ips.scope_code || ')')
+              WHEN 'PRODUCT_GROUP' THEN ips.scope_code || ' - ' || COALESCE((SELECT pg2.name FROM product_categories pg2 WHERE pg2.tenant_id = ips.tenant_id AND pg2.code = ips.scope_code LIMIT 1), 'Unknown group (' || ips.scope_code || ')')
+              WHEN 'HSN_CODE' THEN ips.scope_code
+              WHEN 'SUPPLIER' THEN COALESCE((SELECT COALESCE(s2.code || ' - ', '') || s2.name FROM suppliers s2 WHERE s2.tenant_id = ips.tenant_id AND s2.id = ips.scope_id LIMIT 1), 'Supplier ' || ips.scope_id::text)
+              ELSE ips.scope_type::text
+            END AS scope_label
+          FROM inventory_policy_scopes ips
+          WHERE ips.tenant_id = il.tenant_id
+            AND (ips.location_id IS NULL OR ips.location_id = il.location_id)
+            AND CURRENT_DATE >= ips.effective_from
+            AND (ips.effective_to IS NULL OR CURRENT_DATE <= ips.effective_to)
+            AND (
+              (ips.scope_type = 'PRODUCT_COMPANY' AND ips.scope_code = NULLIF(TRIM(p.product_company), ''))
+              OR (ips.scope_type = 'HSN_CODE' AND ips.scope_code = NULLIF(TRIM(p.hsn_code), ''))
+              OR (ips.scope_type = 'SALT' AND ips.scope_code = NULLIF(TRIM(p.salt), ''))
+              OR (ips.scope_type = 'PRODUCT_GROUP' AND ips.scope_code = NULLIF(TRIM(p.product_group), ''))
+              OR (ips.scope_type = 'SUPPLIER' AND ips.scope_id = supplier_match.supplier_id)
+            )
+          ORDER BY
+            CASE WHEN ips.location_id = il.location_id THEN 1 ELSE 0 END DESC,
+            ips.priority DESC,
+            ips.updated_at DESC
+          LIMIT 1
+        ) scope_policy ON TRUE
         LEFT JOIN inventory_policies ip ON ip.tenant_id = il.tenant_id AND ip.product_id = il.product_id AND ip.location_id = il.location_id
         LEFT JOIN demand d ON d.product_id = il.product_id AND d.location_id = il.location_id
         LEFT JOIN on_order oo ON oo.product_id = il.product_id AND oo.location_id = il.location_id
@@ -789,10 +970,15 @@ export class InventoryReportsService {
     const rows = await this.prisma.$queryRaw<ReorderRow[]>(Prisma.sql`
       ${cte}
       SELECT
-        product_id, sku, product_name, location_id, location_code,
+        product_id, sku, product_name,
+        product_company, product_company_display, salt, salt_display,
+        product_group, product_group_display, hsn_code,
+        supplier_id, supplier_code, supplier_name, supplier_display,
+        location_id, location_code,
         on_hand_qty, available_qty, on_order_qty,
         reorder_point, order_up_to_qty, safety_stock_qty, lead_time_days,
         avg_daily_sales, suggested_order_qty, reorder_status, is_configured,
+        policy_source, policy_scope_type, policy_scope_label,
         abc_class, days_of_stock,
         ${lookbackDays}::int AS lookback_days,
         ${coverageDays}::int AS coverage_days
@@ -887,6 +1073,299 @@ export class InventoryReportsService {
       LIMIT ${limit} OFFSET ${offset}
     `);
     return { data, total: Number(cnt) };
+  }
+
+  async getReorderPolicyScopes(
+    tenantId: string,
+    filters: { scopeType?: string; limit?: number; offset?: number } = {},
+  ): Promise<{ data: ReorderPolicyScopeRow[]; total: number }> {
+    const limit = Math.min(Math.max(filters.limit ?? 100, 1), 1000);
+    const offset = Math.max(filters.offset ?? 0, 0);
+    const conds: Prisma.Sql[] = [Prisma.sql`ips.tenant_id = ${tenantId}::uuid`];
+    if (filters.scopeType) {
+      conds.push(Prisma.sql`ips.scope_type = ${normalizeScopeType(filters.scopeType)}::"InventoryPolicyScopeType"`);
+    }
+    const where = Prisma.join(conds, ' AND ');
+    const [{ cnt }] = await this.prisma.$queryRaw<[{ cnt: bigint }]>(Prisma.sql`
+      SELECT COUNT(*)::bigint AS cnt
+      FROM inventory_policy_scopes ips
+      WHERE ${where}
+    `);
+
+    const data = await this.prisma.$queryRaw<ReorderPolicyScopeRow[]>(Prisma.sql`
+      SELECT
+        ips.id,
+        ips.scope_type::text AS scope_type,
+        ips.scope_code,
+        ips.scope_id,
+        CASE ips.scope_type
+          WHEN 'PRODUCT_COMPANY' THEN ips.scope_code || ' - ' || COALESCE(pc.name, 'Unknown company (' || ips.scope_code || ')')
+          WHEN 'SALT' THEN ips.scope_code || ' - ' || COALESCE(ps.name, 'Unknown salt (' || ips.scope_code || ')')
+          WHEN 'PRODUCT_GROUP' THEN ips.scope_code || ' - ' || COALESCE(pg.name, 'Unknown group (' || ips.scope_code || ')')
+          WHEN 'HSN_CODE' THEN ips.scope_code
+          WHEN 'SUPPLIER' THEN COALESCE(s.code || ' - ', '') || COALESCE(s.name, 'Unknown supplier (' || ips.scope_id::text || ')')
+          ELSE ips.scope_type::text
+        END AS scope_label,
+        ips.location_id,
+        l.code AS location_code,
+        l.name AS location_name,
+        ips.priority,
+        ips.reorder_point::float8 AS reorder_point,
+        ips.reorder_qty::float8 AS reorder_qty,
+        ips.min_order_qty::float8 AS min_order_qty,
+        ips.max_order_qty::float8 AS max_order_qty,
+        ips.multiple_order_qty::float8 AS multiple_order_qty,
+        ips.safety_stock_qty::float8 AS safety_stock_qty,
+        ips.safety_stock_days,
+        ips.lead_time_days,
+        ips.abc_class,
+        ips.updated_at
+      FROM inventory_policy_scopes ips
+      LEFT JOIN locations l ON l.id = ips.location_id AND l.tenant_id = ips.tenant_id
+      LEFT JOIN product_companies pc ON pc.tenant_id = ips.tenant_id AND pc.code = ips.scope_code
+      LEFT JOIN product_salts ps ON ps.tenant_id = ips.tenant_id AND ps.code = ips.scope_code
+      LEFT JOIN product_categories pg ON pg.tenant_id = ips.tenant_id AND pg.code = ips.scope_code
+      LEFT JOIN suppliers s ON s.tenant_id = ips.tenant_id AND s.id = ips.scope_id
+      WHERE ${where}
+      ORDER BY ips.scope_type::text, scope_label, l.code NULLS FIRST
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+
+    return { data, total: Number(cnt) };
+  }
+
+  async getReorderScopeOptions(
+    tenantId: string,
+    scopeTypeRaw: string,
+    search?: string,
+    limitRaw?: number,
+  ): Promise<ReorderScopeOption[]> {
+    const scopeType = normalizeScopeType(scopeTypeRaw);
+    const limit = Math.min(Math.max(limitRaw ?? 50, 1), 200);
+    const term = `%${String(search ?? '').trim()}%`;
+
+    if (scopeType === 'SUPPLIER') {
+      return this.prisma.$queryRaw<ReorderScopeOption[]>(Prisma.sql`
+        SELECT s.id::text AS value, s.code, s.code || ' - ' || s.name AS label
+        FROM suppliers s
+        WHERE s.tenant_id = ${tenantId}::uuid
+          AND s.status = 'ACTIVE'::"DimensionStatus"
+          AND (${!search} OR s.code ILIKE ${term} OR s.name ILIKE ${term})
+        ORDER BY s.name, s.code
+        LIMIT ${limit}
+      `);
+    }
+
+    if (scopeType === 'PRODUCT_COMPANY') {
+      return this.prisma.$queryRaw<ReorderScopeOption[]>(Prisma.sql`
+        SELECT code AS value, code, label
+        FROM (
+          SELECT pc.code, pc.code || ' - ' || pc.name AS label
+          FROM product_companies pc
+          WHERE pc.tenant_id = ${tenantId}::uuid AND pc.is_active = true
+          UNION
+          SELECT DISTINCT NULLIF(TRIM(p.product_company), '') AS code,
+            NULLIF(TRIM(p.product_company), '') || ' - ' || COALESCE(pc.name, 'Unknown company (' || NULLIF(TRIM(p.product_company), '') || ')') AS label
+          FROM products p
+          LEFT JOIN product_companies pc ON pc.tenant_id = p.tenant_id AND pc.code = NULLIF(TRIM(p.product_company), '')
+          WHERE p.tenant_id = ${tenantId}::uuid AND NULLIF(TRIM(p.product_company), '') IS NOT NULL
+        ) opts
+        WHERE (${!search} OR opts.code ILIKE ${term} OR opts.label ILIKE ${term})
+        ORDER BY label
+        LIMIT ${limit}
+      `);
+    }
+
+    if (scopeType === 'SALT') {
+      return this.prisma.$queryRaw<ReorderScopeOption[]>(Prisma.sql`
+        SELECT code AS value, code, label
+        FROM (
+          SELECT ps.code, ps.code || ' - ' || ps.name AS label
+          FROM product_salts ps
+          WHERE ps.tenant_id = ${tenantId}::uuid AND ps.is_active = true
+          UNION
+          SELECT DISTINCT NULLIF(TRIM(p.salt), '') AS code,
+            NULLIF(TRIM(p.salt), '') || ' - ' || COALESCE(ps.name, 'Unknown salt (' || NULLIF(TRIM(p.salt), '') || ')') AS label
+          FROM products p
+          LEFT JOIN product_salts ps ON ps.tenant_id = p.tenant_id AND ps.code = NULLIF(TRIM(p.salt), '')
+          WHERE p.tenant_id = ${tenantId}::uuid AND NULLIF(TRIM(p.salt), '') IS NOT NULL
+        ) opts
+        WHERE (${!search} OR opts.code ILIKE ${term} OR opts.label ILIKE ${term})
+        ORDER BY label
+        LIMIT ${limit}
+      `);
+    }
+
+    if (scopeType === 'PRODUCT_GROUP') {
+      return this.prisma.$queryRaw<ReorderScopeOption[]>(Prisma.sql`
+        SELECT code AS value, code, label
+        FROM (
+          SELECT pg.code, pg.code || ' - ' || pg.name AS label
+          FROM product_categories pg
+          WHERE pg.tenant_id = ${tenantId}::uuid AND pg.is_active = true
+          UNION
+          SELECT DISTINCT NULLIF(TRIM(p.product_group), '') AS code,
+            NULLIF(TRIM(p.product_group), '') || ' - ' || COALESCE(pg.name, 'Unknown group (' || NULLIF(TRIM(p.product_group), '') || ')') AS label
+          FROM products p
+          LEFT JOIN product_categories pg ON pg.tenant_id = p.tenant_id AND pg.code = NULLIF(TRIM(p.product_group), '')
+          WHERE p.tenant_id = ${tenantId}::uuid AND NULLIF(TRIM(p.product_group), '') IS NOT NULL
+        ) opts
+        WHERE (${!search} OR opts.code ILIKE ${term} OR opts.label ILIKE ${term})
+        ORDER BY label
+        LIMIT ${limit}
+      `);
+    }
+
+    return this.prisma.$queryRaw<ReorderScopeOption[]>(Prisma.sql`
+      SELECT code AS value, code, code AS label
+      FROM (
+        SELECT DISTINCT NULLIF(TRIM(p.hsn_code), '') AS code
+        FROM products p
+        WHERE p.tenant_id = ${tenantId}::uuid AND NULLIF(TRIM(p.hsn_code), '') IS NOT NULL
+      ) opts
+      WHERE (${!search} OR opts.code ILIKE ${term})
+      ORDER BY code
+      LIMIT ${limit}
+    `);
+  }
+
+  async upsertReorderPolicyScopes(
+    tenantId: string,
+    rows: Array<{
+      scopeType: string;
+      scopeCode?: string;
+      scopeId?: string;
+      supplierCode?: string;
+      locationId?: string;
+      locationCode?: string;
+      priority?: number;
+      reorderPoint?: number;
+      reorderQty?: number;
+      minOrderQty?: number;
+      maxOrderQty?: number;
+      multipleOrderQty?: number;
+      safetyStockQty?: number;
+      safetyStockDays?: number;
+      leadTimeDays?: number;
+      abcClass?: string;
+    }>,
+  ): Promise<{ upserted: number; skipped: Array<{ row: number; reason: string }> }> {
+    const locationCodes = Array.from(new Set(rows.map((r) => normalizeOptionalCode(r.locationCode)).filter(Boolean) as string[]));
+    const supplierCodes = Array.from(new Set(rows.map((r) => normalizeOptionalCode(r.supplierCode)).filter(Boolean) as string[]));
+    const [locs, suppliers] = await Promise.all([
+      locationCodes.length
+        ? this.prisma.location.findMany({ where: { tenantId, code: { in: locationCodes } }, select: { id: true, code: true } })
+        : Promise.resolve([] as Array<{ id: string; code: string }>),
+      supplierCodes.length
+        ? this.prisma.supplier.findMany({ where: { tenantId, code: { in: supplierCodes } }, select: { id: true, code: true } })
+        : Promise.resolve([] as Array<{ id: string; code: string }>),
+    ]);
+    const locByCode = new Map(locs.map((l) => [l.code, l.id]));
+    const supplierByCode = new Map(suppliers.map((s) => [s.code, s.id]));
+
+    const skipped: Array<{ row: number; reason: string }> = [];
+    let upserted = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      let scopeType: ReorderPolicyScopeType;
+      try {
+        scopeType = normalizeScopeType(r.scopeType);
+      } catch (error) {
+        skipped.push({ row: i, reason: error instanceof Error ? error.message : 'invalid scope type' });
+        continue;
+      }
+
+      const locationCode = normalizeOptionalCode(r.locationCode);
+      const locationId = r.locationId ?? (locationCode ? locByCode.get(locationCode) : undefined);
+      if (locationCode && !locationId) {
+        skipped.push({ row: i, reason: `unknown location: ${locationCode}` });
+        continue;
+      }
+
+      const scopeCode = scopeType === 'SUPPLIER' ? undefined : normalizeOptionalCode(r.scopeCode);
+      const supplierCode = normalizeOptionalCode(r.supplierCode);
+      const scopeId = scopeType === 'SUPPLIER' ? (r.scopeId ?? (supplierCode ? supplierByCode.get(supplierCode) : undefined)) : undefined;
+
+      if (scopeType === 'SUPPLIER' && !scopeId) {
+        skipped.push({ row: i, reason: `unknown supplier: ${supplierCode ?? r.scopeId ?? '(none)'}` });
+        continue;
+      }
+      if (scopeType !== 'SUPPLIER' && !scopeCode) {
+        skipped.push({ row: i, reason: 'scopeCode is required for non-supplier scope policies' });
+        continue;
+      }
+
+      const priority = r.priority ?? DEFAULT_SCOPE_PRIORITY[scopeType];
+      const abcClass = r.abcClass ? String(r.abcClass).trim().toUpperCase().slice(0, 1) : null;
+
+      if (scopeType === 'SUPPLIER') {
+        await this.prisma.$executeRaw(Prisma.sql`
+          INSERT INTO inventory_policy_scopes (
+            tenant_id, scope_type, scope_code, scope_id, location_id, priority,
+            reorder_point, reorder_qty, min_order_qty, max_order_qty, multiple_order_qty,
+            safety_stock_qty, safety_stock_days, lead_time_days, abc_class
+          ) VALUES (
+            ${tenantId}::uuid, ${scopeType}::"InventoryPolicyScopeType", NULL, ${scopeId}::uuid, ${locationId ?? null}::uuid, ${priority},
+            ${r.reorderPoint ?? null}, ${r.reorderQty ?? null}, ${r.minOrderQty ?? null}, ${r.maxOrderQty ?? null}, ${r.multipleOrderQty ?? null},
+            ${r.safetyStockQty ?? null}, ${r.safetyStockDays ?? null}, ${r.leadTimeDays ?? null}, ${abcClass}
+          )
+          ON CONFLICT (
+            tenant_id, scope_type, scope_id, (COALESCE(location_id, ${Prisma.raw(`'${NULL_UUID}'::uuid`)}))
+          ) WHERE scope_id IS NOT NULL
+          DO UPDATE SET
+            priority = EXCLUDED.priority,
+            reorder_point = COALESCE(EXCLUDED.reorder_point, inventory_policy_scopes.reorder_point),
+            reorder_qty = COALESCE(EXCLUDED.reorder_qty, inventory_policy_scopes.reorder_qty),
+            min_order_qty = COALESCE(EXCLUDED.min_order_qty, inventory_policy_scopes.min_order_qty),
+            max_order_qty = COALESCE(EXCLUDED.max_order_qty, inventory_policy_scopes.max_order_qty),
+            multiple_order_qty = COALESCE(EXCLUDED.multiple_order_qty, inventory_policy_scopes.multiple_order_qty),
+            safety_stock_qty = COALESCE(EXCLUDED.safety_stock_qty, inventory_policy_scopes.safety_stock_qty),
+            safety_stock_days = COALESCE(EXCLUDED.safety_stock_days, inventory_policy_scopes.safety_stock_days),
+            lead_time_days = COALESCE(EXCLUDED.lead_time_days, inventory_policy_scopes.lead_time_days),
+            abc_class = COALESCE(EXCLUDED.abc_class, inventory_policy_scopes.abc_class),
+            updated_at = CURRENT_TIMESTAMP
+        `);
+      } else {
+        await this.prisma.$executeRaw(Prisma.sql`
+          INSERT INTO inventory_policy_scopes (
+            tenant_id, scope_type, scope_code, scope_id, location_id, priority,
+            reorder_point, reorder_qty, min_order_qty, max_order_qty, multiple_order_qty,
+            safety_stock_qty, safety_stock_days, lead_time_days, abc_class
+          ) VALUES (
+            ${tenantId}::uuid, ${scopeType}::"InventoryPolicyScopeType", ${scopeCode}, NULL, ${locationId ?? null}::uuid, ${priority},
+            ${r.reorderPoint ?? null}, ${r.reorderQty ?? null}, ${r.minOrderQty ?? null}, ${r.maxOrderQty ?? null}, ${r.multipleOrderQty ?? null},
+            ${r.safetyStockQty ?? null}, ${r.safetyStockDays ?? null}, ${r.leadTimeDays ?? null}, ${abcClass}
+          )
+          ON CONFLICT (
+            tenant_id, scope_type, scope_code, (COALESCE(location_id, ${Prisma.raw(`'${NULL_UUID}'::uuid`)}))
+          ) WHERE scope_code IS NOT NULL
+          DO UPDATE SET
+            priority = EXCLUDED.priority,
+            reorder_point = COALESCE(EXCLUDED.reorder_point, inventory_policy_scopes.reorder_point),
+            reorder_qty = COALESCE(EXCLUDED.reorder_qty, inventory_policy_scopes.reorder_qty),
+            min_order_qty = COALESCE(EXCLUDED.min_order_qty, inventory_policy_scopes.min_order_qty),
+            max_order_qty = COALESCE(EXCLUDED.max_order_qty, inventory_policy_scopes.max_order_qty),
+            multiple_order_qty = COALESCE(EXCLUDED.multiple_order_qty, inventory_policy_scopes.multiple_order_qty),
+            safety_stock_qty = COALESCE(EXCLUDED.safety_stock_qty, inventory_policy_scopes.safety_stock_qty),
+            safety_stock_days = COALESCE(EXCLUDED.safety_stock_days, inventory_policy_scopes.safety_stock_days),
+            lead_time_days = COALESCE(EXCLUDED.lead_time_days, inventory_policy_scopes.lead_time_days),
+            abc_class = COALESCE(EXCLUDED.abc_class, inventory_policy_scopes.abc_class),
+            updated_at = CURRENT_TIMESTAMP
+        `);
+      }
+      upserted++;
+    }
+
+    return { upserted, skipped };
+  }
+
+  async deleteReorderPolicyScope(tenantId: string, id: string): Promise<{ deleted: number }> {
+    const result = await this.prisma.$executeRaw(Prisma.sql`
+      DELETE FROM inventory_policy_scopes
+      WHERE tenant_id = ${tenantId}::uuid AND id = ${id}::uuid
+    `);
+    return { deleted: Number(result) };
   }
 
   /**

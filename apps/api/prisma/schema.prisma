@@ -1197,6 +1197,34 @@ model InventoryPolicy {
   @@map("inventory_policies")
 }
 
+model InventoryPolicyScope {
+  id               String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId         String                   @map("tenant_id") @db.Uuid
+  scopeType        InventoryPolicyScopeType @map("scope_type")
+  scopeCode        String?                  @map("scope_code") @db.VarChar(100)
+  scopeId          String?                  @map("scope_id") @db.Uuid
+  locationId       String?                  @map("location_id") @db.Uuid
+  priority         Int                      @default(0)
+  reorderPoint     Decimal?                 @map("reorder_point") @db.Decimal(18, 4)
+  reorderQty       Decimal?                 @map("reorder_qty") @db.Decimal(18, 4)
+  minOrderQty      Decimal?                 @map("min_order_qty") @db.Decimal(18, 4)
+  maxOrderQty      Decimal?                 @map("max_order_qty") @db.Decimal(18, 4)
+  multipleOrderQty Decimal?                 @map("multiple_order_qty") @db.Decimal(18, 4)
+  safetyStockQty   Decimal?                 @map("safety_stock_qty") @db.Decimal(18, 4)
+  safetyStockDays  Int?                     @map("safety_stock_days")
+  leadTimeDays     Int?                     @map("lead_time_days")
+  abcClass         String?                  @map("abc_class") @db.VarChar(1)
+  effectiveFrom    DateTime                 @default(now()) @map("effective_from") @db.Date
+  effectiveTo      DateTime?                @map("effective_to") @db.Date
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+
+  @@index([tenantId, scopeType, scopeCode])
+  @@index([tenantId, scopeType, scopeId])
+  @@index([tenantId, locationId])
+  @@map("inventory_policy_scopes")
+}
+
 model InventoryLevel {
   id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   tenantId        String    @map("tenant_id") @db.Uuid
@@ -2293,6 +2321,14 @@ enum SafetyStockMethod {
   DAYS_OF_SUPPLY
   SERVICE_LEVEL
   DYNAMIC
+}
+
+enum InventoryPolicyScopeType {
+  PRODUCT_COMPANY
+  HSN_CODE
+  SALT
+  PRODUCT_GROUP
+  SUPPLIER
 }
 
 enum MRPRunType {

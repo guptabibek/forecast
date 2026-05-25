@@ -183,6 +183,10 @@ export default function ProcurementPage() {
   const purchaseCols: Column<SuggestedPurchaseRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
+    { key: 'product_company', header: 'Company', accessor: (r) => r.product_company_display ?? r.product_company ?? '-', filterType: 'text', filterField: 'product_company' },
+    { key: 'salt', header: 'Salt', accessor: (r) => r.salt_display ?? r.salt ?? '-', filterType: 'text', filterField: 'salt' },
+    { key: 'product_group', header: 'Group', accessor: (r) => r.product_group_display ?? r.product_group ?? '-', filterType: 'text', filterField: 'product_group' },
+    { key: 'hsn_code', header: 'HSN', accessor: (r) => r.hsn_code ?? '-', width: '90px', filterType: 'text', filterField: 'hsn_code' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '90px', filterType: 'text', filterField: 'location_code' },
     { key: 'current_stock', header: 'On Hand', accessor: (r) => fmt(r.current_stock), align: 'right', sortable: true, filterType: 'number', filterField: 'current_stock' },
     { key: 'reorder_point', header: 'ROP', accessor: (r) => fmt(r.reorder_point), align: 'right' },
@@ -194,7 +198,23 @@ export default function ProcurementPage() {
       accessor: (r) => <span className="font-bold text-primary-700">{fmt(r.suggested_purchase_qty)}</span>,
     },
     { key: 'estimated_cost', header: 'Est. Cost', accessor: (r) => fmtCurrency(r.estimated_cost), align: 'right' },
-    { key: 'preferred_supplier', header: 'Supplier', accessor: (r) => r.preferred_supplier ?? '—' },
+    { key: 'preferred_supplier', header: 'Supplier', accessor: (r) => r.supplier_display ?? r.preferred_supplier ?? '—', filterType: 'text', filterField: 'supplier_name' },
+    {
+      key: 'policy_source',
+      header: 'Policy',
+      accessor: (r) => (
+        <Badge variant={r.policy_source === 'PRODUCT_LOCATION' ? 'success' : r.policy_source === 'SCOPED' ? 'primary' : 'default'} size="sm">
+          {r.policy_source === 'PRODUCT_LOCATION' ? 'Product' : r.policy_source === 'SCOPED' ? 'Scoped' : 'Computed'}
+        </Badge>
+      ),
+      filterType: 'select',
+      filterField: 'policy_source',
+      filterOptions: [
+        { value: 'PRODUCT_LOCATION', label: 'Product-location' },
+        { value: 'SCOPED', label: 'Scoped' },
+        { value: 'COMPUTED', label: 'Computed' },
+      ],
+    },
   ]);
 
   const supplierCols: Column<SupplierPerformanceRow>[] = reportCols([
