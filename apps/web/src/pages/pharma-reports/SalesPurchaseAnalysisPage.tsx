@@ -1,16 +1,10 @@
 import { useMemo, useState } from 'react';
-import { useTenantConfig } from '../../hooks/useTenantConfig';
+import { LineChart, PieChart } from '../../components/charts';
+import { DetailPopupActions } from '../../components/reports/DetailPopupActions';
 import type { Column } from '../../components/ui';
 import { Card, CardHeader, DataTable, Modal, QueryErrorBanner } from '../../components/ui';
-import { DetailPopupActions } from '../../components/reports/DetailPopupActions';
-import { LineChart, PieChart } from '../../components/charts';
-import { usePharmaGrid } from '../../hooks/usePharmaGrid';
 import { usePdfPayload } from '../../hooks/usePdfPayload';
-import {
-  resolveSingleRange,
-  SINGLE_RANGE_PRESETS,
-  type SingleRangePresetId,
-} from '../../utils/date-presets';
+import { usePharmaGrid } from '../../hooks/usePharmaGrid';
 import {
   useSalesPurchaseBillDrilldown,
   useSalesPurchaseBills,
@@ -19,12 +13,18 @@ import {
   useSalesPurchaseOverview,
   useSalesPurchasePartyDrilldown,
 } from '../../hooks/usePharmaReports';
+import { useTenantConfig } from '../../hooks/useTenantConfig';
 import type {
   SalesPurchaseAnalysisKind,
   SalesPurchaseBillRow,
   SalesPurchaseDimension,
   SalesPurchaseDimensionRow,
 } from '../../services/api/pharma-reports.service';
+import {
+  resolveSingleRange,
+  SINGLE_RANGE_PRESETS,
+  type SingleRangePresetId,
+} from '../../utils/date-presets';
 import ExportToolbar from './ExportToolbar';
 import { fmt, fmtCurrency, fmtDate, fmtPct } from './shared';
 
@@ -91,6 +91,16 @@ export default function SalesPurchaseAnalysisPage() {
   const [scope, setScope] = useState<'invoice' | 'return' | 'net'>('invoice');
   const [drilldown, setDrilldown] = useState<Drilldown>(null);
   const [dimension, setDimension] = useState<SalesPurchaseDimension>('salesman');
+
+  type SortDir = 'asc' | 'desc';
+  const [partiesSort, setPartiesSort] = useState<{ key: 'value' | 'share'; dir: SortDir } | null>(null);
+  const [itemsSort, setItemsSort] = useState<{ key: 'quantity' | 'value'; dir: SortDir } | null>(null);
+
+  const togglePartiesSort = (key: 'value' | 'share') =>
+    setPartiesSort((prev) => prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' });
+
+  const toggleItemsSort = (key: 'quantity' | 'value') =>
+    setItemsSort((prev) => prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' });
   const dimensionGrid = usePharmaGrid({ initialSortBy: 'netAmount', initialSortOrder: 'desc', initialPageSize: 25 });
   const grid = usePharmaGrid({ initialSortBy: 'date', initialSortOrder: 'desc', initialPageSize: 25 });
 
@@ -126,6 +136,18 @@ export default function SalesPurchaseAnalysisPage() {
   const billDetail = useSalesPurchaseBillDrilldown(kind, drilldown?.type === 'bill' ? drilldown.key : undefined);
   const itemDetail = useSalesPurchaseItemDrilldown(kind, drilldown?.type === 'item' ? drilldown.key : undefined, { scope, ...grid.pharmaParams });
   const partyDetail = useSalesPurchasePartyDrilldown(kind, drilldown?.type === 'party' ? drilldown.key : undefined, { scope, ...grid.pharmaParams });
+
+  const sortedParties = useMemo(() => {
+    const data = [...(overview.data?.topParties ?? [])];
+    if (!partiesSort) return data;
+    return data.sort((a, b) => partiesSort.dir === 'asc' ? a[partiesSort.key] - b[partiesSort.key] : b[partiesSort.key] - a[partiesSort.key]);
+  }, [overview.data?.topParties, partiesSort]);
+
+  const sortedItems = useMemo(() => {
+    const data = [...(overview.data?.topItems ?? [])];
+    if (!itemsSort) return data;
+    return data.sort((a, b) => itemsSort.dir === 'asc' ? a[itemsSort.key] - b[itemsSort.key] : b[itemsSort.key] - a[itemsSort.key]);
+  }, [overview.data?.topItems, itemsSort]);
 
   const summary = overview.data?.summary;
   const exportType = kind === 'sales' ? 'sales-analysis-bills' : 'purchase-analysis-bills';
@@ -163,13 +185,13 @@ export default function SalesPurchaseAnalysisPage() {
       { key: 'net_amount', header: 'Net', accessor: (row) => fmtCurrency(row.net_amount), align: 'right', sortable: true, filterType: 'number', filterField: 'net_amount' },
     ];
 
-    if (kind === 'sales') {
-      cols.push(
-        { key: 'cost_amount', header: 'Cost', accessor: (row) => fmtCurrency(row.cost_amount), align: 'right', filterType: 'number', filterField: 'cost' },
-        { key: 'profit', header: 'Profit', accessor: (row) => fmtCurrency(row.profit), align: 'right', sortable: true, filterType: 'number', filterField: 'profit' },
-        { key: 'margin_pct', header: 'Margin %', accessor: (row) => fmtPct(row.margin_pct), align: 'right', filterType: 'number', filterField: 'margin_pct' },
-      );
-    }
+    // if (kind === 'sales') {
+    //   cols.push(
+    //     { key: 'cost_amount', header: 'Cost', accessor: (row) => fmtCurrency(row.cost_amount), align: 'right', filterType: 'number', filterField: 'cost' },
+    //     { key: 'profit', header: 'Profit', accessor: (row) => fmtCurrency(row.profit), align: 'right', sortable: true, filterType: 'number', filterField: 'profit' },
+    //     { key: 'margin_pct', header: 'Margin %', accessor: (row) => fmtPct(row.margin_pct), align: 'right', filterType: 'number', filterField: 'margin_pct' },
+    //   );
+    // }
 
     cols.push(
       { key: 'quantity', header: 'Qty', accessor: (row) => fmt(row.quantity, 2), align: 'right', sortable: true, filterType: 'number', filterField: 'quantity' },
@@ -358,31 +380,134 @@ export default function SalesPurchaseAnalysisPage() {
       <div className="grid grid-cols-1 gap-4 lg:gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader title={kind === 'sales' ? 'Top Customers' : 'Top Suppliers'} />
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
+                  <th className="px-4 py-2 text-left">Name</th>
+                  <th className="px-4 py-2 text-right">Bills</th>
+                  {(['value', 'share'] as const).map((col) => (
+                    <th key={col} className="px-4 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => togglePartiesSort(col)}
+                        className="inline-flex items-center gap-1 group float-right"
+                      >
+                        {col === 'value' ? 'Value' : 'Share'}
+                        <span className={`text-[10px] leading-none transition-colors ${partiesSort?.key === col ? 'text-primary-600' : 'text-gray-300 group-hover:text-gray-400'}`}>
+                          {partiesSort?.key === col && partiesSort.dir === 'asc' ? '▲' : '▼'}
+                        </span>
+                      </button>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {sortedParties.map((row) => (
+                  <tr key={row.party_code || row.name} className="hover:bg-gray-50">
+                    <td className="px-4 py-2">
+                      <button type="button" className="font-medium text-primary-700 underline-offset-2 hover:underline text-left" onClick={() => setDrilldown({ type: 'party', key: row.party_code, title: row.name })}>{row.name}</button>
+                    </td>
+                    <td className="px-4 py-2 text-right text-gray-600">{fmt(row.bills)}</td>
+                    <td className="px-4 py-2 text-right font-medium">{fmtCurrency(row.value)}</td>
+                    <td className="px-4 py-2 text-right text-gray-600">{fmtPct(row.share)}</td>
+                  </tr>
+                ))}
+                {sortedParties.length === 0 && (
+                  <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-400 text-xs">No data</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title="Top Items" />
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
+                  <th className="px-4 py-2 text-left">Code</th>
+                  <th className="px-4 py-2 text-left">Item</th>
+                  {(['quantity', 'value'] as const).map((col) => (
+                    <th key={col} className="px-4 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => toggleItemsSort(col)}
+                        className="inline-flex items-center gap-1 group float-right"
+                      >
+                        {col === 'quantity' ? 'Qty' : 'Value'}
+                        <span className={`text-[10px] leading-none transition-colors ${itemsSort?.key === col ? 'text-primary-600' : 'text-gray-300 group-hover:text-gray-400'}`}>
+                          {itemsSort?.key === col && itemsSort.dir === 'asc' ? '▲' : '▼'}
+                        </span>
+                      </button>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {sortedItems.map((row) => (
+                  <tr key={row.item_key || row.item_code} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-mono text-xs text-gray-500">{row.item_code}</td>
+                    <td className="px-4 py-2">
+                      <button type="button" className="font-medium text-primary-700 underline-offset-2 hover:underline text-left" onClick={() => setDrilldown({ type: 'item', key: row.item_key?.includes('-') ? `product:${row.item_key}` : row.item_key, title: row.item_name })}>{row.item_name}</button>
+                    </td>
+                    <td className="px-4 py-2 text-right text-gray-600">{fmt(row.quantity, 2)}</td>
+                    <td className="px-4 py-2 text-right font-medium">{fmtCurrency(row.value)}</td>
+                  </tr>
+                ))}
+                {sortedItems.length === 0 && (
+                  <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-400 text-xs">No data</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+
+      {kind === 'sales' && <div className="grid grid-cols-1 gap-4 lg:gap-6 lg:grid-cols-3">
+        <Card>
+          <CardHeader title="Salesman-wise Sales" />
           <DataTable
-            data={overview.data?.topParties ?? []}
+            data={overview.data?.topSalesmen ?? []}
             columns={[
-              { key: 'name', header: 'Name', accessor: (row) => <button type="button" className="font-medium text-primary-700 underline-offset-2 hover:underline" onClick={() => setDrilldown({ type: 'party', key: row.party_code, title: row.name })}>{row.name}</button> },
+              { key: 'rank', header: '#', accessor: (row) => String(row.rank), align: 'right' },
+              { key: 'name', header: 'Salesman', accessor: 'name' },
               { key: 'bills', header: 'Bills', accessor: (row) => fmt(row.bills), align: 'right' },
               { key: 'value', header: 'Value', accessor: (row) => fmtCurrency(row.value), align: 'right' },
               { key: 'share', header: 'Share', accessor: (row) => fmtPct(row.share), align: 'right' },
             ]}
-            keyExtractor={(row) => row.party_code || row.name}
+            keyExtractor={(row) => row.key}
           />
         </Card>
         <Card>
-          <CardHeader title="Top Items" />
+          <CardHeader title="State-wise Sales" />
           <DataTable
-            data={overview.data?.topItems ?? []}
+            data={overview.data?.topStates ?? []}
             columns={[
-              { key: 'item_code', header: 'Code', accessor: 'item_code' },
-              { key: 'item_name', header: 'Item', accessor: (row) => <button type="button" className="font-medium text-primary-700 underline-offset-2 hover:underline" onClick={() => setDrilldown({ type: 'item', key: row.item_key?.includes('-') ? `product:${row.item_key}` : row.item_key, title: row.item_name })}>{row.item_name}</button> },
-              { key: 'quantity', header: 'Qty', accessor: (row) => fmt(row.quantity, 2), align: 'right' },
+              { key: 'rank', header: '#', accessor: (row) => String(row.rank), align: 'right' },
+              { key: 'name', header: 'State', accessor: 'name' },
+              { key: 'bills', header: 'Bills', accessor: (row) => fmt(row.bills), align: 'right' },
               { key: 'value', header: 'Value', accessor: (row) => fmtCurrency(row.value), align: 'right' },
+              { key: 'share', header: 'Share', accessor: (row) => fmtPct(row.share), align: 'right' },
             ]}
-            keyExtractor={(row) => row.item_key || row.item_code}
+            keyExtractor={(row) => row.name}
           />
         </Card>
-      </div>
+        <Card>
+          <CardHeader title="City / Area-wise Sales" />
+          <DataTable
+            data={overview.data?.topCities ?? []}
+            columns={[
+              { key: 'rank', header: '#', accessor: (row) => String(row.rank), align: 'right' },
+              { key: 'name', header: 'City / Area', accessor: 'name' },
+              { key: 'bills', header: 'Bills', accessor: (row) => fmt(row.bills), align: 'right' },
+              { key: 'value', header: 'Value', accessor: (row) => fmtCurrency(row.value), align: 'right' },
+              { key: 'share', header: 'Share', accessor: (row) => fmtPct(row.share), align: 'right' },
+            ]}
+            keyExtractor={(row) => row.name}
+          />
+        </Card>
+      </div>}
 
       <div className="grid grid-cols-1 gap-4 lg:gap-6 lg:grid-cols-2">
         <Card>
@@ -495,21 +620,21 @@ export default function SalesPurchaseAnalysisPage() {
             },
             ...(kind === 'sales'
               ? [
-                  {
-                    key: 'profit',
-                    header: 'Profit',
-                    align: 'right' as const,
-                    sortable: true,
-                    filterType: 'number' as const,
-                    filterField: 'profit',
-                    accessor: (row: SalesPurchaseDimensionRow) => fmtCurrency(row.profit),
-                  },
-                  {
-                    key: 'marginPct',
-                    header: 'Margin %',
-                    align: 'right' as const,
-                    accessor: (row: SalesPurchaseDimensionRow) => fmtPct(row.marginPct),
-                  },
+                  // {
+                  //   key: 'profit',
+                  //   header: 'Profit',
+                  //   align: 'right' as const,
+                  //   sortable: true,
+                  //   filterType: 'number' as const,
+                  //   filterField: 'profit',
+                  //   accessor: (row: SalesPurchaseDimensionRow) => fmtCurrency(row.profit),
+                  // },
+                  // {
+                  //   key: 'marginPct',
+                  //   header: 'Margin %',
+                  //   align: 'right' as const,
+                  //   accessor: (row: SalesPurchaseDimensionRow) => fmtPct(row.marginPct),
+                  // },
                 ]
               : []),
             {

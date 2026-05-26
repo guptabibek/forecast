@@ -2040,6 +2040,7 @@ model InventoryTransaction {
   @@index([tenantId, transactionDate])
   @@index([tenantId, transactionType])
   @@index([tenantId, productId, transactionDate])
+  @@index([tenantId, referenceType])
   @@map("inventory_transactions")
 }
 
@@ -2809,6 +2810,7 @@ model MargTransaction {
 
   @@unique([tenantId, companyId, sourceKey])
   @@index([tenantId, date])
+  @@index([tenantId, companyId, voucher])
   @@index([actualId])
   @@map("marg_transactions")
 }
@@ -2848,6 +2850,8 @@ model MargVoucher {
 
   @@unique([tenantId, companyId, voucher, type])
   @@index([tenantId, date])
+  @@index([tenantId, type])
+  @@index([tenantId, family, date])
   @@map("marg_vouchers")
 }
 
@@ -3082,6 +3086,7 @@ model MargBillRollup {
 
   @@id([tenantId, companyId, voucher, type])
   @@index([tenantId, date, family])
+  @@index([tenantId, family, date])
   @@map("marg_bill_rollup")
 }
 
@@ -4087,6 +4092,8 @@ model InventoryLedger {
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId])
   @@index([tenantId, productId, locationId])
+  @@index([tenantId, productId, locationId, sequenceNumber])
+  @@index([tenantId, referenceType])
   @@index([batchId])
   @@index([tenantId, transactionDate])
   @@index([referenceType, referenceId])

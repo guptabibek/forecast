@@ -11,7 +11,7 @@ export type ExportFormat = 'csv' | 'xlsx';
 // (the product name identifies the row, and the raw Marg codes are noisy).
 // Centralised so there is exactly one place to flip if a tenant ever needs
 // multi-branch. Apply by wrapping a report's column array: reportCols([...]).
-export const HIDDEN_REPORT_COLUMN_KEYS = new Set(['sku', 'location_code']);
+export const HIDDEN_REPORT_COLUMN_KEYS = new Set(['sku', 'location_code','company','hsn_code']);
 
 export function reportCols<T>(cols: Column<T>[]): Column<T>[] {
   return cols.filter((c) => !HIDDEN_REPORT_COLUMN_KEYS.has(c.key));

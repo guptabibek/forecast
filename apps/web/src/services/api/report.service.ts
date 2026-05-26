@@ -164,6 +164,30 @@ export const reportService = {
     return data.data;
   },
 
+  async getStateBreakdown(filters?: DashboardFilterParams): Promise<{
+    id: string;
+    name: string;
+    code: string;
+    revenue: number;
+    percentage: number;
+    rank: number;
+  }[]> {
+    const { data } = await apiClient.get('/reports/dashboard/regional/state', { params: filters });
+    return data.data;
+  },
+
+  async getCityBreakdown(filters?: DashboardFilterParams): Promise<{
+    id: string;
+    name: string;
+    code: string;
+    revenue: number;
+    percentage: number;
+    rank: number;
+  }[]> {
+    const { data } = await apiClient.get('/reports/dashboard/regional/city', { params: filters });
+    return data.data;
+  },
+
   async getVarianceAlerts(filters?: DashboardFilterParams): Promise<{
     id: string;
     type: 'over' | 'under';

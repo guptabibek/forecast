@@ -131,12 +131,15 @@ export class SalesPurchaseAnalysisService {
       ? await this.getOverviewSummaryFromRollup(tenantId, kind, filters)
       : await this.getOverviewSummaryFromLive(tenantId, kind, filters);
 
-    const [trend, topParties, topItems, taxSummary, paymentModeSummary] = await Promise.all([
+    const [trend, topParties, topItems, taxSummary, paymentModeSummary, topSalesmen, topStates, topCities] = await Promise.all([
       this.trend(tenantId, kind, filters),
       this.topParties(tenantId, kind, filters),
       this.topItems(tenantId, kind, filters),
       this.taxSummary(tenantId, kind, filters),
       this.paymentSummary(tenantId, kind, filters),
+      this.topSalesmen(tenantId, kind, filters),
+      this.topStates(tenantId, kind, filters),
+      this.topCities(tenantId, kind, filters),
     ]);
 
     const totalAmount = Number(summary?.total_amount ?? 0);
@@ -168,6 +171,9 @@ export class SalesPurchaseAnalysisService {
       topItems,
       taxSummary,
       paymentModeSummary,
+      topSalesmen,
+      topStates,
+      topCities,
     };
   }
 
@@ -818,6 +824,159 @@ export class SalesPurchaseAnalysisService {
     `);
   }
 
+  private async topSalesmen(tenantId: string, kind: AnalysisKind, filters: SalesPurchaseAnalysisFilterDto) {
+    if (!this.requiresLineLevelDrill(filters)) {
+      const where = this.buildRollupWhere(tenantId, kind, filters);
+      const signedAmount = this.scopeRollupAmountColumn(kind, this.resolveScope(filters));
+      return this.prisma.$queryRaw<any[]>(Prisma.sql`
+        WITH ranked AS (
+          SELECT
+            COALESCE(NULLIF(TRIM(b.salesman), ''), NULLIF(TRIM(b.mr), ''), '__UNATTRIBUTED__') AS salesman_key,
+            COALESCE(sm.name, NULLIF(TRIM(b.salesman), ''), NULLIF(TRIM(b.mr), ''), 'Unattributed') AS name,
+            COUNT(*)::int AS bills,
+            COALESCE(SUM(b.${signedAmount}), 0)::float8 AS value
+          FROM marg_bill_rollup b
+          LEFT JOIN salesmen sm
+            ON sm.tenant_id = b.tenant_id
+            AND sm.code = COALESCE(NULLIF(TRIM(b.salesman), ''), NULLIF(TRIM(b.mr), ''))
+          WHERE ${where}
+          GROUP BY
+            COALESCE(NULLIF(TRIM(b.salesman), ''), NULLIF(TRIM(b.mr), ''), '__UNATTRIBUTED__'),
+            COALESCE(sm.name, NULLIF(TRIM(b.salesman), ''), NULLIF(TRIM(b.mr), ''), 'Unattributed')
+        )
+        SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
+          salesman_key AS key, name, bills, value,
+          CASE WHEN SUM(value) OVER () > 0 THEN (value / SUM(value) OVER () * 100)::float8 ELSE 0 END AS share
+        FROM ranked
+        ORDER BY value DESC
+        LIMIT 10
+      `);
+    }
+    const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
+    return this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH bills AS (${this.billRollupSql(tenantId, kind, where, this.resolveScope(filters))}),
+      ranked AS (
+        SELECT
+          COALESCE(salesman_code, '__UNATTRIBUTED__') AS salesman_key,
+          COALESCE(salesman_name, 'Unattributed') AS name,
+          COUNT(*)::int AS bills,
+          COALESCE(SUM(signed_net_amount), 0)::float8 AS value
+        FROM bills
+        GROUP BY COALESCE(salesman_code, '__UNATTRIBUTED__'), COALESCE(salesman_name, 'Unattributed')
+      )
+      SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
+        salesman_key AS key, name, bills, value,
+        CASE WHEN SUM(value) OVER () > 0 THEN (value / SUM(value) OVER () * 100)::float8 ELSE 0 END AS share
+      FROM ranked
+      ORDER BY value DESC
+      LIMIT 10
+    `);
+  }
+
+  private async topStates(tenantId: string, kind: AnalysisKind, filters: SalesPurchaseAnalysisFilterDto) {
+    if (!this.requiresLineLevelDrill(filters)) {
+      const where = this.buildRollupWhere(tenantId, kind, filters);
+      const signedAmount = this.scopeRollupAmountColumn(kind, this.resolveScope(filters));
+      return this.prisma.$queryRaw<any[]>(Prisma.sql`
+        WITH loc_per_company AS (
+          SELECT DISTINCT ON (mb.company_id)
+            mb.company_id, loc.state
+          FROM marg_branches mb
+          LEFT JOIN locations loc ON loc.id = mb.location_id
+          WHERE mb.tenant_id = ${tenantId}::uuid
+          ORDER BY mb.company_id
+        ),
+        ranked AS (
+          SELECT
+            COALESCE(lc.state, 'Unknown') AS name,
+            COUNT(*)::int AS bills,
+            COALESCE(SUM(b.${signedAmount}), 0)::float8 AS value
+          FROM marg_bill_rollup b
+          LEFT JOIN loc_per_company lc ON lc.company_id = b.company_id
+          WHERE ${where}
+          GROUP BY COALESCE(lc.state, 'Unknown')
+        )
+        SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
+          name, bills, value,
+          CASE WHEN SUM(value) OVER () > 0 THEN (value / SUM(value) OVER () * 100)::float8 ELSE 0 END AS share
+        FROM ranked
+        ORDER BY value DESC
+        LIMIT 10
+      `);
+    }
+    const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
+    return this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH bills AS (${this.billRollupSql(tenantId, kind, where, this.resolveScope(filters))}),
+      ranked AS (
+        SELECT
+          COALESCE(loc.state, 'Unknown') AS name,
+          COUNT(*)::int AS bills,
+          COALESCE(SUM(b.signed_net_amount), 0)::float8 AS value
+        FROM bills b
+        LEFT JOIN locations loc ON loc.id = b.branch_id
+        GROUP BY COALESCE(loc.state, 'Unknown')
+      )
+      SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
+        name, bills, value,
+        CASE WHEN SUM(value) OVER () > 0 THEN (value / SUM(value) OVER () * 100)::float8 ELSE 0 END AS share
+      FROM ranked
+      ORDER BY value DESC
+      LIMIT 10
+    `);
+  }
+
+  private async topCities(tenantId: string, kind: AnalysisKind, filters: SalesPurchaseAnalysisFilterDto) {
+    if (!this.requiresLineLevelDrill(filters)) {
+      const where = this.buildRollupWhere(tenantId, kind, filters);
+      const signedAmount = this.scopeRollupAmountColumn(kind, this.resolveScope(filters));
+      return this.prisma.$queryRaw<any[]>(Prisma.sql`
+        WITH ranked AS (
+          SELECT
+            COALESCE(NULLIF(TRIM(mp.area), ''), 'Unknown') AS name,
+            COUNT(*)::int AS bills,
+            COALESCE(SUM(b.${signedAmount}), 0)::float8 AS value
+          FROM marg_bill_rollup b
+          LEFT JOIN marg_parties mp
+            ON mp.tenant_id = b.tenant_id
+            AND mp.company_id = b.company_id
+            AND mp.cid = b.cid
+            AND mp.is_deleted = false
+          WHERE ${where}
+          GROUP BY COALESCE(NULLIF(TRIM(mp.area), ''), 'Unknown')
+        )
+        SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
+          name, bills, value,
+          CASE WHEN SUM(value) OVER () > 0 THEN (value / SUM(value) OVER () * 100)::float8 ELSE 0 END AS share
+        FROM ranked
+        ORDER BY value DESC
+        LIMIT 10
+      `);
+    }
+    const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
+    return this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH bills AS (${this.billRollupSql(tenantId, kind, where, this.resolveScope(filters))}),
+      ranked AS (
+        SELECT
+          COALESCE(NULLIF(TRIM(mp.area), ''), 'Unknown') AS name,
+          COUNT(*)::int AS bills,
+          COALESCE(SUM(b.signed_net_amount), 0)::float8 AS value
+        FROM bills b
+        LEFT JOIN marg_parties mp
+          ON mp.tenant_id = ${tenantId}::uuid
+          AND mp.company_id = b.company_id
+          AND mp.cid = b.party_code
+          AND mp.is_deleted = false
+        GROUP BY COALESCE(NULLIF(TRIM(mp.area), ''), 'Unknown')
+      )
+      SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
+        name, bills, value,
+        CASE WHEN SUM(value) OVER () > 0 THEN (value / SUM(value) OVER () * 100)::float8 ELSE 0 END AS share
+      FROM ranked
+      ORDER BY value DESC
+      LIMIT 10
+    `);
+  }
+
   private async topItems(tenantId: string, kind: AnalysisKind, filters: SalesPurchaseAnalysisFilterDto) {
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
     const signExpr = this.scopeAmountSignSql(kind, this.resolveScope(filters), 'mv');
@@ -1436,6 +1595,15 @@ export class SalesPurchaseAnalysisService {
           keyExpr: Prisma.sql`COALESCE(p.id::text, 'marg-pid:' || COALESCE(mt.pid, '__UNMAPPED__'))`,
           labelExpr: Prisma.sql`COALESCE(p.name, mprod.name, 'Unmapped product')`,
           needsProduct: true,
+        };
+      case 'supplier':
+        return {
+          // Supplier = the party on the purchase voucher (mv.cid). mp is always
+          // LEFT JOINed in both dimensionComparison and getDimensionAnalysis so
+          // mp.par_name is safe to reference here without needsProduct.
+          keyExpr: Prisma.sql`COALESCE(NULLIF(TRIM(mv.cid), ''), '__UNMAPPED__')`,
+          labelExpr: Prisma.sql`COALESCE(NULLIF(TRIM(mp.par_name), ''), mv.cid, 'Unmapped supplier')`,
+          needsProduct: false,
         };
       default:
         throw new BadRequestException(`Unsupported dimension: ${dimension}`);

@@ -557,6 +557,9 @@ export interface SalesPurchaseOverviewResponse {
   topItems: Array<{ rank: number; item_key: string; item_code: string; item_name: string; quantity: number; value: number }>;
   taxSummary: Array<{ tax_pct: number; tax_amount: number; taxable_amount: number }>;
   paymentModeSummary: Array<{ payment_mode: string; bills: number; amount: number }>;
+  topSalesmen: Array<{ rank: number; key: string; name: string; bills: number; value: number; share: number }>;
+  topStates: Array<{ rank: number; name: string; bills: number; value: number; share: number }>;
+  topCities: Array<{ rank: number; name: string; bills: number; value: number; share: number }>;
 }
 
 export interface SalesPurchaseBillRow {
@@ -948,7 +951,8 @@ export type SalesPurchaseDimension =
   | 'productCompany'
   | 'productGroup'
   | 'product'
-  | 'hsnCode';
+  | 'hsnCode'
+  | 'supplier';
 
 export interface SalesPurchaseDimensionRow {
   key: string;

@@ -1,6 +1,10 @@
-import { ChevronDownIcon, ChevronRightIcon, ScaleIcon } from '@heroicons/react/24/outline';
+import { ArrowDownIcon, ArrowTrendingUpIcon, ArrowUpIcon, BanknotesIcon, ChartBarIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, ExclamationTriangleIcon, ScaleIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { useQuery } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { reportsService } from '../../services/api';
+import { formatInrCompact } from '../../utils/number-format';
 import type { Column } from '../../components/ui';
 import { Card, DataTable, Modal, QueryErrorBanner } from '../../components/ui';
 import { DetailPopupActions } from '../../components/reports/DetailPopupActions';
@@ -70,6 +74,79 @@ function cr(value: number) {
   return value < -0.005 ? fmtCurrency(-value) : '';
 }
 
+interface RevenueMetrics {
+  currentMonth: number;
+  lastMonth: number;
+  momChange: number;
+  yoyChange: number;
+  ytdRevenue: number;
+  ytdForecast: number;
+  ytdVariance: number;
+}
+
+const formatPercent = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+
+const formatRelativeTime = (dateString: string): string => {
+  const diffMins = Math.floor((Date.now() - new Date(dateString).getTime()) / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return new Date(dateString).toLocaleDateString();
+};
+
+const KPICard = ({
+  title, value, trend, icon: Icon, color, isLoading,
+}: {
+  title: string;
+  value: string;
+  trend?: number;
+  icon: React.ElementType;
+  color: 'blue' | 'green' | 'purple' | 'orange' | 'red';
+  isLoading?: boolean;
+}) => {
+  const palette = {
+    blue:   { bg: 'bg-blue-50 dark:bg-blue-900/20',     icon: 'text-blue-600',    border: 'border-blue-200' },
+    green:  { bg: 'bg-emerald-50 dark:bg-emerald-900/20', icon: 'text-emerald-600', border: 'border-emerald-200' },
+    purple: { bg: 'bg-purple-50 dark:bg-purple-900/20', icon: 'text-purple-600',  border: 'border-purple-200' },
+    orange: { bg: 'bg-orange-50 dark:bg-orange-900/20', icon: 'text-orange-600',  border: 'border-orange-200' },
+    red:    { bg: 'bg-red-50 dark:bg-red-900/20',       icon: 'text-red-600',     border: 'border-red-200' },
+  };
+  const c = palette[color];
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className={`p-3 rounded-xl ${c.bg} border ${c.border} border-opacity-50 min-w-0 overflow-hidden`}
+    >
+      {isLoading ? (
+        <div className="animate-pulse space-y-2">
+          <div className="h-3 bg-secondary-200 rounded w-16" />
+          <div className="h-6 bg-secondary-200 rounded w-20" />
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${c.icon}`} />
+            <span className="text-[11px] font-medium text-secondary-600 dark:text-secondary-300 truncate">{title}</span>
+          </div>
+          <div className="flex items-end justify-between gap-1">
+            <p className="text-sm lg:text-base font-bold text-secondary-900 dark:text-white truncate">{value}</p>
+            {trend !== undefined && (
+              <div className={`flex items-center gap-0.5 text-xs font-medium flex-shrink-0 ${trend >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                {trend >= 0 ? <ArrowUpIcon className="w-3 h-3" /> : <ArrowDownIcon className="w-3 h-3" />}
+                {Math.abs(trend).toFixed(1)}%
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </motion.div>
+  );
+};
+
 export default function TrialBalancePage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -97,6 +174,19 @@ export default function TrialBalancePage() {
   );
 
   const trialBalance = useTrialBalance(baseFilters);
+
+  const { data: revenueData, isLoading: revenueLoading } = useQuery({
+    queryKey: ['dashboard-revenue'],
+    queryFn: () => reportsService.getRevenueMetrics(),
+    staleTime: 30000,
+  });
+  const { data: statsData } = useQuery({
+    queryKey: ['dashboard-stats'],
+    queryFn: () => reportsService.getDashboardStats(),
+    staleTime: 30000,
+  });
+  const revenue = revenueData as RevenueMetrics | undefined;
+  const lastSync = (statsData as { lastDataSync?: string } | undefined)?.lastDataSync;
 
   const ledgerGrid = usePharmaGrid({ initialSortBy: 'entryDate', initialSortOrder: 'asc', initialPageSize: 50 });
   const [selectedAccount, setSelectedAccount] = useState<TrialBalanceRow | null>(null);
@@ -299,6 +389,34 @@ export default function TrialBalancePage() {
       {trialBalance.isError && (
         <QueryErrorBanner error={trialBalance.error} onRetry={() => trialBalance.refetch()} />
       )}
+
+      {/* Revenue Overview — mirrors the dashboard KPI strip */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="card p-4 lg:p-6"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+          <div className="flex items-center gap-2">
+            <BanknotesIcon className="w-5 h-5 text-emerald-600" />
+            <h2 className="text-base lg:text-lg font-semibold">Revenue Overview</h2>
+          </div>
+          {lastSync && (
+            <span className="text-xs text-secondary-400">
+              Updated: {formatRelativeTime(lastSync)}
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-7 gap-2 lg:gap-3">
+          <KPICard title="This Month"  value={formatInrCompact(revenue?.currentMonth ?? 0)} trend={revenue?.momChange} icon={BanknotesIcon}           color="green"  isLoading={revenueLoading} />
+          <KPICard title="Last Month"  value={formatInrCompact(revenue?.lastMonth ?? 0)}                              icon={ClockIcon}              color="blue"   isLoading={revenueLoading} />
+          <KPICard title="MoM Change"  value={formatPercent(revenue?.momChange ?? 0)}                                icon={ArrowTrendingUpIcon}    color={revenue?.momChange != null && revenue.momChange >= 0 ? 'green' : 'red'}   isLoading={revenueLoading} />
+          <KPICard title="YoY Change"  value={formatPercent(revenue?.yoyChange ?? 0)}                                icon={ArrowTrendingUpIcon}    color={revenue?.yoyChange != null && revenue.yoyChange >= 0 ? 'green' : 'red'}   isLoading={revenueLoading} />
+          <KPICard title="YTD Revenue" value={formatInrCompact(revenue?.ytdRevenue ?? 0)}                            icon={ChartBarIcon}           color="purple" isLoading={revenueLoading} />
+          <KPICard title="YTD Forecast"value={formatInrCompact(revenue?.ytdForecast ?? 0)}                           icon={SparklesIcon}           color="blue"   isLoading={revenueLoading} />
+          <KPICard title="YTD Variance"value={formatPercent(revenue?.ytdVariance ?? 0)}                              icon={ExclamationTriangleIcon} color={revenue?.ytdVariance != null && Math.abs(revenue.ytdVariance) < 5 ? 'green' : 'orange'} isLoading={revenueLoading} />
+        </div>
+      </motion.div>
 
       <Card padding="sm">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">

@@ -195,6 +195,7 @@ export default function ProcurementPage() {
     { key: 'lead_time_days', header: 'Lead (d)', accessor: (r) => r.lead_time_days ?? '—', align: 'right', filterType: 'number', filterField: 'lead_time_days' },
     {
       key: 'suggested_purchase_qty', header: 'Suggested Qty', align: 'right',
+      sortable: true, filterType: 'number', filterField: 'suggested_purchase_qty',
       accessor: (r) => <span className="font-bold text-primary-700">{fmt(r.suggested_purchase_qty)}</span>,
     },
     { key: 'estimated_cost', header: 'Est. Cost', accessor: (r) => fmtCurrency(r.estimated_cost), align: 'right' },

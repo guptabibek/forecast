@@ -685,6 +685,67 @@ export class ReportsService {
     };
   }
 
+  async getStateBreakdown(tenantId: string, filters?: DashboardFilterDto) {
+    const range = this.resolveDashboardDateRange(filters, DEFAULT_ANALYTICS_PERIODS);
+    const data = await this.prisma.$queryRaw<Array<{ name: string; revenue: number }>>(Prisma.sql`
+      WITH bills AS (${this.erpSalesBillRollupSql(tenantId, filters, range)})
+      SELECT
+        COALESCE(loc.state, 'Unknown') AS name,
+        COALESCE(SUM(b.net_amount), 0)::float8 AS revenue
+      FROM bills b
+      LEFT JOIN marg_branches mb
+        ON mb.tenant_id = ${tenantId}::uuid
+        AND mb.location_id::text = b.location_id
+      LEFT JOIN locations loc
+        ON loc.id = mb.location_id
+        AND loc.tenant_id = ${tenantId}::uuid
+      GROUP BY COALESCE(loc.state, 'Unknown')
+      ORDER BY revenue DESC
+    `);
+    const total = data.reduce((s, r) => s + r.revenue, 0);
+    return {
+      data: data.map((r, i) => ({
+        id: r.name,
+        name: r.name,
+        code: r.name,
+        revenue: r.revenue,
+        percentage: total > 0 ? (r.revenue / total) * 100 : 0,
+        rank: i + 1,
+      })),
+    };
+  }
+
+  async getCityBreakdown(tenantId: string, filters?: DashboardFilterDto) {
+    const range = this.resolveDashboardDateRange(filters, DEFAULT_ANALYTICS_PERIODS);
+    const data = await this.prisma.$queryRaw<Array<{ name: string; revenue: number }>>(Prisma.sql`
+      WITH bills AS (${this.erpSalesBillRollupSql(tenantId, filters, range)})
+      SELECT
+        COALESCE(mp.area, 'Unknown') AS name,
+        COALESCE(SUM(b.net_amount), 0)::float8 AS revenue
+      FROM bills b
+      LEFT JOIN marg_vouchers mv
+        ON mv.tenant_id = ${tenantId}::uuid
+        AND mv.company_id::text || ':' || mv.voucher = b.bill_key
+      LEFT JOIN marg_parties mp
+        ON mp.tenant_id = ${tenantId}::uuid
+        AND mp.company_id = mv.company_id
+        AND mp.cid = mv.cid
+      GROUP BY COALESCE(mp.area, 'Unknown')
+      ORDER BY revenue DESC
+    `);
+    const total = data.reduce((s, r) => s + r.revenue, 0);
+    return {
+      data: data.map((r, i) => ({
+        id: r.name,
+        name: r.name,
+        code: r.name,
+        revenue: r.revenue,
+        percentage: total > 0 ? (r.revenue / total) * 100 : 0,
+        rank: i + 1,
+      })),
+    };
+  }
+
   async getVarianceAlerts(tenantId: string, filters?: DashboardFilterDto) {
     const dimensionFilters = buildDimensionFilters(filters);
     const dateRange = this.resolveDashboardDateRange(filters, DEFAULT_DASHBOARD_PERIODS);

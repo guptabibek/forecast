@@ -250,7 +250,6 @@ export interface SupplierPerformanceReportResponse {
 }
 
 export interface StockOutReportResponse {
-  analysis: ProcurementDataSyncAnalysis;
   data: StockOutReportRow[];
   total: number;
 }
@@ -1483,7 +1482,6 @@ export class ProcurementReportsService {
     tenantId: string,
     filters: StockOutFilterDto,
   ): Promise<StockOutReportResponse> {
-    const analysis = await this.getProcurementDataSyncAnalysis(tenantId);
     const limit = filters.limit ?? 50;
     const offset = filters.offset ?? 0;
 
@@ -1522,37 +1520,29 @@ export class ProcurementReportsService {
             LAG(COALESCE(il.running_balance, 0)::float8) OVER (
               PARTITION BY il.product_id, il.location_id
               ORDER BY il.sequence_number
-            ) AS prev_balance
+            ) AS prev_balance,
+            -- Suffix-minimum window: next date stock returns to positive.
+            -- O(n) single pass — replaces the O(n²) correlated subquery.
+            MIN(CASE WHEN COALESCE(il.running_balance, 0) > 0 THEN il.transaction_date ELSE NULL END) OVER (
+              PARTITION BY il.product_id, il.location_id
+              ORDER BY il.sequence_number
+              ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING
+            ) AS next_positive_date
           FROM inventory_ledger il
           WHERE il.tenant_id = ${tenantId}::uuid
             AND il.reference_type = 'MARG_EDE'
             ${scopeFilterSql}
         ),
-        stockout_starts AS (
+        stockout_periods AS (
           SELECT
             ml.product_id,
             ml.location_id,
             ml.transaction_date AS stockout_start,
-            ml.sequence_number
+            ml.next_positive_date AS stockout_end
           FROM marg_ledger ml
           WHERE ml.running_balance <= 0
             AND COALESCE(ml.prev_balance, 1) > 0
             ${stockoutFilterSql}
-        ),
-        stockout_periods AS (
-          SELECT
-            ss.product_id,
-            ss.location_id,
-            ss.stockout_start,
-            (
-              SELECT MIN(ml2.transaction_date)
-              FROM marg_ledger ml2
-              WHERE ml2.product_id = ss.product_id
-                AND ml2.location_id = ss.location_id
-                AND ml2.sequence_number > ss.sequence_number
-                AND ml2.running_balance > 0
-            ) AS stockout_end
-          FROM stockout_starts ss
         ),
         level_snapshot AS (
           SELECT
@@ -1647,7 +1637,6 @@ export class ProcurementReportsService {
     );
 
     return {
-      analysis,
       data: rows,
       total: Number(countResult[0]?.cnt ?? 0),
     };

@@ -1,16 +1,13 @@
 import {
     AdjustmentsHorizontalIcon,
-    ArrowDownIcon,
     ArrowPathIcon,
     ArrowTrendingDownIcon,
     ArrowTrendingUpIcon,
-    ArrowUpIcon,
     BanknotesIcon,
     CalendarDaysIcon,
     ChartBarIcon,
     CheckCircleIcon,
     ChevronDownIcon,
-    ClockIcon,
     CubeIcon,
     DocumentTextIcon,
     ExclamationTriangleIcon,
@@ -44,7 +41,7 @@ import {
 import { dataService, reportsService } from '../services/api';
 import type { ABCAnalysisParams } from '../services/api/report.service';
 import type { Dimension } from '../types';
-import { formatIndianCompactNumber, formatInr, formatInrCompact } from '../utils/number-format';
+import { formatIndianCompactNumber, formatInr } from '../utils/number-format';
 import PharmaExecutiveOverview from './pharma-reports/PharmaExecutiveOverview';
 
 // =====================
@@ -61,15 +58,6 @@ interface DashboardStats {
   lastDataSync: string;
 }
 
-interface RevenueMetrics {
-  currentMonth: number;
-  lastMonth: number;
-  momChange: number;
-  yoyChange: number;
-  ytdRevenue: number;
-  ytdForecast: number;
-  ytdVariance: number;
-}
 
 interface TopProduct {
   id: string;
@@ -136,25 +124,6 @@ const formatCurrency = (value: number): string => {
 
 const formatNumber = (value: number): string => {
   return formatIndianCompactNumber(value);
-};
-
-const formatPercent = (value: number): string => {
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
-};
-
-const formatRelativeTime = (dateString: string): string => {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
 };
 
 // =====================
@@ -229,69 +198,6 @@ const StatCard = ({
   </motion.div>
 );
 
-const KPICard = ({
-  title,
-  value,
-  subValue,
-  trend,
-  icon: Icon,
-  color,
-  isLoading,
-}: {
-  title: string;
-  value: string;
-  subValue?: string;
-  trend?: number;
-  icon: React.ElementType;
-  color: 'blue' | 'green' | 'purple' | 'orange' | 'red';
-  isLoading?: boolean;
-}) => {
-  const colors = {
-    blue: { bg: 'bg-blue-50 dark:bg-blue-900/20', icon: 'text-blue-600', border: 'border-blue-200' },
-    green: { bg: 'bg-emerald-50 dark:bg-emerald-900/20', icon: 'text-emerald-600', border: 'border-emerald-200' },
-    purple: { bg: 'bg-purple-50 dark:bg-purple-900/20', icon: 'text-purple-600', border: 'border-purple-200' },
-    orange: { bg: 'bg-orange-50 dark:bg-orange-900/20', icon: 'text-orange-600', border: 'border-orange-200' },
-    red: { bg: 'bg-red-50 dark:bg-red-900/20', icon: 'text-red-600', border: 'border-red-200' },
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className={`p-3 rounded-xl ${colors[color].bg} border ${colors[color].border} border-opacity-50 min-w-0 overflow-hidden`}
-    >
-      {isLoading ? (
-        <div className="animate-pulse space-y-2">
-          <div className="h-3 bg-secondary-200 rounded w-16" />
-          <div className="h-6 bg-secondary-200 rounded w-20" />
-        </div>
-      ) : (
-        <>
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${colors[color].icon}`} />
-            <span className="text-[11px] font-medium text-secondary-600 dark:text-secondary-300 truncate">{title}</span>
-          </div>
-          <div className="flex items-end justify-between gap-1">
-            <div className="min-w-0">
-              <p className="text-sm lg:text-base font-bold text-secondary-900 dark:text-white truncate">{value}</p>
-              {subValue && <p className="text-[10px] text-secondary-500 truncate">{subValue}</p>}
-            </div>
-            {trend !== undefined && (
-              <div
-                className={`flex items-center gap-0.5 text-xs font-medium flex-shrink-0 ${
-                  trend >= 0 ? 'text-emerald-600' : 'text-red-600'
-                }`}
-              >
-                {trend >= 0 ? <ArrowUpIcon className="w-3 h-3" /> : <ArrowDownIcon className="w-3 h-3" />}
-                {Math.abs(trend).toFixed(1)}%
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </motion.div>
-  );
-};
 
 const VarianceAlertCard = ({ alert }: { alert: VarianceAlert }) => {
   const severityColors = {
@@ -1037,6 +943,9 @@ const ABCClassificationSection = ({ filterParams }: ABCClassificationProps) => {
 export default function Dashboard() {
   // Period selector state
   const [granularity, setGranularity] = useState<Granularity>('monthly');
+
+  // Regional breakdown tab
+  const [regionalTab, setRegionalTab] = useState<'state' | 'city'>('state');
   
   // Filter state
   const [filters, setFilters] = useState<DashboardFilters>({
@@ -1090,12 +999,6 @@ export default function Dashboard() {
     ...dashboardQueryBehavior,
   });
 
-  const { data: revenueData, isLoading: revenueLoading } = useQuery({
-    queryKey: ['dashboard-revenue', periodAwareParams],
-    queryFn: () => reportsService.getRevenueMetrics(periodAwareParams),
-    staleTime: 30000,
-    ...dashboardQueryBehavior,
-  });
 
   const { data: topProducts, isLoading: productsLoading } = useQuery({
     queryKey: ['dashboard-top-products', periodAwareParams],
@@ -1104,9 +1007,23 @@ export default function Dashboard() {
     ...dashboardQueryBehavior,
   });
 
-  const { data: regionalData, isLoading: regionalLoading } = useQuery({
+  useQuery({
     queryKey: ['dashboard-regional', periodAwareParams],
     queryFn: () => reportsService.getRegionalBreakdown(periodAwareParams),
+    staleTime: 60000,
+    ...dashboardQueryBehavior,
+  });
+
+  const { data: stateData, isLoading: stateLoading } = useQuery({
+    queryKey: ['dashboard-regional-state', periodAwareParams],
+    queryFn: () => reportsService.getStateBreakdown(periodAwareParams),
+    staleTime: 60000,
+    ...dashboardQueryBehavior,
+  });
+
+  const { data: cityData, isLoading: cityLoading } = useQuery({
+    queryKey: ['dashboard-regional-city', periodAwareParams],
+    queryFn: () => reportsService.getCityBreakdown(periodAwareParams),
     staleTime: 60000,
     ...dashboardQueryBehavior,
   });
@@ -1164,10 +1081,12 @@ export default function Dashboard() {
   // ABC Analysis is now handled by the ABCClassificationSection component internally
 
   const stats = statsData as DashboardStats | undefined;
-  const revenue = revenueData as RevenueMetrics | undefined;
   const health = forecastHealth as ForecastHealth | undefined;
   const products = topProducts as TopProduct[] | undefined;
-  const regions = regionalData as RegionalData[] | undefined;
+  const stateRegions = stateData as RegionalData[] | undefined;
+  const cityRegions = cityData as RegionalData[] | undefined;
+  const activeRegionalData = regionalTab === 'state' ? stateRegions : cityRegions;
+  const activeRegionalLoading = regionalTab === 'state' ? stateLoading : cityLoading;
   const alerts = varianceAlerts as VarianceAlert[] | undefined;
   const models = modelAccuracy as { model: string; mape: number }[] | undefined;
 
@@ -1215,73 +1134,6 @@ export default function Dashboard() {
           isLoadingProducts={productsFilterLoading}
           isLoadingCustomers={customersFilterLoading}
         />
-      </motion.div>
-
-      {/* Revenue KPIs Row */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="card p-4 lg:p-6"
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-          <div className="flex items-center gap-2">
-            <BanknotesIcon className="w-5 h-5 text-emerald-600" />
-            <h2 className="text-base lg:text-lg font-semibold">Revenue Overview</h2>
-          </div>
-          <span className="text-xs text-secondary-400">Updated: {formatRelativeTime(stats?.lastDataSync || new Date().toISOString())}</span>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-7 gap-2 lg:gap-3">
-          <KPICard
-            title="This Month"
-            value={formatInrCompact(revenue?.currentMonth || 0)}
-            trend={revenue?.momChange}
-            icon={BanknotesIcon}
-            color="green"
-            isLoading={revenueLoading}
-          />
-          <KPICard
-            title="Last Month"
-            value={formatInrCompact(revenue?.lastMonth || 0)}
-            icon={ClockIcon}
-            color="blue"
-            isLoading={revenueLoading}
-          />
-          <KPICard
-            title="MoM Change"
-            value={formatPercent(revenue?.momChange || 0)}
-            icon={ArrowTrendingUpIcon}
-            color={revenue?.momChange && revenue.momChange >= 0 ? 'green' : 'red'}
-            isLoading={revenueLoading}
-          />
-          <KPICard
-            title="YoY Change"
-            value={formatPercent(revenue?.yoyChange || 0)}
-            icon={ArrowTrendingUpIcon}
-            color={revenue?.yoyChange && revenue.yoyChange >= 0 ? 'green' : 'red'}
-            isLoading={revenueLoading}
-          />
-          <KPICard
-            title="YTD Revenue"
-            value={formatInrCompact(revenue?.ytdRevenue || 0)}
-            icon={ChartBarIcon}
-            color="purple"
-            isLoading={revenueLoading}
-          />
-          <KPICard
-            title="YTD Forecast"
-            value={formatInrCompact(revenue?.ytdForecast || 0)}
-            icon={SparklesIcon}
-            color="blue"
-            isLoading={revenueLoading}
-          />
-          <KPICard
-            title="YTD Variance"
-            value={formatPercent(revenue?.ytdVariance || 0)}
-            icon={ExclamationTriangleIcon}
-            color={revenue?.ytdVariance && Math.abs(revenue.ytdVariance) < 5 ? 'green' : 'orange'}
-            isLoading={revenueLoading}
-          />
-        </div>
       </motion.div>
 
       {/* Core Stats Row */}
@@ -1555,20 +1407,37 @@ export default function Dashboard() {
           transition={{ delay: 0.35 }}
           className="card"
         >
-          <div className="card-header flex items-center gap-2">
-            <GlobeAltIcon className="w-5 h-5 text-purple-600" />
-            <h2 className="text-lg font-semibold">Regional Breakdown</h2>
+          <div className="card-header flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <GlobeAltIcon className="w-5 h-5 text-purple-600" />
+              <h2 className="text-lg font-semibold">Regional Breakdown</h2>
+            </div>
+            <div className="flex rounded-lg border border-secondary-200 overflow-hidden text-xs font-medium">
+              {(['state', 'city'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setRegionalTab(tab)}
+                  className={`px-3 py-1 capitalize transition-colors ${
+                    regionalTab === tab
+                      ? 'bg-primary-600 text-white'
+                      : 'text-secondary-600 hover:bg-secondary-50'
+                  }`}
+                >
+                  {tab === 'state' ? 'State' : 'City/Area'}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="p-6">
-            {regionalLoading ? (
+            {activeRegionalLoading ? (
               <div className="h-[200px] flex items-center justify-center">
                 <ArrowPathIcon className="w-6 h-6 animate-spin text-primary-500" />
               </div>
-            ) : !regions || regions.length === 0 ? (
+            ) : !activeRegionalData || activeRegionalData.length === 0 ? (
               <div className="h-[200px] flex items-center justify-center text-secondary-500">
                 <div className="text-center">
                   <GlobeAltIcon className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No regional data</p>
+                  <p className="text-sm">No {regionalTab === 'state' ? 'state' : 'city/area'} data</p>
                 </div>
               </div>
             ) : (
@@ -1576,7 +1445,7 @@ export default function Dashboard() {
                 <ResponsiveContainer width="100%" height={180}>
                   <PieChart>
                     <Pie
-                      data={regions.slice(0, 6)}
+                      data={activeRegionalData.slice(0, 6)}
                       cx="50%"
                       cy="50%"
                       innerRadius={50}
@@ -1585,7 +1454,7 @@ export default function Dashboard() {
                       dataKey="revenue"
                       nameKey="name"
                     >
-                      {regions.slice(0, 6).map((_, index) => (
+                      {activeRegionalData.slice(0, 6).map((_, index) => (
                         <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                       ))}
                     </Pie>
@@ -1601,7 +1470,7 @@ export default function Dashboard() {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="grid grid-cols-2 gap-2 mt-2">
-                  {regions.slice(0, 6).map((region, index) => (
+                  {activeRegionalData.slice(0, 6).map((region, index) => (
                     <div key={region.id} className="flex items-center gap-2 text-xs">
                       <div
                         className="w-2 h-2 rounded-full"

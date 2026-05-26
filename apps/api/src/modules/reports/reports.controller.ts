@@ -119,6 +119,26 @@ export class ReportsController {
     return this.reportsService.getRegionalBreakdown(user.tenantId, filters);
   }
 
+  @Get('dashboard/regional/state')
+  @ApiOperation({ summary: 'Get state-wise sales breakdown' })
+  @ApiResponse({ status: 200, description: 'State-wise breakdown retrieved' })
+  async getDashboardRegionalState(
+    @CurrentUser() user: any,
+    @Query() filters: DashboardFilterDto,
+  ) {
+    return this.reportsService.getStateBreakdown(user.tenantId, filters);
+  }
+
+  @Get('dashboard/regional/city')
+  @ApiOperation({ summary: 'Get city/area-wise sales breakdown' })
+  @ApiResponse({ status: 200, description: 'City/area-wise breakdown retrieved' })
+  async getDashboardRegionalCity(
+    @CurrentUser() user: any,
+    @Query() filters: DashboardFilterDto,
+  ) {
+    return this.reportsService.getCityBreakdown(user.tenantId, filters);
+  }
+
   @Get('dashboard/variance-alerts')
   @ApiOperation({ summary: 'Get variance alerts' })
   @ApiResponse({ status: 200, description: 'Variance alerts retrieved' })

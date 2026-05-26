@@ -1,11 +1,11 @@
 import { ArrowDownIcon, ArrowUpIcon, MinusIcon } from '@heroicons/react/24/solid';
 import { useEffect, useMemo, useState } from 'react';
-import type { Column } from '../../components/ui';
 import { BarChart } from '../../components/charts';
+import type { Column } from '../../components/ui';
 import { Card, CardHeader, DataTable, QueryErrorBanner } from '../../components/ui';
 import { usePdfPayload } from '../../hooks/usePdfPayload';
-import { useTenantConfig } from '../../hooks/useTenantConfig';
 import { useSalesPurchaseComparison } from '../../hooks/usePharmaReports';
+import { useTenantConfig } from '../../hooks/useTenantConfig';
 import type {
   SalesPurchaseAnalysisKind,
   SalesPurchaseComparisonBreakdownRow,
@@ -21,9 +21,10 @@ import { fmt, fmtCurrency, fmtDate, fmtPct } from './shared';
 
 type DimensionChoice = SalesPurchaseDimension | 'none';
 
-const ALL_DIMENSION_OPTIONS: Array<{ value: DimensionChoice; label: string; pharmaOnly?: boolean }> = [
+const ALL_DIMENSION_OPTIONS: Array<{ value: DimensionChoice; label: string; pharmaOnly?: boolean; purchaseOnly?: boolean }> = [
   { value: 'none', label: 'No breakdown (summary only)' },
   { value: 'salesman', label: 'By Salesman' },
+  { value: 'supplier', label: 'By Supplier', purchaseOnly: true },
   { value: 'productCompany', label: 'By Company' },
   { value: 'productGroup', label: 'By Product Group' },
   { value: 'salt', label: 'By Salt', pharmaOnly: true },
@@ -96,8 +97,11 @@ function MetricCard({
 
 export default function GrowthAnalysisPage() {
   const { isPharma } = useTenantConfig();
-  const DIMENSION_OPTIONS = useMemo(() => ALL_DIMENSION_OPTIONS.filter((d) => !d.pharmaOnly || isPharma), [isPharma]);
   const [kind, setKind] = useState<SalesPurchaseAnalysisKind>('sales');
+  const DIMENSION_OPTIONS = useMemo(
+    () => ALL_DIMENSION_OPTIONS.filter((d) => (!d.pharmaOnly || isPharma) && (!d.purchaseOnly || kind === 'purchase')),
+    [isPharma, kind],
+  );
 
   // Default windows resolve through the comparison-preset helper so users land
   // on a sensible "last-30-vs-prior-30" view; switching presets recomputes all
@@ -109,6 +113,7 @@ export default function GrowthAnalysisPage() {
   const [compareStartDate, setCompareStartDate] = useState<string>(initial?.compare.startDate ?? '');
   const [compareEndDate, setCompareEndDate] = useState<string>(initial?.compare.endDate ?? '');
   const [dimension, setDimension] = useState<DimensionChoice>('productCompany');
+  const [breakdownSort, setBreakdownSort] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'currentAmount', order: 'desc' });
 
   // When user picks a non-custom preset, push all four dates atomically.
   useEffect(() => {
@@ -121,6 +126,14 @@ export default function GrowthAnalysisPage() {
       setCompareEndDate(r.compare.endDate);
     }
   }, [presetId]);
+
+  // Reset purchase-only dimensions when switching to sales.
+  useEffect(() => {
+    const opt = ALL_DIMENSION_OPTIONS.find((d) => d.value === dimension);
+    if (opt?.purchaseOnly && kind === 'sales') {
+      setDimension('productCompany');
+    }
+  }, [kind, dimension]);
 
   const filters = useMemo(
     () => ({
@@ -137,6 +150,32 @@ export default function GrowthAnalysisPage() {
 
   const comparison = useSalesPurchaseComparison(kind, filters);
   const data = comparison.data;
+
+  const sortedBreakdown = useMemo(() => {
+    const rows = [...(data?.breakdown ?? [])];
+    const { key, order } = breakdownSort;
+    return rows.sort((a, b) => {
+      let av: number;
+      let bv: number;
+      if (key === 'growthPct') {
+        if (a.growthPct === null && b.growthPct === null) return 0;
+        if (a.growthPct === null) return 1;
+        if (b.growthPct === null) return -1;
+        av = a.growthPct;
+        bv = b.growthPct;
+      } else {
+        av = (a as unknown as Record<string, number>)[key] ?? 0;
+        bv = (b as unknown as Record<string, number>)[key] ?? 0;
+      }
+      return order === 'desc' ? bv - av : av - bv;
+    });
+  }, [data?.breakdown, breakdownSort]);
+
+  const handleBreakdownSort = (key: string) => {
+    setBreakdownSort((prev) =>
+      prev.key === key ? { key, order: prev.order === 'asc' ? 'desc' : 'asc' } : { key, order: 'desc' },
+    );
+  };
 
   const breakdownColumns: Column<SalesPurchaseComparisonBreakdownRow>[] = [
     {
@@ -155,6 +194,7 @@ export default function GrowthAnalysisPage() {
       key: 'currentAmount',
       header: 'Current',
       align: 'right',
+      sortable: true,
       accessor: (row) => fmtCurrency(row.currentAmount),
     },
     {
@@ -178,6 +218,7 @@ export default function GrowthAnalysisPage() {
       key: 'growthPct',
       header: 'Growth %',
       align: 'right',
+      sortable: true,
       accessor: (row) => <GrowthBadge value={row.growthPct} />,
     },
     {
@@ -371,7 +412,7 @@ export default function GrowthAnalysisPage() {
             growthPct={summary.growthPct.itemCount}
             formatter={(v) => fmt(v ?? 0)}
           />
-          {kind === 'sales' && (
+          {/* {kind === 'sales' && (
             <MetricCard
               label="Profit"
               current={summary.current.profit}
@@ -380,8 +421,8 @@ export default function GrowthAnalysisPage() {
               growthPct={summary.growthPct.profit}
               formatter={fmtCurrency}
             />
-          )}
-          {kind === 'sales' && (
+          )} */}
+          {/* {kind === 'sales' && (
             <Card padding="sm">
               <p className="text-[10px] lg:text-xs font-semibold uppercase tracking-wide text-gray-500">Margin %</p>
               <p className="mt-1 text-sm lg:text-lg font-bold text-gray-900">{fmtPct(summary.current.marginPct)}</p>
@@ -401,7 +442,7 @@ export default function GrowthAnalysisPage() {
                 )}
               </div>
             </Card>
-          )}
+          )} */}
         </div>
       )}
 
@@ -526,11 +567,12 @@ export default function GrowthAnalysisPage() {
             className="px-6 pt-6"
           />
           <DataTable<SalesPurchaseComparisonBreakdownRow>
-            data={data?.breakdown ?? []}
+            data={sortedBreakdown}
             columns={breakdownColumns}
             keyExtractor={(row) => row.key}
             isLoading={comparison.isLoading}
             emptyMessage="No activity in either period for the selected breakdown"
+            sorting={{ sortBy: breakdownSort.key, sortOrder: breakdownSort.order, onSort: handleBreakdownSort }}
           />
         </Card>
       )}
