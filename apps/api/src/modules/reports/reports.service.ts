@@ -201,7 +201,14 @@ export class ReportsService {
         (COALESCE(MAX(mv.final_amt), SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0)))) * ${margSalesAmountSignSql('mv')})::float8 AS net_amount,
         (COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0) * ${margSalesAmountSignSql('mv')})::float8 AS taxable_amount,
         (COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0) * ${margSalesAmountSignSql('mv')})::float8 AS quantity,
-        COUNT(DISTINCT mt.pid) FILTER (WHERE mt.pid IS NOT NULL)::int AS item_count
+        COUNT(DISTINCT mt.pid) FILTER (WHERE mt.pid IS NOT NULL)::int AS item_count,
+        -- State/area codes from marg_transactions.add_field (';'-separated positional format).
+        -- Format: I; ;BWMF;00;0;;date;0;...;0;STATE_CODE;AREA_CODE;...
+        -- SPLIT_PART position 20 (1-indexed) = state s_code (marg_sale_types sg_code='ROUT')
+        -- SPLIT_PART position 21 (1-indexed) = area  s_code (marg_sale_types sg_code='AREA')
+        -- MAX used because all transaction rows for a voucher carry the same header-level codes.
+        MAX(NULLIF(TRIM(SPLIT_PART(COALESCE(mt.add_field, ''), ';', 20)), '')) AS state_code,
+        MAX(NULLIF(TRIM(SPLIT_PART(COALESCE(mt.add_field, ''), ';', 21)), '')) AS area_code
       FROM marg_vouchers mv
       LEFT JOIN marg_transactions mt
         ON mt.tenant_id = mv.tenant_id
@@ -690,16 +697,15 @@ export class ReportsService {
     const data = await this.prisma.$queryRaw<Array<{ name: string; revenue: number }>>(Prisma.sql`
       WITH bills AS (${this.erpSalesBillRollupSql(tenantId, filters, range)})
       SELECT
-        COALESCE(loc.state, 'Unknown') AS name,
-        COALESCE(SUM(b.net_amount), 0)::float8 AS revenue
-      FROM bills b
-      LEFT JOIN marg_branches mb
-        ON mb.tenant_id = ${tenantId}::uuid
-        AND mb.location_id::text = b.location_id
-      LEFT JOIN locations loc
-        ON loc.id = mb.location_id
-        AND loc.tenant_id = ${tenantId}::uuid
-      GROUP BY COALESCE(loc.state, 'Unknown')
+        COALESCE(mst.name, bills.state_code, 'Unknown') AS name,
+        COALESCE(SUM(bills.net_amount), 0)::float8 AS revenue
+      FROM bills
+      LEFT JOIN marg_sale_types mst
+        ON mst.tenant_id = ${tenantId}::uuid
+        AND mst.company_id = bills.company_id
+        AND mst.sg_code = 'ROUT'
+        AND mst.s_code = bills.state_code
+      GROUP BY COALESCE(mst.name, bills.state_code, 'Unknown')
       ORDER BY revenue DESC
     `);
     const total = data.reduce((s, r) => s + r.revenue, 0);
@@ -720,17 +726,15 @@ export class ReportsService {
     const data = await this.prisma.$queryRaw<Array<{ name: string; revenue: number }>>(Prisma.sql`
       WITH bills AS (${this.erpSalesBillRollupSql(tenantId, filters, range)})
       SELECT
-        COALESCE(mp.area, 'Unknown') AS name,
-        COALESCE(SUM(b.net_amount), 0)::float8 AS revenue
-      FROM bills b
-      LEFT JOIN marg_vouchers mv
-        ON mv.tenant_id = ${tenantId}::uuid
-        AND mv.company_id::text || ':' || mv.voucher = b.bill_key
-      LEFT JOIN marg_parties mp
-        ON mp.tenant_id = ${tenantId}::uuid
-        AND mp.company_id = mv.company_id
-        AND mp.cid = mv.cid
-      GROUP BY COALESCE(mp.area, 'Unknown')
+        COALESCE(mst.name, bills.area_code, 'Unknown') AS name,
+        COALESCE(SUM(bills.net_amount), 0)::float8 AS revenue
+      FROM bills
+      LEFT JOIN marg_sale_types mst
+        ON mst.tenant_id = ${tenantId}::uuid
+        AND mst.company_id = bills.company_id
+        AND mst.sg_code = 'AREA'
+        AND mst.s_code = bills.area_code
+      GROUP BY COALESCE(mst.name, bills.area_code, 'Unknown')
       ORDER BY revenue DESC
     `);
     const total = data.reduce((s, r) => s + r.revenue, 0);
