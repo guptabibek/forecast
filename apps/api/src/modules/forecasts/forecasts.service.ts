@@ -175,8 +175,16 @@ export class ForecastsService {
         ...(filterIds.customerIds?.length ? { customerId: { in: filterIds.customerIds } } : {}),
       },
       orderBy: { periodDate: 'desc' },
-      select: { periodDate: true },
+      select: { periodDate: true, currency: true },
     });
+
+    // Forecasts are expressed in the currency of the historical data they are
+    // built from (the actuals' currency), not a hardcoded default. Falls back
+    // to the tenant's reporting currency, then USD.
+    const forecastCurrency =
+      latestActual?.currency ||
+      (await this.prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { defaultCurrency: true } }))?.defaultCurrency ||
+      'USD';
 
     // History ends at the later of the plan start and the latest actual.
     const historyEnd =
@@ -304,6 +312,9 @@ export class ForecastsService {
 
       try {
         const engineParams = { ...(generateDto.parameters || {}) };
+        if (!engineParams.currency) {
+          engineParams.currency = forecastCurrency;
+        }
         if (modelName === 'AI_HYBRID' && generateDto.ensembleWeights) {
           engineParams.userWeights = generateDto.ensembleWeights;
         }
@@ -2697,9 +2708,24 @@ export class ForecastsService {
 
       const key = `${currency}-${reportingCurrency}-${new Date(result.periodDate).toISOString().split('T')[0]}`;
       let rate = cache.get(key);
-      if (!rate) {
-        rate = await this.fxRateService.getRate(tenantId, currency, reportingCurrency, new Date(result.periodDate));
-        cache.set(key, rate);
+      if (rate == null) {
+        try {
+          rate = await this.fxRateService.getRate(tenantId, currency, reportingCurrency, new Date(result.periodDate));
+          cache.set(key, rate);
+        } catch {
+          // FX rate unavailable: surface the amount in its own currency, flagged,
+          // instead of failing the entire report.
+          this.logger.warn(
+            `FX rate ${currency}->${reportingCurrency} unavailable; returning unconverted amount`,
+          );
+          converted.push({
+            ...result,
+            reportingCurrency: currency,
+            reportingAmount: Number(result.forecastAmount),
+            rateUnavailable: true,
+          });
+          continue;
+        }
       }
 
       converted.push({
@@ -2724,8 +2750,18 @@ export class ForecastsService {
       return Number(amount);
     }
 
-    const rate = await this.fxRateService.getRate(tenantId, sourceCurrency, toCurrency, asOfDate);
-    return Number(amount) * rate;
+    try {
+      const rate = await this.fxRateService.getRate(tenantId, sourceCurrency, toCurrency, asOfDate);
+      return Number(amount) * rate;
+    } catch {
+      // FX rate unavailable: degrade gracefully rather than failing the whole
+      // report. The source amount is preserved — variance vs actuals stays
+      // valid when forecast and actual share the source currency.
+      this.logger.warn(
+        `FX rate ${sourceCurrency}->${toCurrency} unavailable; using unconverted amount`,
+      );
+      return Number(amount);
+    }
   }
 
   private async validateTimeBuckets(

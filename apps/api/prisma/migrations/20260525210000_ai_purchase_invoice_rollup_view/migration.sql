@@ -1,0 +1,25 @@
+-- No-op migration (intentionally empty).
+--
+-- The original migration here attempted to `CREATE OR REPLACE` an AI-reporting
+-- purchase-invoice view while changing the data type of the `branch_code`
+-- column (VARCHAR(20) -> VARCHAR). PostgreSQL forbids changing a view column's
+-- type via CREATE OR REPLACE and aborted with:
+--     42P16: cannot change data type of view column "branch_code"
+--
+-- The migration applied 0 steps (nothing was committed) and its original SQL
+-- was subsequently lost from version control, leaving the deploy pipeline
+-- dead-locked on a failed-migration record (Prisma P3009).
+--
+-- Resolution: this migration is neutralised to a no-op so the history stays
+-- contiguous and reproducible across environments. It is safe because:
+--   * the existing `vw_ai_purchase_invoices` view family (added in
+--     20260512120000 / refined in 20260522*) is intact and functional;
+--   * widening `branch_code` was never needed (Marg branch codes fit in 20
+--     chars) and no application code references a `purchase_invoice_rollup`
+--     view by name;
+--   * therefore nothing depends on the change this migration was meant to make.
+--
+-- If a view definition genuinely needs a column-type change in future, do it in
+-- a fresh migration using `DROP VIEW IF EXISTS ...; CREATE VIEW ...` (not
+-- CREATE OR REPLACE), which avoids the 42P16 error.
+SELECT 1;

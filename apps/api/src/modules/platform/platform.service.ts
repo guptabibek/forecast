@@ -182,7 +182,7 @@ export class PlatformService {
           tier: data.tier ?? 'STARTER',
           domain: data.domain?.trim() || undefined,
           timezone: data.timezone ?? 'UTC',
-          defaultCurrency: data.defaultCurrency ?? 'USD',
+          defaultCurrency: data.defaultCurrency ?? 'INR',
         },
       });
 

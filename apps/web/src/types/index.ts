@@ -154,6 +154,8 @@ export interface Forecast {
   updatedAt?: string;
   reportingCurrency?: string;
   reportingAmount?: number;
+  /** True when an FX rate to the reporting currency was unavailable, so reportingAmount is in the source currency. */
+  rateUnavailable?: boolean;
   // Related entities (optional, depends on include)
   planVersion?: { id: string; name: string };
   scenario?: { id: string; name: string };

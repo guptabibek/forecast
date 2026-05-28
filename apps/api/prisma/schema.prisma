@@ -2851,7 +2851,6 @@ model MargVoucher {
   @@unique([tenantId, companyId, voucher, type])
   @@index([tenantId, date])
   @@index([tenantId, type])
-  @@index([tenantId, family, date])
   @@map("marg_vouchers")
 }
 

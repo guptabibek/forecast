@@ -82,7 +82,10 @@
       "Bash(grep -rn \"db:seed\\\\|prisma db seed\\\\|\\\\\"seed\\\\\":\" apps/api/package.json scripts/docker-entrypoint.sh)",
       "Bash(node -e \"const p=require\\('./apps/api/package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\); console.log\\('PRISMA:',JSON.stringify\\(p.prisma\\)\\)\")",
       "Bash(grep -i \"\\\\.tsx\\\\?$\")",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(DATABASE_URL=\"postgres://postgres:123456@127.0.0.1:5433/forecast\" npx prisma migrate status)",
+      "Bash(DATABASE_URL=\"postgres://postgres:123456@127.0.0.1:5433/forecast\" npx prisma migrate resolve --rolled-back 20260525210000_ai_purchase_invoice_rollup_view)",
+      "Bash(DATABASE_URL=\"postgres://postgres:123456@127.0.0.1:5433/forecast\" npx prisma migrate deploy)"
     ]
   }
 }
