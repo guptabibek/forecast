@@ -184,9 +184,9 @@ export default function GrowthAnalysisPage() {
       accessor: (row) => (
         <div>
           <div className="font-medium text-gray-900">{row.label}</div>
-          {row.key && row.key !== row.label && row.key !== '__UNMAPPED__' && row.key !== '__UNATTRIBUTED__' && (
+          {/* {row.key && row.key !== row.label && row.key !== '__UNMAPPED__' && row.key !== '__UNATTRIBUTED__' && (
             <div className="text-xs font-mono text-gray-500">{row.key}</div>
-          )}
+          )} */}
         </div>
       ),
     },

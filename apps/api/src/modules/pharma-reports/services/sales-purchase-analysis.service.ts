@@ -878,23 +878,27 @@ export class SalesPurchaseAnalysisService {
       const where = this.buildRollupWhere(tenantId, kind, filters);
       const signedAmount = this.scopeRollupAmountColumn(kind, this.resolveScope(filters));
       return this.prisma.$queryRaw<any[]>(Prisma.sql`
-        WITH loc_per_company AS (
-          SELECT DISTINCT ON (mb.company_id)
-            mb.company_id, loc.state
-          FROM marg_branches mb
-          LEFT JOIN locations loc ON loc.id = mb.location_id
-          WHERE mb.tenant_id = ${tenantId}::uuid
-          ORDER BY mb.company_id
+        WITH state_per_bill AS (
+          SELECT company_id, voucher,
+            MAX(NULLIF(TRIM(SPLIT_PART(COALESCE(add_field, ''), ';', 20)), '')) AS state_code
+          FROM marg_transactions
+          WHERE tenant_id = ${tenantId}::uuid
+          GROUP BY company_id, voucher
         ),
         ranked AS (
           SELECT
-            COALESCE(lc.state, 'Unknown') AS name,
+            COALESCE(mst.name, spb.state_code, 'Unknown') AS name,
             COUNT(*)::int AS bills,
             COALESCE(SUM(b.${signedAmount}), 0)::float8 AS value
           FROM marg_bill_rollup b
-          LEFT JOIN loc_per_company lc ON lc.company_id = b.company_id
+          LEFT JOIN state_per_bill spb ON spb.company_id = b.company_id AND spb.voucher = b.voucher
+          LEFT JOIN marg_sale_types mst
+            ON mst.tenant_id = ${tenantId}::uuid
+            AND mst.company_id = b.company_id
+            AND mst.sg_code = 'ROUT'
+            AND mst.s_code = spb.state_code
           WHERE ${where}
-          GROUP BY COALESCE(lc.state, 'Unknown')
+          GROUP BY COALESCE(mst.name, spb.state_code, 'Unknown')
         )
         SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
           name, bills, value,
@@ -907,14 +911,26 @@ export class SalesPurchaseAnalysisService {
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
     return this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH bills AS (${this.billRollupSql(tenantId, kind, where, this.resolveScope(filters))}),
+      state_per_bill AS (
+        SELECT company_id, voucher,
+          MAX(NULLIF(TRIM(SPLIT_PART(COALESCE(add_field, ''), ';', 20)), '')) AS state_code
+        FROM marg_transactions
+        WHERE tenant_id = ${tenantId}::uuid
+        GROUP BY company_id, voucher
+      ),
       ranked AS (
         SELECT
-          COALESCE(loc.state, 'Unknown') AS name,
+          COALESCE(mst.name, spb.state_code, 'Unknown') AS name,
           COUNT(*)::int AS bills,
           COALESCE(SUM(b.signed_net_amount), 0)::float8 AS value
         FROM bills b
-        LEFT JOIN locations loc ON loc.id = b.branch_id
-        GROUP BY COALESCE(loc.state, 'Unknown')
+        LEFT JOIN state_per_bill spb ON spb.company_id = b.company_id AND spb.voucher = b.voucher
+        LEFT JOIN marg_sale_types mst
+          ON mst.tenant_id = ${tenantId}::uuid
+          AND mst.company_id = b.company_id
+          AND mst.sg_code = 'ROUT'
+          AND mst.s_code = spb.state_code
+        GROUP BY COALESCE(mst.name, spb.state_code, 'Unknown')
       )
       SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
         name, bills, value,
@@ -932,7 +948,7 @@ export class SalesPurchaseAnalysisService {
       return this.prisma.$queryRaw<any[]>(Prisma.sql`
         WITH ranked AS (
           SELECT
-            COALESCE(NULLIF(TRIM(mp.area), ''), 'Unknown') AS name,
+            COALESCE(mst.name, NULLIF(TRIM(mp.area), ''), 'Unknown') AS name,
             COUNT(*)::int AS bills,
             COALESCE(SUM(b.${signedAmount}), 0)::float8 AS value
           FROM marg_bill_rollup b
@@ -941,8 +957,13 @@ export class SalesPurchaseAnalysisService {
             AND mp.company_id = b.company_id
             AND mp.cid = b.cid
             AND mp.is_deleted = false
+          LEFT JOIN marg_sale_types mst
+            ON mst.tenant_id = b.tenant_id
+            AND mst.company_id = b.company_id
+            AND mst.sg_code = 'AREA'
+            AND mst.s_code = NULLIF(TRIM(mp.area), '')
           WHERE ${where}
-          GROUP BY COALESCE(NULLIF(TRIM(mp.area), ''), 'Unknown')
+          GROUP BY COALESCE(mst.name, NULLIF(TRIM(mp.area), ''), 'Unknown')
         )
         SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
           name, bills, value,
@@ -957,7 +978,7 @@ export class SalesPurchaseAnalysisService {
       WITH bills AS (${this.billRollupSql(tenantId, kind, where, this.resolveScope(filters))}),
       ranked AS (
         SELECT
-          COALESCE(NULLIF(TRIM(mp.area), ''), 'Unknown') AS name,
+          COALESCE(mst.name, NULLIF(TRIM(mp.area), ''), 'Unknown') AS name,
           COUNT(*)::int AS bills,
           COALESCE(SUM(b.signed_net_amount), 0)::float8 AS value
         FROM bills b
@@ -966,7 +987,12 @@ export class SalesPurchaseAnalysisService {
           AND mp.company_id = b.company_id
           AND mp.cid = b.party_code
           AND mp.is_deleted = false
-        GROUP BY COALESCE(NULLIF(TRIM(mp.area), ''), 'Unknown')
+        LEFT JOIN marg_sale_types mst
+          ON mst.tenant_id = ${tenantId}::uuid
+          AND mst.company_id = b.company_id
+          AND mst.sg_code = 'AREA'
+          AND mst.s_code = NULLIF(TRIM(mp.area), '')
+        GROUP BY COALESCE(mst.name, NULLIF(TRIM(mp.area), ''), 'Unknown')
       )
       SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
         name, bills, value,
@@ -1539,7 +1565,7 @@ export class SalesPurchaseAnalysisService {
           keyExpr: Prisma.sql`COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), ''), '__UNATTRIBUTED__')`,
           labelExpr: Prisma.sql`CASE
             WHEN COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) IS NULL THEN 'Unattributed'
-            ELSE COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) || ' - ' || COALESCE((
+            ELSE COALESCE((
               SELECT s.name FROM salesmen s
               WHERE s.tenant_id = mv.tenant_id
                 AND s.code = COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), ''))
@@ -1560,7 +1586,7 @@ export class SalesPurchaseAnalysisService {
           keyExpr: Prisma.sql`COALESCE(NULLIF(TRIM(p.salt), ''), '__UNMAPPED__')`,
           labelExpr: Prisma.sql`CASE
             WHEN NULLIF(TRIM(p.salt), '') IS NULL THEN 'Unmapped salt'
-            ELSE TRIM(p.salt) || ' - ' || COALESCE((SELECT ps.name FROM product_salts ps WHERE ps.tenant_id = p.tenant_id AND ps.code = TRIM(p.salt) LIMIT 1), 'Unknown salt (' || TRIM(p.salt) || ')')
+            ELSE COALESCE((SELECT ps.name FROM product_salts ps WHERE ps.tenant_id = p.tenant_id AND ps.code = TRIM(p.salt) LIMIT 1), 'Unknown salt (' || TRIM(p.salt) || ')')
           END`,
           needsProduct: true,
         };
@@ -1578,14 +1604,25 @@ export class SalesPurchaseAnalysisService {
           keyExpr: Prisma.sql`COALESCE(NULLIF(TRIM(p.product_group), ''), '__UNMAPPED__')`,
           labelExpr: Prisma.sql`CASE
             WHEN NULLIF(TRIM(p.product_group), '') IS NULL THEN 'Unmapped group'
-            ELSE TRIM(p.product_group) || ' - ' || COALESCE((SELECT pg.name FROM product_categories pg WHERE pg.tenant_id = p.tenant_id AND pg.code = TRIM(p.product_group) LIMIT 1), 'Unknown group (' || TRIM(p.product_group) || ')')
+            ELSE COALESCE((SELECT pg.name FROM product_categories pg WHERE pg.tenant_id = p.tenant_id AND pg.code = TRIM(p.product_group) LIMIT 1), 'Unknown group (' || TRIM(p.product_group) || ')')
           END`,
           needsProduct: true,
         };
       case 'hsnCode':
         return {
           keyExpr: Prisma.sql`COALESCE(NULLIF(TRIM(p.hsn_code), ''), '__UNMAPPED__')`,
-          labelExpr: Prisma.sql`COALESCE(NULLIF(TRIM(p.hsn_code), ''), 'Unmapped HSN')`,
+          labelExpr: Prisma.sql`CASE
+            WHEN NULLIF(TRIM(p.hsn_code), '') IS NULL THEN 'Unmapped HSN'
+            ELSE COALESCE(
+              (SELECT mst.name FROM marg_sale_types mst
+               WHERE mst.tenant_id = mv.tenant_id
+                 AND mst.company_id = mv.company_id
+                 AND mst.sg_code = 'COMMCD'
+                 AND mst.s_code = TRIM(p.hsn_code)
+               LIMIT 1),
+              'Unknown HSN (' || TRIM(p.hsn_code) || ')'
+            )
+          END`,
           needsProduct: true,
         };
       case 'product':

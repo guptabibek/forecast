@@ -817,8 +817,10 @@ export class InventoryReportsService {
           NULLIF(TRIM(p.product_company), '') AS product_company,
           CASE WHEN NULLIF(TRIM(p.product_company), '') IS NULL THEN NULL ELSE TRIM(p.product_company) || ' - ' || COALESCE(pc.name, 'Unknown company (' || TRIM(p.product_company) || ')') END AS product_company_display,
           NULLIF(TRIM(p.salt), '') AS salt,
+          COALESCE(ps.name, CASE WHEN NULLIF(TRIM(p.salt), '') IS NULL THEN NULL ELSE 'Unknown salt (' || TRIM(p.salt) || ')' END) AS salt_name,
           CASE WHEN NULLIF(TRIM(p.salt), '') IS NULL THEN NULL ELSE TRIM(p.salt) || ' - ' || COALESCE(ps.name, 'Unknown salt (' || TRIM(p.salt) || ')') END AS salt_display,
           NULLIF(TRIM(p.product_group), '') AS product_group,
+          COALESCE(pg.name, CASE WHEN NULLIF(TRIM(p.product_group), '') IS NULL THEN NULL ELSE 'Unknown group (' || TRIM(p.product_group) || ')' END) AS product_group_name,
           CASE WHEN NULLIF(TRIM(p.product_group), '') IS NULL THEN NULL ELSE TRIM(p.product_group) || ' - ' || COALESCE(pg.name, 'Unknown group (' || TRIM(p.product_group) || ')') END AS product_group_display,
           NULLIF(TRIM(p.hsn_code), '') AS hsn_code,
           supplier_match.supplier_id,
@@ -971,8 +973,8 @@ export class InventoryReportsService {
       ${cte}
       SELECT
         product_id, sku, product_name,
-        product_company, product_company_display, salt, salt_display,
-        product_group, product_group_display, hsn_code,
+        product_company, product_company_display, salt, salt_name, salt_display,
+        product_group, product_group_name, product_group_display, hsn_code,
         supplier_id, supplier_code, supplier_name, supplier_display,
         location_id, location_code,
         on_hand_qty, available_qty, on_order_qty,

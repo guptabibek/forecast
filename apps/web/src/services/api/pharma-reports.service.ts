@@ -112,8 +112,10 @@ export interface ReorderRow {
   product_company: string | null;
   product_company_display: string | null;
   salt: string | null;
+  salt_name: string | null;
   salt_display: string | null;
   product_group: string | null;
+  product_group_name: string | null;
   product_group_display: string | null;
   hsn_code: string | null;
   supplier_id: string | null;
