@@ -1,13 +1,13 @@
 import { BanknotesIcon, BookOpenIcon, ChartBarIcon, RectangleGroupIcon } from '@heroicons/react/24/outline';
-import { useEffect, useMemo, useState } from 'react';
 import type { ElementType } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { PieChart } from '../../components/charts';
+import { DetailPopupActions } from '../../components/reports/DetailPopupActions';
 import type { Column } from '../../components/ui';
 import { Badge, Button, Card, CardHeader, DataTable, QueryErrorBanner } from '../../components/ui';
-import { DetailPopupActions } from '../../components/reports/DetailPopupActions';
-import { usePharmaGrid } from '../../hooks/usePharmaGrid';
 import { usePdfPayload } from '../../hooks/usePdfPayload';
+import { usePharmaGrid } from '../../hooks/usePharmaGrid';
 import {
   useFinancialOutstanding,
   useFinancialOutstandingByGroup,
@@ -391,7 +391,7 @@ export default function FinancialReportsPage() {
         );
       },
     },
-    { key: 'companyId', header: 'Company', accessor: (row) => row.companyId, align: 'right', width: '80px', sortable: true },
+    // { key: 'companyId', header: 'Company', accessor: (row) => row.companyId, align: 'right', width: '80px', sortable: true },
     { key: 'groupName', header: 'Group', accessor: (row) => row.groupName ?? row.groupCode ?? '-', width: '150px', sortable: true, filterType: 'text', filterField: 'groupName' },
     { key: 'openInvoiceCount', header: 'Open Bills', accessor: (row) => fmt(row.openInvoiceCount), align: 'right', sortable: true, filterType: 'number', filterField: 'openInvoiceCount' },
     {
@@ -842,8 +842,8 @@ export default function FinancialReportsPage() {
                             </button>
                           ),
                         },
-                        { key: 'companyId', header: 'Co.', accessor: (row) => row.companyId, align: 'right', width: '70px' },
-                        {
+                        // { key: 'companyId', header: 'Co.', accessor: (row) => row.companyId, align: 'right', width: '70px' },
+                         {
                           key: 'overdueAmount',
                           header: 'Overdue',
                           accessor: (row) => (

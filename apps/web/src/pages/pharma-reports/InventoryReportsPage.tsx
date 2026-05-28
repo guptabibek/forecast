@@ -2,9 +2,8 @@ import { useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Column } from '../../components/ui';
 import { Badge, Card, CardHeader, DataTable, QueryErrorBanner } from '../../components/ui';
-import { usePharmaGrid } from '../../hooks/usePharmaGrid';
 import { usePdfPayload } from '../../hooks/usePdfPayload';
-import { useTenantConfig } from '../../hooks/useTenantConfig';
+import { usePharmaGrid } from '../../hooks/usePharmaGrid';
 import {
   useBatchInventory,
   useCurrentStock,
@@ -13,7 +12,7 @@ import {
   useStockAgeing,
   useUpsertReorderConfig,
 } from '../../hooks/usePharmaReports';
-import { parseReorderConfigCsv } from './reorderConfigCsv';
+import { useTenantConfig } from '../../hooks/useTenantConfig';
 import type {
   BatchInventoryRow,
   CurrentStockRow,
@@ -22,6 +21,7 @@ import type {
   StockAgeingRow,
 } from '../../services/api/pharma-reports.service';
 import ExportToolbar from './ExportToolbar';
+import { parseReorderConfigCsv } from './reorderConfigCsv';
 import { fmt, fmtCurrency, fmtDate, reportCols } from './shared';
 
 type Tab = 'current' | 'batch' | 'ledger' | 'reorder' | 'ageing';
@@ -107,8 +107,8 @@ export default function InventoryReportsPage() {
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', sortable: true, filterType: 'text', filterField: 'product_name' },
     { key: 'company', header: 'Company', accessor: (r) => r.company_display ?? r.company ?? '-', filterType: 'text', filterField: 'company' },
-    ...(showSaltColumn ? [{ key: 'salt', header: 'Salt', accessor: (r: CurrentStockRow) => r.salt_display ?? r.salt ?? '-', filterType: 'text' as const, filterField: 'salt' }] : []),
-    { key: 'product_group', header: 'Group', accessor: (r) => r.product_group_display ?? r.product_group ?? '-', filterType: 'text', filterField: 'product_group' },
+    ...(showSaltColumn ? [{ key: 'salt', header: 'Salt', accessor: (r: CurrentStockRow) => r.salt_name ?? r.salt ?? '-', filterType: 'text' as const, filterField: 'salt' }] : []),
+    { key: 'product_group', header: 'Group', accessor: (r) => r.product_group_name ?? r.product_group ?? '-', filterType: 'text', filterField: 'product_group' },
     { key: 'hsn_code', header: 'HSN', accessor: (r) => r.hsn_code ?? '-', filterType: 'text', filterField: 'hsn_code' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '100px', sortable: true, filterType: 'text', filterField: 'location_code' },
     { key: 'on_hand_qty', header: 'On Hand', accessor: (r) => fmt(r.on_hand_qty), align: 'right', sortable: true, filterType: 'number', filterField: 'on_hand_qty' },
@@ -174,9 +174,8 @@ export default function InventoryReportsPage() {
   const reorderCols: Column<ReorderRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
-    { key: 'product_company', header: 'Company', accessor: (r) => r.product_company_display ?? r.product_company ?? '-', filterType: 'text', filterField: 'product_company' },
-    ...(showSaltColumn ? [{ key: 'salt', header: 'Salt', accessor: (r: ReorderRow) => r.salt_display ?? r.salt ?? '-', filterType: 'text' as const, filterField: 'salt' }] : []),
-    { key: 'product_group', header: 'Group', accessor: (r) => r.product_group_display ?? r.product_group ?? '-', filterType: 'text', filterField: 'product_group' },
+    ...(showSaltColumn ? [{ key: 'salt', header: 'Salt', accessor: (r: ReorderRow) => r.salt_name ?? r.salt ?? '-', filterType: 'text' as const, filterField: 'salt' }] : []),
+    { key: 'product_group', header: 'Group', accessor: (r) => r.product_group_name ?? r.product_group ?? '-', filterType: 'text', filterField: 'product_group' },
     { key: 'hsn_code', header: 'HSN', accessor: (r) => r.hsn_code ?? '-', width: '90px', filterType: 'text', filterField: 'hsn_code' },
     { key: 'supplier_name', header: 'Supplier', accessor: (r) => r.supplier_display ?? r.supplier_name ?? '-', filterType: 'text', filterField: 'supplier_name' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '90px', filterType: 'text', filterField: 'location_code' },

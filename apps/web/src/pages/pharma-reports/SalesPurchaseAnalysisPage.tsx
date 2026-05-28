@@ -175,8 +175,8 @@ export default function SalesPurchaseAnalysisPage() {
         filterType: 'text',
         filterField: kind === 'sales' ? 'customer' : 'supplier',
       },
-      { key: 'branch_name', header: 'Warehouse / Branch', accessor: 'branch_name', filterType: 'text', filterField: 'warehouse' },
-      { key: 'salesman', header: kind === 'sales' ? 'Salesman' : 'User', accessor: (row) => row.salesman_display || row.salesman || row.user_name || '-', filterType: 'text', filterField: 'user' },
+      // { key: 'branch_name', header: 'Warehouse / Branch', accessor: 'branch_name', filterType: 'text', filterField: 'warehouse' },
+      { key: 'salesman', header: kind === 'sales' ? 'Salesman' : 'User', accessor: (row) => row.salesman_name || row.salesman || row.user_name || '-', filterType: 'text', filterField: 'user' },
       { key: 'payment_mode', header: 'Payment', accessor: 'payment_mode', sortable: true, filterType: 'select', filterField: 'payment_mode', filterOptions: [{ value: 'CASH', label: 'Cash' }, { value: 'CREDIT', label: 'Credit' }, { value: 'MIXED', label: 'Mixed' }] },
       { key: 'gross_amount', header: 'Gross', accessor: (row) => fmtCurrency(row.gross_amount), align: 'right', sortable: true, filterType: 'number', filterField: 'gross_amount' },
       { key: 'discount', header: 'Discount', accessor: (row) => fmtCurrency(row.discount), align: 'right', filterType: 'number', filterField: 'discount' },
@@ -426,7 +426,7 @@ export default function SalesPurchaseAnalysisPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
-                  <th className="px-4 py-2 text-left">Code</th>
+             
                   <th className="px-4 py-2 text-left">Item</th>
                   {(['quantity', 'value'] as const).map((col) => (
                     <th key={col} className="px-4 py-2 text-right">
@@ -447,7 +447,7 @@ export default function SalesPurchaseAnalysisPage() {
               <tbody className="divide-y divide-gray-100">
                 {sortedItems.map((row) => (
                   <tr key={row.item_key || row.item_code} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 font-mono text-xs text-gray-500">{row.item_code}</td>
+
                     <td className="px-4 py-2">
                       <button type="button" className="font-medium text-primary-700 underline-offset-2 hover:underline text-left" onClick={() => setDrilldown({ type: 'item', key: row.item_key?.includes('-') ? `product:${row.item_key}` : row.item_key, title: row.item_name })}>{row.item_name}</button>
                     </td>
@@ -591,7 +591,7 @@ export default function SalesPurchaseAnalysisPage() {
               accessor: (row) => (
                 <div>
                   <div className="font-medium text-gray-900">{row.label}</div>
-                  {row.key && row.key !== row.label && row.key !== '__UNMAPPED__' && row.key !== '__UNATTRIBUTED__' && (
+                  {row.key && row.key !== row.label && row.key !== '__UNMAPPED__' && row.key !== '__UNATTRIBUTED__' && dimension !== 'salesman' && dimension !== 'salt' && dimension !== 'productGroup' && dimension !== 'product' && dimension !== 'hsnCode' && (
                     <div className="text-xs font-mono text-gray-500">{row.key}</div>
                   )}
                 </div>

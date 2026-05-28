@@ -1,42 +1,42 @@
 import {
-    AdjustmentsHorizontalIcon,
-    ArrowPathIcon,
-    ArrowTrendingDownIcon,
-    ArrowTrendingUpIcon,
-    BanknotesIcon,
-    CalendarDaysIcon,
-    ChartBarIcon,
-    CheckCircleIcon,
-    ChevronDownIcon,
-    CubeIcon,
-    DocumentTextIcon,
-    ExclamationTriangleIcon,
-    FunnelIcon,
-    GlobeAltIcon,
-    SparklesIcon,
-    TableCellsIcon,
-    UserGroupIcon,
-    XMarkIcon,
+  AdjustmentsHorizontalIcon,
+  ArrowPathIcon,
+  ArrowTrendingDownIcon,
+  ArrowTrendingUpIcon,
+  BanknotesIcon,
+  CalendarDaysIcon,
+  ChartBarIcon,
+  CheckCircleIcon,
+  ChevronDownIcon,
+  CubeIcon,
+  DocumentTextIcon,
+  ExclamationTriangleIcon,
+  FunnelIcon,
+  GlobeAltIcon,
+  SparklesIcon,
+  TableCellsIcon,
+  UserGroupIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-    Area,
-    Bar,
-    BarChart,
-    CartesianGrid,
-    Cell,
-    ComposedChart,
-    Legend,
-    Line,
-    Pie,
-    PieChart,
-    ResponsiveContainer,
-    Tooltip,
-    XAxis,
-    YAxis,
+  Area,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Legend,
+  Line,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
 import { dataService, reportsService } from '../services/api';
 import type { ABCAnalysisParams } from '../services/api/report.service';
@@ -1460,10 +1460,10 @@ export default function Dashboard() {
                     </Pie>
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: '#1e293b',
+                        backgroundColor: '#dbe2ee',
                         border: 'none',
                         borderRadius: '8px',
-                        color: '#f8fafc',
+                        color: '#090a0c',
                       }}
                       formatter={(value: number) => formatCurrency(value)}
                     />

@@ -22,7 +22,7 @@ import {
 const DEAD_SLOW_COLUMNS: AllowedSqlColumns = {
   sku: { expression: 'p.code', type: 'string' },
   product_name: { expression: 'p.name', type: 'string' },
-  category: { expression: 'p.category', type: 'string' },
+  category: { expression: 'COALESCE(pc.name, p.category)', type: 'string' },
   location_code: { expression: 'l.code', type: 'string' },
   on_hand_qty: { expression: 'COALESCE(il.on_hand_qty, 0)', type: 'number' },
   inventory_value: { expression: 'COALESCE(il.inventory_value, 0)', type: 'number' },
@@ -187,6 +187,7 @@ export class StockAnalysisService {
         FROM inventory_levels il
         JOIN products p ON p.id = il.product_id AND p.tenant_id = il.tenant_id
         JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
+        LEFT JOIN product_categories pc ON pc.tenant_id = p.tenant_id AND pc.code = NULLIF(TRIM(p.category), '')
         LEFT JOIN last_sales ls ON ls.product_id = il.product_id AND ls.location_id = il.location_id
         WHERE ${where}
           AND (
@@ -214,7 +215,7 @@ export class StockAnalysisService {
           p.id            AS product_id,
           p.code          AS sku,
           p.name          AS product_name,
-          p.category,
+          COALESCE(pc.name, p.category) AS category,
           l.code          AS location_code,
           COALESCE(il.on_hand_qty, 0)::float8     AS on_hand_qty,
           COALESCE(il.inventory_value, 0)::float8  AS inventory_value,
@@ -234,6 +235,7 @@ export class StockAnalysisService {
         FROM inventory_levels il
         JOIN products p  ON p.id = il.product_id AND p.tenant_id = il.tenant_id
         JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
+        LEFT JOIN product_categories pc ON pc.tenant_id = p.tenant_id AND pc.code = NULLIF(TRIM(p.category), '')
         LEFT JOIN last_sales ls ON ls.product_id = il.product_id AND ls.location_id = il.location_id
         WHERE ${where}
           AND (
