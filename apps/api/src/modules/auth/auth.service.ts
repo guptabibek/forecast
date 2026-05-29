@@ -6,7 +6,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { ClsService } from 'nestjs-cls';
 import { v4 as uuidv4 } from 'uuid';
 import { PrismaService } from '../../core/database/prisma.service';
@@ -41,12 +41,31 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto): Promise<TokenResponse> {
-    // ── Static super-admin: credentials live outside the DB ──
+    // ── Static super-admin: credentials live in environment config, NEVER in
+    // source. We prefer a bcrypt hash (SUPER_ADMIN_PASSWORD_HASH); a plaintext
+    // env var (SUPER_ADMIN_PASSWORD) is accepted for backward-compat. There is
+    // deliberately NO built-in password fallback — a secret committed to source
+    // is a known credential for anyone who can read the repo, and an unset env
+    // var must DISABLE this login path (fail closed), not silently enable a
+    // public default.
     const saEmail = (this.configService.get<string>('SUPER_ADMIN_EMAIL') || 'admin@rabbittech.in').toLowerCase();
-    const saPassword = this.configService.get<string>('SUPER_ADMIN_PASSWORD') || 'RabbitTech@2026!';
 
     if (dto.email.toLowerCase() === saEmail) {
-      if (dto.password !== saPassword) {
+      const saPasswordHash = this.configService.get<string>('SUPER_ADMIN_PASSWORD_HASH');
+      const saPassword = this.configService.get<string>('SUPER_ADMIN_PASSWORD');
+
+      if (!saPasswordHash && !saPassword) {
+        this.logger.error(
+          'Static super-admin login attempted but no SUPER_ADMIN_PASSWORD_HASH / SUPER_ADMIN_PASSWORD is configured — refusing (fail closed).',
+        );
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      const passwordOk = saPasswordHash
+        ? await bcrypt.compare(dto.password, saPasswordHash)
+        : this.constantTimeEquals(dto.password, saPassword as string);
+
+      if (!passwordOk) {
         throw new UnauthorizedException('Invalid credentials');
       }
       return this.generateStaticSuperAdminTokens();
@@ -567,6 +586,18 @@ export class AuthService {
       roleName: effectiveRole?.roleName ?? user.role,
       mustResetPassword: user.mustResetPassword ?? false,
     };
+  }
+
+  /**
+   * Constant-time string comparison for the plaintext super-admin password
+   * path. Avoids leaking match progress via response timing. Length mismatch
+   * short-circuits to false (length is not the secret).
+   */
+  private constantTimeEquals(a: string, b: string): boolean {
+    const ab = Buffer.from(a, 'utf8');
+    const bb = Buffer.from(b, 'utf8');
+    if (ab.length !== bb.length) return false;
+    return timingSafeEqual(ab, bb);
   }
 
   private async findTenantByWorkspace(workspace?: string) {

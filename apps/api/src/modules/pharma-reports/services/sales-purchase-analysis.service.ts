@@ -942,28 +942,38 @@ export class SalesPurchaseAnalysisService {
   }
 
   private async topCities(tenantId: string, kind: AnalysisKind, filters: SalesPurchaseAnalysisFilterDto) {
+    // City / Area is resolved from the transaction-time area code on
+    // marg_transactions.add_field (segment 21), collapsed to one value per
+    // voucher, then named via marg_sale_types(sg_code='AREA'). This is the
+    // SAME source the dashboard regional-breakdown report uses and mirrors
+    // topStates() (segment 20 → ROUT). We deliberately do NOT read the
+    // party-master area (mp.area): that value is mutable and silently rewrites
+    // historical regional totals when a customer is re-routed.
     if (!this.requiresLineLevelDrill(filters)) {
       const where = this.buildRollupWhere(tenantId, kind, filters);
       const signedAmount = this.scopeRollupAmountColumn(kind, this.resolveScope(filters));
       return this.prisma.$queryRaw<any[]>(Prisma.sql`
-        WITH ranked AS (
+        WITH area_per_bill AS (
+          SELECT company_id, voucher,
+            MAX(NULLIF(TRIM(SPLIT_PART(COALESCE(add_field, ''), ';', 21)), '')) AS area_code
+          FROM marg_transactions
+          WHERE tenant_id = ${tenantId}::uuid
+          GROUP BY company_id, voucher
+        ),
+        ranked AS (
           SELECT
-            COALESCE(mst.name, NULLIF(TRIM(mp.area), ''), 'Unknown') AS name,
+            COALESCE(mst.name, apb.area_code, 'Unknown') AS name,
             COUNT(*)::int AS bills,
             COALESCE(SUM(b.${signedAmount}), 0)::float8 AS value
           FROM marg_bill_rollup b
-          LEFT JOIN marg_parties mp
-            ON mp.tenant_id = b.tenant_id
-            AND mp.company_id = b.company_id
-            AND mp.cid = b.cid
-            AND mp.is_deleted = false
+          LEFT JOIN area_per_bill apb ON apb.company_id = b.company_id AND apb.voucher = b.voucher
           LEFT JOIN marg_sale_types mst
-            ON mst.tenant_id = b.tenant_id
+            ON mst.tenant_id = ${tenantId}::uuid
             AND mst.company_id = b.company_id
             AND mst.sg_code = 'AREA'
-            AND mst.s_code = NULLIF(TRIM(mp.area), '')
+            AND mst.s_code = apb.area_code
           WHERE ${where}
-          GROUP BY COALESCE(mst.name, NULLIF(TRIM(mp.area), ''), 'Unknown')
+          GROUP BY COALESCE(mst.name, apb.area_code, 'Unknown')
         )
         SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
           name, bills, value,
@@ -976,23 +986,26 @@ export class SalesPurchaseAnalysisService {
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
     return this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH bills AS (${this.billRollupSql(tenantId, kind, where, this.resolveScope(filters))}),
+      area_per_bill AS (
+        SELECT company_id, voucher,
+          MAX(NULLIF(TRIM(SPLIT_PART(COALESCE(add_field, ''), ';', 21)), '')) AS area_code
+        FROM marg_transactions
+        WHERE tenant_id = ${tenantId}::uuid
+        GROUP BY company_id, voucher
+      ),
       ranked AS (
         SELECT
-          COALESCE(mst.name, NULLIF(TRIM(mp.area), ''), 'Unknown') AS name,
+          COALESCE(mst.name, apb.area_code, 'Unknown') AS name,
           COUNT(*)::int AS bills,
           COALESCE(SUM(b.signed_net_amount), 0)::float8 AS value
         FROM bills b
-        LEFT JOIN marg_parties mp
-          ON mp.tenant_id = ${tenantId}::uuid
-          AND mp.company_id = b.company_id
-          AND mp.cid = b.party_code
-          AND mp.is_deleted = false
+        LEFT JOIN area_per_bill apb ON apb.company_id = b.company_id AND apb.voucher = b.voucher
         LEFT JOIN marg_sale_types mst
           ON mst.tenant_id = ${tenantId}::uuid
           AND mst.company_id = b.company_id
           AND mst.sg_code = 'AREA'
-          AND mst.s_code = NULLIF(TRIM(mp.area), '')
-        GROUP BY COALESCE(mst.name, NULLIF(TRIM(mp.area), ''), 'Unknown')
+          AND mst.s_code = apb.area_code
+        GROUP BY COALESCE(mst.name, apb.area_code, 'Unknown')
       )
       SELECT ROW_NUMBER() OVER (ORDER BY value DESC)::int AS rank,
         name, bills, value,
@@ -1558,6 +1571,14 @@ export class SalesPurchaseAnalysisService {
     keyExpr: Prisma.Sql;
     labelExpr: Prisma.Sql;
     needsProduct: boolean;
+    // Optional extra JOIN spliced into the `lines` CTE (used by both
+    // getDimensionAnalysis and dimensionComparison). Lets a dimension resolve
+    // from a per-bill computed source — e.g. `state`, whose code lives on the
+    // transaction lines (add_field segment 20) and must be collapsed to one
+    // value per voucher before grouping, otherwise lines that omit the code
+    // would fragment a single bill across the real state and an Unmapped
+    // bucket. Defaults to empty for the column-resolved dimensions.
+    extraJoin?: Prisma.Sql;
   } {
     switch (dimension) {
       case 'salesman':
@@ -1633,6 +1654,68 @@ export class SalesPurchaseAnalysisService {
           labelExpr: Prisma.sql`COALESCE(p.name, mprod.name, 'Unmapped product')`,
           needsProduct: true,
         };
+      case 'state':
+        return {
+          // State = the route/state code carried on the transaction lines
+          // (add_field segment 20), resolved to a friendly name via
+          // marg_sale_types(sg_code='ROUT'). Identical source + lookup as the
+          // overview's topStates(). The code is collapsed to ONE value per
+          // voucher in the LATERAL below so a bill never splits across the
+          // real state and the Unmapped bucket.
+          keyExpr: Prisma.sql`COALESCE(state_dim.state_code, '__UNMAPPED__')`,
+          labelExpr: Prisma.sql`COALESCE(state_dim.state_name, state_dim.state_code, 'Unknown state')`,
+          needsProduct: false,
+          extraJoin: Prisma.sql`
+            LEFT JOIN LATERAL (
+              SELECT
+                sb.state_code,
+                (SELECT mst.name FROM marg_sale_types mst
+                  WHERE mst.tenant_id = mv.tenant_id
+                    AND mst.company_id = mv.company_id
+                    AND mst.sg_code = 'ROUT'
+                    AND mst.s_code = sb.state_code
+                  LIMIT 1) AS state_name
+              FROM (
+                SELECT MAX(NULLIF(TRIM(SPLIT_PART(COALESCE(mt2.add_field, ''), ';', 20)), '')) AS state_code
+                FROM marg_transactions mt2
+                WHERE mt2.tenant_id = mv.tenant_id
+                  AND mt2.company_id = mv.company_id
+                  AND mt2.voucher = mv.voucher
+              ) sb
+            ) state_dim ON TRUE`,
+        };
+      case 'city':
+        return {
+          // City / Area = the transaction-time area code carried on the
+          // transaction lines (add_field segment 21), resolved to a name via
+          // marg_sale_types(sg_code='AREA'). This is the SAME source the
+          // dashboard's regional-breakdown report uses (point-in-time, booked
+          // at sale; immutable — unlike the party-master area which drifts when
+          // a customer is re-routed). The code is collapsed to ONE value per
+          // voucher in the LATERAL so a bill never fragments. Mirrors `state`
+          // exactly (segment 20 → ROUT vs segment 21 → AREA).
+          keyExpr: Prisma.sql`COALESCE(city_dim.area_code, '__UNMAPPED__')`,
+          labelExpr: Prisma.sql`COALESCE(city_dim.area_name, city_dim.area_code, 'Unknown city / area')`,
+          needsProduct: false,
+          extraJoin: Prisma.sql`
+            LEFT JOIN LATERAL (
+              SELECT
+                sb.area_code,
+                (SELECT mst.name FROM marg_sale_types mst
+                  WHERE mst.tenant_id = mv.tenant_id
+                    AND mst.company_id = mv.company_id
+                    AND mst.sg_code = 'AREA'
+                    AND mst.s_code = sb.area_code
+                  LIMIT 1) AS area_name
+              FROM (
+                SELECT MAX(NULLIF(TRIM(SPLIT_PART(COALESCE(mt2.add_field, ''), ';', 21)), '')) AS area_code
+                FROM marg_transactions mt2
+                WHERE mt2.tenant_id = mv.tenant_id
+                  AND mt2.company_id = mv.company_id
+                  AND mt2.voucher = mv.voucher
+              ) sb
+            ) city_dim ON TRUE`,
+        };
       case 'supplier':
         return {
           // Supplier = the party on the purchase voucher (mv.cid). mp is always
@@ -1705,6 +1788,7 @@ export class SalesPurchaseAnalysisService {
           ORDER BY CASE WHEN mt.batch IS NOT NULL AND ms.batch = mt.batch THEN 0 ELSE 1 END, ms.updated_at DESC
           LIMIT 1
         ) ms ON TRUE
+        ${dim.extraJoin ?? Prisma.empty}
         WHERE ${where}
       ),
       bill_grain AS (
@@ -1981,7 +2065,7 @@ export class SalesPurchaseAnalysisService {
       compareStartDate?: string;
       compareEndDate?: string;
     },
-    dim: { keyExpr: Prisma.Sql; labelExpr: Prisma.Sql; needsProduct: boolean },
+    dim: { keyExpr: Prisma.Sql; labelExpr: Prisma.Sql; needsProduct: boolean; extraJoin?: Prisma.Sql },
   ): Promise<
     Array<{
       key: string;
@@ -2046,6 +2130,7 @@ export class SalesPurchaseAnalysisService {
           ON mp.tenant_id = mv.tenant_id
           AND mp.company_id = mv.company_id
           AND mp.cid = mv.cid
+        ${dim.extraJoin ?? Prisma.empty}
         WHERE ${baseWhere} AND ${dateGuard}
       ),
       buckets AS (

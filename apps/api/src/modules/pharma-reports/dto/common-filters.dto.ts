@@ -563,23 +563,23 @@ export class SalesPurchaseComparisonFilterDto extends SalesPurchaseAnalysisFilte
 
   @ApiPropertyOptional({
     description: 'Optional dimension to break the comparison down by',
-    enum: ['none', 'salesman', 'salt', 'productCompany', 'productGroup', 'product', 'hsnCode', 'supplier'],
+    enum: ['none', 'salesman', 'salt', 'productCompany', 'productGroup', 'product', 'hsnCode', 'state', 'city', 'supplier'],
   })
   @IsOptional()
-  @IsIn(['none', 'salesman', 'salt', 'productCompany', 'productGroup', 'product', 'hsnCode', 'supplier'])
-  dimension?: 'none' | 'salesman' | 'salt' | 'productCompany' | 'productGroup' | 'product' | 'hsnCode' | 'supplier';
+  @IsIn(['none', 'salesman', 'salt', 'productCompany', 'productGroup', 'product', 'hsnCode', 'state', 'city', 'supplier'])
+  dimension?: 'none' | 'salesman' | 'salt' | 'productCompany' | 'productGroup' | 'product' | 'hsnCode' | 'state' | 'city' | 'supplier';
 }
 
 /** Top-N analysis grouped by a chosen dimension (salt, company, product group, etc.) */
 export class SalesPurchaseDimensionFilterDto extends SalesPurchaseAnalysisFilterDto {
   @ApiPropertyOptional({
     description: 'Dimension to group by',
-    enum: ['salesman', 'salt', 'productCompany', 'productGroup', 'product', 'hsnCode', 'supplier'],
+    enum: ['salesman', 'salt', 'productCompany', 'productGroup', 'product', 'hsnCode', 'state', 'city', 'supplier'],
     default: 'salesman',
   })
   @IsOptional()
-  @IsIn(['salesman', 'salt', 'productCompany', 'productGroup', 'product', 'hsnCode', 'supplier'])
-  dimension?: 'salesman' | 'salt' | 'productCompany' | 'productGroup' | 'product' | 'hsnCode' | 'supplier';
+  @IsIn(['salesman', 'salt', 'productCompany', 'productGroup', 'product', 'hsnCode', 'state', 'city', 'supplier'])
+  dimension?: 'salesman' | 'salt' | 'productCompany' | 'productGroup' | 'product' | 'hsnCode' | 'state' | 'city' | 'supplier';
 }
 
 export class AlertConfigDto {

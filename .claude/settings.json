@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx prisma *)"
+      "Bash(npx prisma *)",
+      "Bash(node -e ' *)",
+      "Bash(docker compose *)"
     ]
   }
 }

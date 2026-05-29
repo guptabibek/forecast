@@ -30,6 +30,8 @@ const ALL_DIMENSION_OPTIONS: Array<{ value: DimensionChoice; label: string; phar
   { value: 'salt', label: 'By Salt', pharmaOnly: true },
   { value: 'product', label: 'By Product' },
   { value: 'hsnCode', label: 'By HSN' },
+  { value: 'state', label: 'By State' },
+  { value: 'city', label: 'By City / Area' },
 ];
 
 const KIND_TABS: Array<{ key: SalesPurchaseAnalysisKind; label: string }> = [

@@ -508,7 +508,7 @@ export class PharmaReportsController {
   }
 
   @Get('analysis/:kind/dimension/:dimension')
-  @ApiOperation({ summary: 'Top-N analysis grouped by dimension (salesman / salt / company / group / product / hsn)' })
+  @ApiOperation({ summary: 'Top-N analysis grouped by dimension (salesman / salt / company / group / product / hsn / state / city / supplier)' })
   @ApiResponse({ status: 200, description: 'Grouped analytical rollup' })
   async getSalesPurchaseDimension(
     @CurrentUser() user: any,

@@ -2,7 +2,7 @@ import { getFallbackPathForRole } from '@/permissions';
 import { useBranding } from '@components/ThemeProvider';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useAuthStore } from '@stores/auth.store';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { Link, useNavigate } from 'react-router-dom';
@@ -22,6 +22,26 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const brandName = settings?.name || 'ForecastPro';
   const logoUrl = settings?.logoUrl;
+
+  // Surface why the user landed here when they were force-logged-out (e.g. the
+  // account signed in on another device). The API interceptor stashes a reason
+  // in sessionStorage before redirecting; we show it once and clear it so it
+  // doesn't reappear on later visits to /login.
+  useEffect(() => {
+    let reason: string | null = null;
+    try {
+      reason = window.sessionStorage.getItem('auth:logoutReason');
+      if (reason) window.sessionStorage.removeItem('auth:logoutReason');
+    } catch {
+      // sessionStorage unavailable — nothing to surface.
+    }
+    if (reason === 'session_replaced') {
+      toast.error('You were signed out because your account was logged in on another device.', {
+        id: 'auth:logoutReason',
+        duration: 6000,
+      });
+    }
+  }, []);
 
 
   const {

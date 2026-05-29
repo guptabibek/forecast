@@ -954,6 +954,8 @@ export type SalesPurchaseDimension =
   | 'productGroup'
   | 'product'
   | 'hsnCode'
+  | 'state'
+  | 'city'
   | 'supplier';
 
 export interface SalesPurchaseDimensionRow {

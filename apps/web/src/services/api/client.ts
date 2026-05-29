@@ -137,6 +137,17 @@ apiClient.interceptors.request.use(
 
 // Response interceptor - handle errors and token refresh
 let isRefreshing = false;
+// Set once a terminal, non-recoverable auth outcome has been handled and a
+// full-page redirect to /login is on its way (session replaced on another
+// device, token expired, or refresh failed on a protected route). Every other
+// in-flight request will also 401 — and an authenticated page fires many at
+// once — so without this guard each rejection re-runs the alert + logout +
+// redirect. That is exactly what made the "logged in on another device" dialog
+// pop back up no matter how many times the user clicked OK. We swallow those
+// follow-on errors quietly; the pending navigation reloads the app and resets
+// this flag back to false. It is ONLY set on paths that actually navigate, so
+// it can never get stuck on a page we intentionally stay on.
+let sessionInvalidated = false;
 let failedQueue: Array<{
   resolve: (value?: unknown) => void;
   reject: (reason?: unknown) => void;
@@ -163,6 +174,17 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     reportApiError(error);
 
+    // A terminal logout + redirect is already in flight (see sessionInvalidated
+    // note above). Swallow every follow-on error quietly so we don't stack a
+    // second alert / logout / redirect for each of the other in-flight requests
+    // that 401 at the same time.
+    if (sessionInvalidated) {
+      if (isMutation(error.config)) {
+        useApiLoadingStore.getState()._decrement();
+      }
+      return Promise.reject(error);
+    }
+
     const originalRequest = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
     };
@@ -177,13 +199,23 @@ apiClient.interceptors.response.use(
       responseMessage.includes('Tenant context could not be resolved');
 
     if (error.response?.status === 401 && responseData?.code === 'SESSION_REPLACED') {
-      window.alert('Your account was logged in on another device.');
+      sessionInvalidated = true;
+      // Hand the reason to the login page via sessionStorage (survives the
+      // logout + full redirect) so it can show a proper toast, instead of a
+      // native blocking window.alert that stacked one dialog per in-flight
+      // request.
+      try {
+        window.sessionStorage.setItem('auth:logoutReason', 'session_replaced');
+      } catch {
+        // sessionStorage unavailable (private mode / quota) — non-fatal.
+      }
       await useAuthStore.getState().logout();
       window.location.href = '/login';
       return Promise.reject(error);
     }
 
     if (error.response?.status === 401 && responseData?.code === 'TOKEN_EXPIRED') {
+      sessionInvalidated = true;
       await useAuthStore.getState().logout();
       window.location.href = '/login';
       return Promise.reject(error);
@@ -222,6 +254,11 @@ apiClient.interceptors.response.use(
         const publicAuthPaths = ['/login', '/forgot-password', '/reset-password'];
         const isPublicPath = publicAuthPaths.some((p) => currentPath.startsWith(p));
         if (!isPublicPath) {
+          // Same one-shot guard: a protected-route refresh failure logs out and
+          // redirects, so suppress the other concurrent 401s. We do NOT set it
+          // on public auth pages, where we stay put and must keep handling
+          // their errors normally.
+          sessionInvalidated = true;
           window.location.href = '/login';
         }
         return Promise.reject(refreshError);

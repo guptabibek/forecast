@@ -62,6 +62,8 @@ const ALL_DIMENSION_TABS: Array<{ key: SalesPurchaseDimension; label: string; de
   { key: 'productGroup', label: 'Top Groups', description: 'Therapeutic group / classification ranking' },
   { key: 'product', label: 'Top Products', description: 'Top SKUs by value with margin context' },
   { key: 'hsnCode', label: 'HSN', description: 'HSN-code rollup for tax / GST audit' },
+  { key: 'state', label: 'State', description: 'Regional breakdown by state / route — value & share by region' },
+  { key: 'city', label: 'City / Area', description: 'Regional breakdown by city / area — value & share by locality' },
 ];
 
 type ViewKey = 'overview' | 'bills' | 'dimension';
@@ -591,7 +593,7 @@ export default function SalesPurchaseAnalysisPage() {
               accessor: (row) => (
                 <div>
                   <div className="font-medium text-gray-900">{row.label}</div>
-                  {row.key && row.key !== row.label && row.key !== '__UNMAPPED__' && row.key !== '__UNATTRIBUTED__' && dimension !== 'salesman' && dimension !== 'salt' && dimension !== 'productGroup' && dimension !== 'product' && dimension !== 'hsnCode' && (
+                  {row.key && row.key !== row.label && row.key !== '__UNMAPPED__' && row.key !== '__UNATTRIBUTED__' && dimension !== 'salesman' && dimension !== 'salt' && dimension !== 'productGroup' && dimension !== 'product' && dimension !== 'hsnCode' && dimension !== 'state' && dimension !== 'city' && (
                     <div className="text-xs font-mono text-gray-500">{row.key}</div>
                   )}
                 </div>
