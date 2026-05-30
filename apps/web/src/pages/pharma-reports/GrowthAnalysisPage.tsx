@@ -116,6 +116,11 @@ export default function GrowthAnalysisPage() {
   const [compareEndDate, setCompareEndDate] = useState<string>(initial?.compare.endDate ?? '');
   const [dimension, setDimension] = useState<DimensionChoice>('productCompany');
   const [breakdownSort, setBreakdownSort] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'currentAmount', order: 'desc' });
+  // The breakdown returns ALL groups (the backend no longer truncates to a
+  // top-N); we paginate it client-side so a multi-thousand-SKU product
+  // breakdown stays responsive while still showing every row.
+  const [breakdownPage, setBreakdownPage] = useState(1);
+  const [breakdownPageSize, setBreakdownPageSize] = useState(50);
 
   // When user picks a non-custom preset, push all four dates atomically.
   useEffect(() => {
@@ -144,8 +149,6 @@ export default function GrowthAnalysisPage() {
       compareStartDate,
       compareEndDate,
       dimension,
-      limit: 200,
-      offset: 0,
     }),
     [startDate, endDate, compareStartDate, compareEndDate, dimension],
   );
@@ -172,6 +175,17 @@ export default function GrowthAnalysisPage() {
       return order === 'desc' ? bv - av : av - bv;
     });
   }, [data?.breakdown, breakdownSort]);
+
+  // Reset to the first page whenever the result set or its ordering changes,
+  // so the user isn't stranded on a page that no longer exists.
+  useEffect(() => {
+    setBreakdownPage(1);
+  }, [data?.breakdown, breakdownSort, breakdownPageSize]);
+
+  const pagedBreakdown = useMemo(
+    () => sortedBreakdown.slice((breakdownPage - 1) * breakdownPageSize, breakdownPage * breakdownPageSize),
+    [sortedBreakdown, breakdownPage, breakdownPageSize],
+  );
 
   const handleBreakdownSort = (key: string) => {
     setBreakdownSort((prev) =>
@@ -565,16 +579,23 @@ export default function GrowthAnalysisPage() {
         <Card padding="none">
           <CardHeader
             title={`Breakdown — ${DIMENSION_OPTIONS.find((d) => d.value === dimension)?.label}`}
-            description="Sorted by largest gainers first; decliners at the bottom."
+            description={`All ${sortedBreakdown.length.toLocaleString()} groups with activity in either period — click any column to sort; gainers and decliners both shown.`}
             className="px-6 pt-6"
           />
           <DataTable<SalesPurchaseComparisonBreakdownRow>
-            data={sortedBreakdown}
+            data={pagedBreakdown}
             columns={breakdownColumns}
             keyExtractor={(row) => row.key}
             isLoading={comparison.isLoading}
             emptyMessage="No activity in either period for the selected breakdown"
             sorting={{ sortBy: breakdownSort.key, sortOrder: breakdownSort.order, onSort: handleBreakdownSort }}
+            pagination={{
+              page: breakdownPage,
+              pageSize: breakdownPageSize,
+              total: sortedBreakdown.length,
+              onPageChange: setBreakdownPage,
+              onPageSizeChange: setBreakdownPageSize,
+            }}
           />
         </Card>
       )}

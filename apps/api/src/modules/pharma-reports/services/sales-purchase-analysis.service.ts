@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/database/prisma.service';
+import {
+  margPurchaseAmountSignSql,
+  margSalesAmountSignSql,
+  margVoucherFamilySql,
+} from '../../marg-ede/marg-voucher-family.sql';
 import { SalesPurchaseAnalysisFilterDto } from '../dto';
 import {
   AllowedSqlColumns,
@@ -8,11 +13,6 @@ import {
   buildPharmaOrderBySql,
   parsePharmaFilters,
 } from '../pharma-filter.helper';
-import {
-  margPurchaseAmountSignSql,
-  margSalesAmountSignSql,
-  margVoucherFamilySql,
-} from '../../marg-ede/marg-voucher-family.sql';
 
 type AnalysisKind = 'sales' | 'purchase';
 
@@ -1579,6 +1579,14 @@ export class SalesPurchaseAnalysisService {
     // would fragment a single bill across the real state and an Unmapped
     // bucket. Defaults to empty for the column-resolved dimensions.
     extraJoin?: Prisma.Sql;
+    // True when the dimension is an attribute of the VOUCHER (one value per
+    // bill: salesman / supplier / state / city) rather than of the LINE
+    // (product / salt / company / group / hsn). For per-voucher dimensions an
+    // entire bill maps to a single dim value, so the per-bill net uses Marg's
+    // rounded invoice total `final_amt` — matching the overview cards
+    // (topStates/topCities) and Marg exactly. Per-line dimensions keep the
+    // line-sum because a bill's round-off cannot be attributed to one product.
+    perVoucher?: boolean;
   } {
     switch (dimension) {
       case 'salesman':
@@ -1601,6 +1609,7 @@ export class SalesPurchaseAnalysisService {
             ), 'Unknown salesman (' || COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) || ')')
           END`,
           needsProduct: false,
+          perVoucher: true,
         };
       case 'salt':
         return {
@@ -1662,9 +1671,18 @@ export class SalesPurchaseAnalysisService {
           // overview's topStates(). The code is collapsed to ONE value per
           // voucher in the LATERAL below so a bill never splits across the
           // real state and the Unmapped bucket.
-          keyExpr: Prisma.sql`COALESCE(state_dim.state_code, '__UNMAPPED__')`,
-          labelExpr: Prisma.sql`COALESCE(state_dim.state_name, state_dim.state_code, 'Unknown state')`,
+          //
+          // Group by the RESOLVED NAME, not the raw code: a tenant routinely
+          // has several route codes that map to the same state/locality name
+          // (two code namespaces in Marg). Keying on the code fragments one
+          // state across multiple rows, so neither matches Marg. The dashboard
+          // getStateBreakdown() and the overview topStates() both group by
+          // COALESCE(name, code, 'Unknown') — we mirror that exactly here so
+          // the By-Dimension table and the Growth report reconcile with them.
+          keyExpr: Prisma.sql`COALESCE(state_dim.state_name, state_dim.state_code, 'Unknown')`,
+          labelExpr: Prisma.sql`COALESCE(state_dim.state_name, state_dim.state_code, 'Unknown')`,
           needsProduct: false,
+          perVoucher: true,
           extraJoin: Prisma.sql`
             LEFT JOIN LATERAL (
               SELECT
@@ -1694,9 +1712,17 @@ export class SalesPurchaseAnalysisService {
           // a customer is re-routed). The code is collapsed to ONE value per
           // voucher in the LATERAL so a bill never fragments. Mirrors `state`
           // exactly (segment 20 → ROUT vs segment 21 → AREA).
-          keyExpr: Prisma.sql`COALESCE(city_dim.area_code, '__UNMAPPED__')`,
-          labelExpr: Prisma.sql`COALESCE(city_dim.area_name, city_dim.area_code, 'Unknown city / area')`,
+          //
+          // Group by the RESOLVED NAME, not the raw code — same reason as
+          // `state`: Marg stores the same locality under multiple area codes
+          // (e.g. MANGO = code 366 AND code A3), and keying on the code splits
+          // one city into several rows that never reconcile with Marg. The
+          // dashboard getCityBreakdown() and overview topCities() group by
+          // COALESCE(name, code, 'Unknown'); we match that.
+          keyExpr: Prisma.sql`COALESCE(city_dim.area_name, city_dim.area_code, 'Unknown')`,
+          labelExpr: Prisma.sql`COALESCE(city_dim.area_name, city_dim.area_code, 'Unknown')`,
           needsProduct: false,
+          perVoucher: true,
           extraJoin: Prisma.sql`
             LEFT JOIN LATERAL (
               SELECT
@@ -1724,6 +1750,7 @@ export class SalesPurchaseAnalysisService {
           keyExpr: Prisma.sql`COALESCE(NULLIF(TRIM(mv.cid), ''), '__UNMAPPED__')`,
           labelExpr: Prisma.sql`COALESCE(NULLIF(TRIM(mp.par_name), ''), mv.cid, 'Unmapped supplier')`,
           needsProduct: false,
+          perVoucher: true,
         };
       default:
         throw new BadRequestException(`Unsupported dimension: ${dimension}`);
@@ -1749,6 +1776,14 @@ export class SalesPurchaseAnalysisService {
     // +1 invoice / -1 return so dimension net_amount nets correctly. Applied
     // at the line level so all downstream sums inherit it.
     const dimSign = this.scopeAmountSignSql(kind, this.resolveScope(filters), 'mv');
+    // Per-bill net. For per-voucher dimensions a bill maps to one dim value, so
+    // use Marg's rounded invoice total `final_amt` (× sign), exactly as the
+    // overview's billRollupSql does — this carries the bill round-off and makes
+    // state/city/salesman/supplier reconcile to the overview cards and Marg.
+    // Per-line dimensions keep the line-sum (round-off isn't a product's value).
+    const billNet = dim.perVoucher
+      ? Prisma.sql`CASE WHEN has_final THEN bill_final_signed ELSE amount + gst_amount END`
+      : Prisma.sql`amount + gst_amount`;
     const cte = Prisma.sql`
       WITH lines AS (
         SELECT
@@ -1762,7 +1797,11 @@ export class SalesPurchaseAnalysisService {
           ABS(COALESCE(mt.amount, 0)) * ${dimSign} AS amount,
           ABS(COALESCE(mt.gst_amount, 0)) * ${dimSign} AS gst_amount,
           ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0) * ${dimSign} AS line_cost,
-          mt.pid
+          mt.pid,
+          -- final_amt is constant per voucher; carry it (signed) so bill_grain
+          -- can prefer it over the line-sum for per-voucher dimensions.
+          COALESCE(mv.final_amt, 0) * ${dimSign} AS bill_final_signed,
+          (mv.final_amt IS NOT NULL) AS has_final
         FROM marg_vouchers mv
         LEFT JOIN marg_transactions mt
           ON mt.tenant_id = mv.tenant_id
@@ -1802,6 +1841,8 @@ export class SalesPurchaseAnalysisService {
           SUM(qty) AS qty,
           SUM(amount) AS amount,
           SUM(gst_amount) AS gst_amount,
+          MAX(bill_final_signed) AS bill_final_signed,
+          bool_or(has_final) AS has_final,
           SUM(line_cost) AS line_cost,
           COUNT(DISTINCT pid) FILTER (WHERE pid IS NOT NULL) AS items
         FROM lines
@@ -1814,9 +1855,9 @@ export class SalesPurchaseAnalysisService {
           COUNT(DISTINCT company_id || ':' || voucher)::int AS bill_count,
           COUNT(DISTINCT cid) FILTER (WHERE cid IS NOT NULL)::int AS party_count,
           SUM(qty)::float8 AS quantity,
-          SUM(amount + gst_amount)::float8 AS net_amount,
+          SUM(${billNet})::float8 AS net_amount,
           SUM(line_cost)::float8 AS cost_amount,
-          SUM(amount + gst_amount - line_cost)::float8 AS profit,
+          SUM((${billNet}) - line_cost)::float8 AS profit,
           SUM(items)::int AS item_count
         FROM bill_grain
         GROUP BY dim_key
@@ -2007,7 +2048,9 @@ export class SalesPurchaseAnalysisService {
           ABS(COALESCE(mt.amount, 0)) * ${cmpSign} AS amount,
           ABS(COALESCE(mt.gst_amount, 0)) * ${cmpSign} AS gst_amount,
           ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0) * ${cmpSign} AS line_cost,
-          mt.pid
+          mt.pid,
+          COALESCE(mv.final_amt, 0) * ${cmpSign} AS bill_final_signed,
+          (mv.final_amt IS NOT NULL) AS has_final
         FROM marg_vouchers mv
         LEFT JOIN marg_transactions mt
           ON mt.tenant_id = mv.tenant_id
@@ -2034,15 +2077,32 @@ export class SalesPurchaseAnalysisService {
           LIMIT 1
         ) ms ON TRUE
         WHERE ${where}
+      ),
+      -- Roll lines up to one row per bill so the headline net uses Marg's
+      -- rounded invoice total (final_amt) — the same per-bill basis as the
+      -- overview KPI strip — instead of re-summing line amounts (which drops
+      -- the per-bill round-off and drifts a few rupees from the overview).
+      bill_grain AS (
+        SELECT
+          company_id,
+          voucher,
+          SUM(qty) AS qty,
+          SUM(amount) AS amount,
+          SUM(gst_amount) AS gst_amount,
+          MAX(bill_final_signed) AS bill_final_signed,
+          bool_or(has_final) AS has_final,
+          SUM(line_cost) AS line_cost
+        FROM lines
+        GROUP BY company_id, voucher
       )
       SELECT
-        COALESCE(SUM(amount + gst_amount), 0)::float8 AS net_amount,
+        COALESCE(SUM(CASE WHEN has_final THEN bill_final_signed ELSE amount + gst_amount END), 0)::float8 AS net_amount,
         COALESCE(SUM(qty), 0)::float8 AS quantity,
-        COUNT(DISTINCT company_id || ':' || voucher)::int AS bill_count,
-        COUNT(DISTINCT pid) FILTER (WHERE pid IS NOT NULL)::int AS item_count,
+        COUNT(*)::int AS bill_count,
+        (SELECT COUNT(DISTINCT pid) FROM lines WHERE pid IS NOT NULL)::int AS item_count,
         COALESCE(SUM(line_cost), 0)::float8 AS cost_amount,
-        COALESCE(SUM(amount + gst_amount - line_cost), 0)::float8 AS profit
-      FROM lines
+        COALESCE(SUM((CASE WHEN has_final THEN bill_final_signed ELSE amount + gst_amount END) - line_cost), 0)::float8 AS profit
+      FROM bill_grain
     `);
 
     const net = Number(row?.net_amount ?? 0);
@@ -2065,7 +2125,7 @@ export class SalesPurchaseAnalysisService {
       compareStartDate?: string;
       compareEndDate?: string;
     },
-    dim: { keyExpr: Prisma.Sql; labelExpr: Prisma.Sql; needsProduct: boolean; extraJoin?: Prisma.Sql },
+    dim: { keyExpr: Prisma.Sql; labelExpr: Prisma.Sql; needsProduct: boolean; extraJoin?: Prisma.Sql; perVoucher?: boolean },
   ): Promise<
     Array<{
       key: string;
@@ -2089,6 +2149,23 @@ export class SalesPurchaseAnalysisService {
     };
     const baseWhere = this.buildHeaderWhere(tenantId, kind, widenedFilters, 'mv', 'mt', 'mp', 'mprod');
     const cmpDimSign = this.scopeAmountSignSql(kind, this.resolveScope(filters), 'mv');
+    // Per-bill amount in each period bucket. Per-voucher dimensions use the
+    // signed `final_amt` (round-off included) so the growth breakdown matches
+    // the overview / By-Dimension exactly; per-line dimensions keep the
+    // line-sum. Both evaluate at the (dim_key, voucher) bucket grain where
+    // final_amt is constant, so MAX() picks it cleanly.
+    const cmpAmount = dim.perVoucher
+      ? Prisma.sql`CASE WHEN bool_or(has_final) THEN MAX(bill_final_signed) ELSE SUM(net_line) END`
+      : Prisma.sql`SUM(net_line)`;
+    // The growth/degrowth breakdown returns ALL material groups; the frontend
+    // paginates client-side. Deliberately decoupled from the request `limit`
+    // (which is @Max(500) for server-paged grids and was what truncated every
+    // decliner): a small client limit must NOT cap the breakdown. The constant
+    // is only a safety valve against pathological cardinality; combined with the
+    // GREATEST() ordering below, if it is ever hit the most material rows are
+    // the ones kept. 30k comfortably covers a 2-month union of a pharma SKU
+    // catalogue (~10–15k) with headroom.
+    const cmpLimit = 30000;
     const dateGuard = Prisma.sql`(
       (mv.date >= ${filters.startDate}::date AND mv.date <= ${filters.endDate}::date)
       OR (mv.date >= ${filters.compareStartDate}::date AND mv.date <= ${filters.compareEndDate}::date)
@@ -2114,7 +2191,9 @@ export class SalesPurchaseAnalysisService {
           ${dim.keyExpr} AS dim_key,
           ${dim.labelExpr} AS dim_label,
           ABS(COALESCE(mt.qty, 0)) * ${cmpDimSign} AS qty,
-          (ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))) * ${cmpDimSign} AS net_line
+          (ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))) * ${cmpDimSign} AS net_line,
+          COALESCE(mv.final_amt, 0) * ${cmpDimSign} AS bill_final_signed,
+          (mv.final_amt IS NOT NULL) AS has_final
         FROM marg_vouchers mv
         LEFT JOIN marg_transactions mt
           ON mt.tenant_id = mv.tenant_id
@@ -2145,7 +2224,7 @@ export class SalesPurchaseAnalysisService {
             ELSE NULL
           END AS bucket,
           SUM(qty) AS qty,
-          SUM(net_line) AS amount
+          ${cmpAmount} AS amount
         FROM lines
         GROUP BY dim_key, company_id, voucher
       )
@@ -2161,8 +2240,19 @@ export class SalesPurchaseAnalysisService {
       FROM buckets
       WHERE bucket IS NOT NULL
       GROUP BY dim_key
-      ORDER BY (COALESCE(SUM(amount) FILTER (WHERE bucket = 'A'), 0) - COALESCE(SUM(amount) FILTER (WHERE bucket = 'B'), 0)) DESC
-      LIMIT 200
+      -- Select the most MATERIAL groups (largest magnitude in EITHER period),
+      -- not the largest gainers. Ordering by delta DESC + a fixed limit returns
+      -- only top gainers and silently truncates every decliner — for a
+      -- high-cardinality dimension (e.g. ~10k product SKUs) that made the whole
+      -- breakdown look universally positive even when the total fell. Ordering
+      -- by GREATEST(|current|, |compare|) surfaces the products that actually
+      -- move the total, so genuine degrowth is visible. The frontend re-sorts
+      -- client-side, so this only governs which rows are kept.
+      ORDER BY GREATEST(
+        ABS(COALESCE(SUM(amount) FILTER (WHERE bucket = 'A'), 0)),
+        ABS(COALESCE(SUM(amount) FILTER (WHERE bucket = 'B'), 0))
+      ) DESC, dim_label ASC
+      LIMIT ${cmpLimit}
     `);
 
     return rows.map((r) => {
