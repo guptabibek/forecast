@@ -1945,13 +1945,29 @@ export class MargEdeService {
         };
       if (shouldCommitCursor) {
         const completedAt = new Date();
+        // Persist the DATETIME as the durable incremental cursor, and reset the
+        // pagination INDEX to 0 — do NOT carry over the final Marg index.
+        //
+        // Marg's `index` is only a within-session pagination token; the datetime
+        // is the cross-sync cursor. We reach this commit ONLY after the fetch
+        // reported COMPLETE for the window (both fetch loops above throw if they
+        // hit maxPagesPerSync without completing), so the window is fully
+        // drained here and the next incremental must start a NEW session at
+        // index 0 with the advanced datetime. Persisting the final index
+        // (e.g. 2000) made the next scheduled incremental resume at that offset,
+        // which Marg cannot serve for the new datetime window — the fetch hung
+        // at 0 rows and the stale-recovery sweep reaped it, silently freezing
+        // the cursor and breaking auto-sync (manual syncs only worked because a
+        // fromDate resets the index to 0). Keeping the datetime means
+        // `startedFromCleanCursor` stays false, so the stock/outstanding
+        // authoritativeness gates are unaffected.
         if (shouldRunInventory) {
           configUpdate.lastSyncAt = completedAt;
-          configUpdate.lastSyncIndex = currentIndex;
+          configUpdate.lastSyncIndex = 0;
           configUpdate.lastSyncDatetime = lastDatetime || new Date().toISOString();
         }
         configUpdate.lastAccountingSyncAt = completedAt;
-        configUpdate.lastAccountingSyncIndex = accountingIndex;
+        configUpdate.lastAccountingSyncIndex = 0;
         configUpdate.lastAccountingSyncDatetime = accountingDatetime || new Date().toISOString();
       }
       await this.margPrisma.margSyncConfig.update({

@@ -62,7 +62,7 @@ const ALL_DIMENSION_TABS: Array<{ key: SalesPurchaseDimension; label: string; de
   { key: 'productGroup', label: 'Top Groups', description: 'Therapeutic group / classification ranking' },
   { key: 'product', label: 'Top Products', description: 'Top SKUs by value with margin context' },
   { key: 'hsnCode', label: 'HSN', description: 'HSN-code rollup for tax / GST audit' },
-  { key: 'state', label: 'State', description: 'Regional breakdown by state / route — value & share by region' },
+  { key: 'state', label: 'Route', description: 'Breakdown by route — value & share by route' },
   { key: 'city', label: 'City / Area', description: 'Regional breakdown by city / area — value & share by locality' },
 ];
 
@@ -482,12 +482,12 @@ export default function SalesPurchaseAnalysisPage() {
           />
         </Card>
         <Card>
-          <CardHeader title="State-wise Sales" />
+          <CardHeader title="Route-wise Sales" />
           <DataTable
             data={overview.data?.topStates ?? []}
             columns={[
               { key: 'rank', header: '#', accessor: (row) => String(row.rank), align: 'right' },
-              { key: 'name', header: 'State', accessor: 'name' },
+              { key: 'name', header: 'Route', accessor: 'name' },
               { key: 'bills', header: 'Bills', accessor: (row) => fmt(row.bills), align: 'right' },
               { key: 'value', header: 'Value', accessor: (row) => fmtCurrency(row.value), align: 'right' },
               { key: 'share', header: 'Share', accessor: (row) => fmtPct(row.share), align: 'right' },

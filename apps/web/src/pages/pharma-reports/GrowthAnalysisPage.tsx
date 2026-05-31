@@ -30,7 +30,7 @@ const ALL_DIMENSION_OPTIONS: Array<{ value: DimensionChoice; label: string; phar
   { value: 'salt', label: 'By Salt', pharmaOnly: true },
   { value: 'product', label: 'By Product' },
   { value: 'hsnCode', label: 'By HSN' },
-  { value: 'state', label: 'By State' },
+  { value: 'state', label: 'By Route' },
   { value: 'city', label: 'By City / Area' },
 ];
 

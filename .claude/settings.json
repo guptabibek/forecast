@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npx prisma *)",
       "Bash(node -e ' *)",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(git check-ignore *)"
     ]
   }
 }

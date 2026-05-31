@@ -1423,7 +1423,7 @@ export default function Dashboard() {
                       : 'text-secondary-600 hover:bg-secondary-50'
                   }`}
                 >
-                  {tab === 'state' ? 'State' : 'City/Area'}
+                  {tab === 'state' ? 'Route' : 'City/Area'}
                 </button>
               ))}
             </div>
@@ -1437,7 +1437,7 @@ export default function Dashboard() {
               <div className="h-[200px] flex items-center justify-center text-secondary-500">
                 <div className="text-center">
                   <GlobeAltIcon className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No {regionalTab === 'state' ? 'state' : 'city/area'} data</p>
+                  <p className="text-sm">No {regionalTab === 'state' ? 'route' : 'city/area'} data</p>
                 </div>
               </div>
             ) : (
