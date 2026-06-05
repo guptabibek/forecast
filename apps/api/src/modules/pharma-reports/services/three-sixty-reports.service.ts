@@ -10,7 +10,19 @@ import {
 import { InventoryReportsService } from './inventory-reports.service';
 import { ProcurementReportsService } from './procurement-reports.service';
 
-type PeriodKey = 'fy' | 'calendar' | 'last12';
+type PeriodKey =
+  | 'today'
+  | 'yesterday'
+  | 'this_week'
+  | 'last_week'
+  | 'this_month'
+  | 'last_month'
+  | 'this_quarter'
+  | 'last_quarter'
+  | 'fy'
+  | 'last_fy'
+  | 'calendar'
+  | 'last12';
 type ThreeSixtySearchType = 'item' | 'customer' | 'supplier';
 
 interface ReportContext {
@@ -18,7 +30,14 @@ interface ReportContext {
   monthStart: Date;
   nextMonthStart: Date;
   lastMonthStart: Date;
-  fiscalStart: Date;
+  // Selected analysis window [periodStart, periodEnd] (inclusive). Drives all
+  // period-scoped aggregates (period sales/purchase, returns, margin, top
+  // items/buyers, location sales). The month/trend anchors above are
+  // period-independent and always reflect "now".
+  periodStart: Date;
+  periodEnd: Date;
+  // Same window shifted back one year, for the prior-period (YoY) comparison.
+  // priorFiscalEnd is an EXCLUSIVE upper bound.
   priorFiscalStart: Date;
   priorFiscalEnd: Date;
   trendStart: Date;
@@ -135,9 +154,11 @@ export class ThreeSixtyReportsService {
         COALESCE(SUM(amount) FILTER (WHERE kind = 'SALES' AND date >= ${ctx.lastMonthStart}::date AND date < ${ctx.monthStart}::date), 0)::float8 AS last_month_sales_value,
         COALESCE(SUM(quantity) FILTER (WHERE kind = 'PURCHASES' AND date >= ${ctx.monthStart}::date AND date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_purchase_qty,
         COALESCE(SUM(amount) FILTER (WHERE kind = 'PURCHASES' AND date >= ${ctx.monthStart}::date AND date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_purchase_value,
-        COALESCE(SUM(amount) FILTER (WHERE kind = 'SALES' AND date >= ${ctx.fiscalStart}::date AND date <= ${ctx.asOf}::date), 0)::float8 AS current_year_sales_value,
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'SALES' AND date >= ${ctx.periodStart}::date AND date <= ${ctx.periodEnd}::date), 0)::float8 AS current_year_sales_value,
+        COALESCE(SUM(quantity) FILTER (WHERE kind = 'SALES' AND date >= ${ctx.periodStart}::date AND date <= ${ctx.periodEnd}::date), 0)::float8 AS current_year_sales_qty,
         COALESCE(SUM(amount) FILTER (WHERE kind = 'SALES' AND date >= ${ctx.priorFiscalStart}::date AND date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS last_year_sales_value,
-        COALESCE(SUM(amount) FILTER (WHERE kind = 'PURCHASES' AND date >= ${ctx.fiscalStart}::date AND date <= ${ctx.asOf}::date), 0)::float8 AS current_year_purchase_value
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'PURCHASES' AND date >= ${ctx.periodStart}::date AND date <= ${ctx.periodEnd}::date), 0)::float8 AS current_year_purchase_value,
+        COALESCE(SUM(quantity) FILTER (WHERE kind = 'PURCHASES' AND date >= ${ctx.periodStart}::date AND date <= ${ctx.periodEnd}::date), 0)::float8 AS current_year_purchase_qty
       FROM movements
     `);
 
@@ -201,8 +222,8 @@ export class ThreeSixtyReportsService {
         AND (${this.compatibleSalesLineSql('mv', 'mt')} OR ${this.compatiblePurchaseLineSql('mv', 'mt')})
       WHERE mv.tenant_id = ${tenantId}::uuid
         AND mv.is_cancelled = FALSE
-        AND mv.date >= ${ctx.fiscalStart}::date
-        AND mv.date <= ${ctx.asOf}::date
+        AND mv.date >= ${ctx.periodStart}::date
+        AND mv.date <= ${ctx.periodEnd}::date
         AND ${margProductFilter}
     `);
 
@@ -229,8 +250,8 @@ export class ThreeSixtyReportsService {
       ) ms ON TRUE
       WHERE mt.tenant_id = ${tenantId}::uuid
         AND mv.type IN ('S', 'R')
-        AND mt.date >= ${ctx.fiscalStart}::date
-        AND mt.date <= ${ctx.asOf}::date
+        AND mt.date >= ${ctx.periodStart}::date
+        AND mt.date <= ${ctx.periodEnd}::date
         AND ${margProductFilter}
     `);
 
@@ -298,8 +319,8 @@ export class ThreeSixtyReportsService {
         AND mv.type IN ('S', 'R')
         AND ${margProductFilter}
         ${margVoucherLocationFilter}
-        AND mv.date >= ${ctx.fiscalStart}::date
-        AND mv.date <= ${ctx.asOf}::date
+        AND mv.date >= ${ctx.periodStart}::date
+        AND mv.date <= ${ctx.periodEnd}::date
       GROUP BY COALESCE(l.code, l.name, mb.name, mb.branch, 'Unmapped')
       ORDER BY sales_value DESC
       LIMIT 6
@@ -416,6 +437,7 @@ export class ThreeSixtyReportsService {
         AND ${poProductFilter}
         ${poLocationFilter}
       GROUP BY po.id, po.order_number, po.order_date, po.expected_date, s.name, po.status
+      HAVING SUM(GREATEST(pol.quantity - pol.received_qty, 0)) > 0
       ORDER BY po.expected_date ASC
       LIMIT 8
     `);
@@ -431,7 +453,8 @@ export class ThreeSixtyReportsService {
     const effectiveStockAgeing = stockAgeingReport?.summary?.length
       ? this.stockAgeingFromInventoryReport(stockAgeingReport.summary)
       : this.addQuantityShare(stockAgeing);
-    const avgDailySales = Number(kpi.current_month_sales_qty ?? 0) / Math.max(1, this.daysElapsedInMonth(ctx.asOf));
+    // Days-of-cover uses the selected period's sales rate so it tracks the chosen window.
+    const avgDailySales = Number(kpi.current_year_sales_qty ?? 0) / Math.max(1, this.periodDays(ctx));
 
     return {
       asOf: ctx.asOf,
@@ -465,14 +488,16 @@ export class ThreeSixtyReportsService {
         currentMonthPurchaseQty: Number(kpi.current_month_purchase_qty ?? 0),
         currentMonthPurchaseValue: Number(kpi.current_month_purchase_value ?? 0),
         currentYearSalesValue: Number(kpi.current_year_sales_value ?? 0),
+        currentYearSalesQty: Number(kpi.current_year_sales_qty ?? 0),
         currentYearPurchaseValue: Number(kpi.current_year_purchase_value ?? 0),
+        currentYearPurchaseQty: Number(kpi.current_year_purchase_qty ?? 0),
         momSalesChangePct: this.pctChange(totalSales, lastSales),
         yoySalesChangePct: this.pctChange(Number(kpi.current_year_sales_value ?? 0), Number(kpi.last_year_sales_value ?? 0)),
         openPoQty: Number(openPo.open_po_qty ?? 0),
         openPoValue: Number(openPo.open_po_value ?? 0),
         openPoCount: Number(openPo.open_po_count ?? 0),
         daysStockCover: avgDailySales > 0 ? stockQty / avgDailySales : null,
-        returnPct: totalSales > 0 ? Number(margReturns.sales_return_value ?? 0) / totalSales * 100 : null,
+        returnPct: Number(kpi.current_year_sales_value ?? 0) > 0 ? Number(margReturns.sales_return_value ?? 0) / Number(kpi.current_year_sales_value ?? 0) * 100 : null,
         grossMargin: Number(itemMargin.sales_value ?? 0) - Number(itemMargin.cost_value ?? 0),
         marginPct: Number(itemMargin.sales_value ?? 0) > 0
           ? (Number(itemMargin.sales_value ?? 0) - Number(itemMargin.cost_value ?? 0)) / Number(itemMargin.sales_value ?? 0) * 100
@@ -686,9 +711,9 @@ export class ThreeSixtyReportsService {
       SELECT
         COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_sales,
         COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_sales,
-        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date), 0)::float8 AS current_year_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date), 0)::float8 AS current_year_sales,
         COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.priorFiscalStart}::date AND mv.date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS last_year_sales,
-        COUNT(DISTINCT mv.voucher) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'SALES_INVOICE' AND mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date)::int AS invoice_count,
+        COUNT(DISTINCT mv.voucher) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'SALES_INVOICE' AND mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date)::int AS invoice_count,
         MAX(mv.date) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'SALES_INVOICE') AS last_invoice_date
       FROM marg_vouchers mv
       WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R') AND ${margCustomerFilter}
@@ -734,8 +759,8 @@ export class ThreeSixtyReportsService {
       WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
         AND mv.type IN ('S', 'R')
         AND ${margCustomerFilter}
-        AND mv.date >= ${ctx.fiscalStart}::date
-        AND mv.date <= ${ctx.asOf}::date
+        AND mv.date >= ${ctx.periodStart}::date
+        AND mv.date <= ${ctx.periodEnd}::date
       GROUP BY COALESCE(p.name, mprod.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference'),
         COALESCE(p.code, mprod.code, mt.pid), COALESCE(p.product_company, mprod.g_code), COALESCE(p.salt, mprod.g_code3),
         COALESCE(p.product_group, mprod.g_code5), pc.name, ps.name, pg.name, mprod.g_code6, mt.tenant_id,
@@ -773,8 +798,8 @@ export class ThreeSixtyReportsService {
       WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
         AND ${margVoucherFamilySql('mv')} = 'SALES_RETURN'
         AND ${margCustomerFilter}
-        AND mv.date >= ${ctx.fiscalStart}::date
-        AND mv.date <= ${ctx.asOf}::date
+        AND mv.date >= ${ctx.periodStart}::date
+        AND mv.date <= ${ctx.periodEnd}::date
     `);
 
     // Profitability over the customer's true sales activity: invoices add,
@@ -797,8 +822,8 @@ export class ThreeSixtyReportsService {
       WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE
         AND mv.type IN ('S', 'R')
         AND ${margCustomerFilter}
-        AND mv.date >= ${ctx.fiscalStart}::date
-        AND mv.date <= ${ctx.asOf}::date
+        AND mv.date >= ${ctx.periodStart}::date
+        AND mv.date <= ${ctx.periodEnd}::date
     `);
 
     const [lastPayment] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
@@ -808,7 +833,7 @@ export class ThreeSixtyReportsService {
       FROM marg_account_postings map
       WHERE map.tenant_id = ${tenantId}::uuid
         AND ${isAllCustomers ? Prisma.sql`TRUE` : customer.cid ? Prisma.sql`map.company_id = ${customer.company_id} AND (map.code = ${customer.cid} OR map.code1 = ${customer.cid})` : Prisma.sql`FALSE`}
-        AND map.date <= ${ctx.asOf}::date
+        AND map.date <= ${ctx.periodEnd}::date
       ORDER BY map.date DESC, ABS(map.amount) DESC
       LIMIT 1
     `);
@@ -858,7 +883,7 @@ export class ThreeSixtyReportsService {
           returnValue: Number(returnInsight.return_value ?? 0),
           returnQty: Number(returnInsight.return_qty ?? 0),
           returnCount: Number(returnInsight.return_count ?? 0),
-          returnPct: currentMonthSales > 0 ? Number(returnInsight.return_value ?? 0) / currentMonthSales * 100 : null,
+          returnPct: Number(salesBase.current_year_sales ?? 0) > 0 ? Number(returnInsight.return_value ?? 0) / Number(salesBase.current_year_sales ?? 0) * 100 : null,
         },
         profitability: {
           salesValue: Number(profitability.sales_value ?? 0),
@@ -908,9 +933,9 @@ export class ThreeSixtyReportsService {
       SELECT
         COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margPurchaseAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_purchase,
         COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margPurchaseAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_purchase,
-        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margPurchaseAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date), 0)::float8 AS current_year_purchase,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margPurchaseAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date), 0)::float8 AS current_year_purchase,
         COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margPurchaseAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.priorFiscalStart}::date AND mv.date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS last_year_purchase,
-        COUNT(DISTINCT mv.voucher) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'PURCHASE_INVOICE' AND mv.date >= ${ctx.fiscalStart}::date AND mv.date <= ${ctx.asOf}::date)::int AS purchase_invoice_count,
+        COUNT(DISTINCT mv.voucher) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'PURCHASE_INVOICE' AND mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date)::int AS purchase_invoice_count,
         MAX(mv.date) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'PURCHASE_INVOICE') AS last_purchase_date
       FROM marg_vouchers mv
       WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('P', 'B') AND ${margSupplierFilter}
@@ -1018,8 +1043,8 @@ export class ThreeSixtyReportsService {
         AND mt.is_cancelled = FALSE
         AND mt.type IN ('P', 'B')
         AND ${margSupplierFilter}
-        AND mt.date >= ${ctx.fiscalStart}::date
-        AND mt.date <= ${ctx.asOf}::date
+        AND mt.date >= ${ctx.periodStart}::date
+        AND mt.date <= ${ctx.periodEnd}::date
       GROUP BY COALESCE(p.name, mp.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference'),
         COALESCE(p.code, mp.code, mt.pid),
         COALESCE(p.product_company, mp.g_code),
@@ -1076,6 +1101,7 @@ export class ThreeSixtyReportsService {
         ${poLocationFilter}
         AND po.status NOT IN ('CLOSED', 'CANCELLED')
       GROUP BY po.id, po.order_number, po.order_date, po.expected_date, po.total_amount, po.status
+      HAVING SUM(GREATEST(pol.quantity - pol.received_qty, 0)) > 0
       ORDER BY po.expected_date ASC
       LIMIT 8
     `);
@@ -1117,8 +1143,8 @@ export class ThreeSixtyReportsService {
         SELECT
           mt.pid,
           COALESCE(p.name, mp.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference') AS item_name,
-          AVG(COALESCE(mt.rate, 0)) FILTER (WHERE mt.date >= ${ctx.fiscalStart}::date AND mt.date <= ${ctx.asOf}::date) AS current_rate,
-          AVG(COALESCE(mt.rate, 0)) FILTER (WHERE mt.date >= ${ctx.priorFiscalStart}::date AND mt.date < ${ctx.fiscalStart}::date) AS previous_rate
+          AVG(COALESCE(mt.rate, 0)) FILTER (WHERE mt.date >= ${ctx.periodStart}::date AND mt.date <= ${ctx.periodEnd}::date) AS current_rate,
+          AVG(COALESCE(mt.rate, 0)) FILTER (WHERE mt.date >= ${ctx.priorFiscalStart}::date AND mt.date < ${ctx.periodStart}::date) AS previous_rate
         FROM marg_transactions mt
         LEFT JOIN marg_products mp ON mp.tenant_id = mt.tenant_id AND mp.company_id = mt.company_id AND mp.pid = mt.pid
         LEFT JOIN products p ON p.id = mp.product_id
@@ -1131,7 +1157,7 @@ export class ThreeSixtyReportsService {
           AND mt.type = 'P'
           AND ${margSupplierFilter}
           AND mt.date >= ${ctx.priorFiscalStart}::date
-          AND mt.date <= ${ctx.asOf}::date
+          AND mt.date <= ${ctx.periodEnd}::date
         GROUP BY mt.pid, COALESCE(p.name, mp.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference')
       ),
       variances AS (
@@ -1186,6 +1212,7 @@ export class ThreeSixtyReportsService {
         lastMonthPurchase,
         momPurchaseChangePct: this.pctChange(currentMonthPurchase, lastMonthPurchase),
         currentYearPurchase: Number(purchase.current_year_purchase ?? 0),
+        purchaseInvoiceCount: Number(purchase.purchase_invoice_count ?? 0),
         yoyPurchaseChangePct: this.pctChange(Number(purchase.current_year_purchase ?? 0), Number(purchase.last_year_purchase ?? 0)),
         payableAmount: Number(payable.total_outstanding ?? 0),
         supplierAdvanceAmount: Number(payable.credit_balance ?? 0),
@@ -1234,21 +1261,73 @@ export class ThreeSixtyReportsService {
       select: { fiscalYearStart: true },
     });
     const asOf = new Date();
-    const monthStart = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), 1));
-    const nextMonthStart = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() + 1, 1));
-    const lastMonthStart = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() - 1, 1));
-    const fiscalMonth = Math.max(1, Math.min(12, tenant?.fiscalYearStart ?? 4)) - 1;
-    const fiscalYear = asOf.getUTCMonth() >= fiscalMonth ? asOf.getUTCFullYear() : asOf.getUTCFullYear() - 1;
-    const fiscalStart = period === 'calendar'
-      ? new Date(Date.UTC(asOf.getUTCFullYear(), 0, 1))
-      : period === 'last12'
-        ? new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() - 11, 1))
-        : new Date(Date.UTC(fiscalYear, fiscalMonth, 1));
-    const priorFiscalStart = new Date(Date.UTC(fiscalStart.getUTCFullYear() - 1, fiscalStart.getUTCMonth(), 1));
-    const priorFiscalEnd = new Date(Date.UTC(fiscalStart.getUTCFullYear() - 1, asOf.getUTCMonth(), asOf.getUTCDate() + 1));
-    const trendStart = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() - 11, 1));
+    const Y = asOf.getUTCFullYear();
+    const M = asOf.getUTCMonth();
+    const D = asOf.getUTCDate();
 
-    return { asOf, monthStart, nextMonthStart, lastMonthStart, fiscalStart, priorFiscalStart, priorFiscalEnd, trendStart };
+    // Period-independent anchors: current-month KPI tiles + 12-month trends.
+    const monthStart = new Date(Date.UTC(Y, M, 1));
+    const nextMonthStart = new Date(Date.UTC(Y, M + 1, 1));
+    const lastMonthStart = new Date(Date.UTC(Y, M - 1, 1));
+    const trendStart = new Date(Date.UTC(Y, M - 11, 1));
+    const today = new Date(Date.UTC(Y, M, D));
+
+    const fiscalMonth = Math.max(1, Math.min(12, tenant?.fiscalYearStart ?? 4)) - 1;
+    const fiscalYear = M >= fiscalMonth ? Y : Y - 1;
+
+    // Monday-based week boundaries.
+    const mondayOffset = (asOf.getUTCDay() + 6) % 7;
+    const thisWeekStart = new Date(Date.UTC(Y, M, D - mondayOffset));
+    const lastWeekStart = new Date(Date.UTC(Y, M, D - mondayOffset - 7));
+    const lastWeekEnd = new Date(Date.UTC(Y, M, D - mondayOffset - 1));
+
+    const quarterStartMonth = Math.floor(M / 3) * 3;
+    const thisQuarterStart = new Date(Date.UTC(Y, quarterStartMonth, 1));
+    const lastQuarterStart = new Date(Date.UTC(Y, quarterStartMonth - 3, 1));
+    const lastQuarterEnd = new Date(Date.UTC(Y, quarterStartMonth, 0)); // day before this quarter
+
+    const fiscalStart = new Date(Date.UTC(fiscalYear, fiscalMonth, 1));
+    const lastFiscalStart = new Date(Date.UTC(fiscalYear - 1, fiscalMonth, 1));
+    const lastFiscalEnd = new Date(Date.UTC(fiscalYear, fiscalMonth, 0)); // day before this FY
+
+    let periodStart: Date;
+    let periodEnd: Date;
+    switch (period) {
+      case 'today':
+        periodStart = today; periodEnd = today; break;
+      case 'yesterday':
+        periodStart = new Date(Date.UTC(Y, M, D - 1)); periodEnd = new Date(Date.UTC(Y, M, D - 1)); break;
+      case 'this_week':
+        periodStart = thisWeekStart; periodEnd = today; break;
+      case 'last_week':
+        periodStart = lastWeekStart; periodEnd = lastWeekEnd; break;
+      case 'this_month':
+        periodStart = monthStart; periodEnd = today; break;
+      case 'last_month':
+        periodStart = lastMonthStart; periodEnd = new Date(Date.UTC(Y, M, 0)); break;
+      case 'this_quarter':
+        periodStart = thisQuarterStart; periodEnd = today; break;
+      case 'last_quarter':
+        periodStart = lastQuarterStart; periodEnd = lastQuarterEnd; break;
+      case 'last_fy':
+        periodStart = lastFiscalStart; periodEnd = lastFiscalEnd; break;
+      case 'calendar':
+        periodStart = new Date(Date.UTC(Y, 0, 1)); periodEnd = today; break;
+      case 'last12':
+        periodStart = new Date(Date.UTC(Y, M - 11, 1)); periodEnd = today; break;
+      case 'fy':
+      default:
+        periodStart = fiscalStart; periodEnd = today; break;
+    }
+
+    // Prior period = selected window shifted back exactly one year. priorFiscalEnd
+    // is exclusive (queries use `date < priorFiscalEnd`), so add one day.
+    const shiftBackOneYear = (d: Date) =>
+      new Date(Date.UTC(d.getUTCFullYear() - 1, d.getUTCMonth(), d.getUTCDate()));
+    const priorFiscalStart = shiftBackOneYear(periodStart);
+    const priorFiscalEnd = new Date(shiftBackOneYear(periodEnd).getTime() + 86_400_000);
+
+    return { asOf, monthStart, nextMonthStart, lastMonthStart, periodStart, periodEnd, priorFiscalStart, priorFiscalEnd, trendStart };
   }
 
   private compatibleSalesLineSql(voucherAlias: string, transactionAlias: string): Prisma.Sql {
@@ -1710,8 +1789,8 @@ export class ThreeSixtyReportsService {
     const filters = {
       limit: 10000,
       offset: 0,
-      startDate: this.dateOnly(ctx.fiscalStart),
-      endDate: this.dateOnly(ctx.asOf),
+      startDate: this.dateOnly(ctx.periodStart),
+      endDate: this.dateOnly(ctx.periodEnd),
       ...(supplier.supplier_id ? { supplierIds: [supplier.supplier_id] } : {}),
     } as any;
     const report = await this.procurementReports.getSupplierPerformanceReport(tenantId, filters);
@@ -1727,7 +1806,7 @@ export class ThreeSixtyReportsService {
   }
 
   private periodDays(ctx: ReportContext): number {
-    return Math.max(1, Math.floor((ctx.asOf.getTime() - ctx.fiscalStart.getTime()) / 86_400_000) + 1);
+    return Math.max(1, Math.floor((ctx.periodEnd.getTime() - ctx.periodStart.getTime()) / 86_400_000) + 1);
   }
 
   private daysSince(value: Date | string | null | undefined, asOf: Date): number | null {
@@ -1747,9 +1826,6 @@ export class ThreeSixtyReportsService {
     return (current - previous) / Math.abs(previous) * 100;
   }
 
-  private daysElapsedInMonth(asOf: Date): number {
-    return Math.max(1, asOf.getUTCDate());
-  }
 
   private addShare(rows: any[]) {
     const total = rows.reduce((sum, row) => sum + Number(row.value ?? 0), 0);

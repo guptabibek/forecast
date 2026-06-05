@@ -34,10 +34,36 @@ const tabs: { key: Tab; label: string; placeholder: string }[] = [
 ];
 
 const periodOptions: { value: ThreeSixtyPeriod; label: string }[] = [
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'this_week', label: 'This Week' },
+  { value: 'last_week', label: 'Last Week' },
+  { value: 'this_month', label: 'This Month' },
+  { value: 'last_month', label: 'Last Month' },
+  { value: 'this_quarter', label: 'This Quarter' },
+  { value: 'last_quarter', label: 'Last Quarter' },
   { value: 'fy', label: 'Current Financial Year' },
+  { value: 'last_fy', label: 'Last Financial Year' },
   { value: 'calendar', label: 'Current Calendar Year' },
   { value: 'last12', label: 'Last 12 Months' },
 ];
+
+// Short labels used inside KPI tiles/rows so the period-scoped figures read
+// correctly (e.g. "This Week Sales" instead of a fixed "Current Year Sales").
+const periodShortLabels: Record<ThreeSixtyPeriod, string> = {
+  today: 'Today',
+  yesterday: 'Yesterday',
+  this_week: 'This Week',
+  last_week: 'Last Week',
+  this_month: 'This Month',
+  last_month: 'Last Month',
+  this_quarter: 'This Quarter',
+  last_quarter: 'Last Quarter',
+  fy: 'Current FY',
+  last_fy: 'Last FY',
+  calendar: 'This Calendar Year',
+  last12: 'Last 12 Months',
+};
 
 const allEntityLabels: Record<Tab, string> = {
   item: 'All Items',
@@ -338,7 +364,7 @@ function ProfileCard({ activeTab, report }: { activeTab: Tab; report: Report }) 
   );
 }
 
-function ItemReport({ report }: { report: Item360Report }) {
+function ItemReport({ report, periodLabel }: { report: Item360Report; periodLabel: string }) {
   const k = report.kpis;
   const stockAgeing = report.tables.stockAgeing ?? [];
   const openPurchaseOrders = report.tables.openPurchaseOrders ?? [];
@@ -346,8 +372,8 @@ function ItemReport({ report }: { report: Item360Report }) {
     <>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiTile title="Current Stock" value={fmt(k.currentStock)} subtext={`Cover: ${k.daysStockCover == null ? '-' : `${fmt(k.daysStockCover, 1)} days`}`} />
-        <KpiTile title="Current Month Sales" value={fmtCurrency(k.currentMonthSalesValue)} subtext={trendText(k.momSalesChangePct)} tone={(k.momSalesChangePct ?? 0) >= 0 ? 'good' : 'warn'} />
-        <KpiTile title="Current Month Purchase" value={fmtCurrency(k.currentMonthPurchaseValue)} subtext={`${fmt(k.currentMonthPurchaseQty)} units`} />
+        <KpiTile title={`${periodLabel} Sales`} value={fmtCurrency(k.currentYearSalesValue)} subtext={trendText(k.yoySalesChangePct)} tone={(k.yoySalesChangePct ?? 0) >= 0 ? 'good' : 'warn'} />
+        <KpiTile title={`${periodLabel} Purchase`} value={fmtCurrency(k.currentYearPurchaseValue)} subtext={`${fmt(k.currentYearPurchaseQty)} units`} />
         <KpiTile title="Raised PO Pending" value={fmt(k.openPoQty)} subtext={fmtCurrency(k.openPoValue)} tone={asNumber(k.openPoQty) > 0 ? 'warn' : 'good'} />
       </div>
 
@@ -355,18 +381,16 @@ function ItemReport({ report }: { report: Item360Report }) {
         <Card>
           <h3 className="text-base font-semibold text-secondary-950">Sales Insight</h3>
           <MetricTable rows={[
-            ['Current Month Qty', fmt(k.currentMonthSalesQty)],
-            ['Current Month Value', fmtCurrency(k.currentMonthSalesValue)],
-            ['Current Year Sales', fmtCurrency(k.currentYearSalesValue)],
+            [`${periodLabel} Qty`, fmt(k.currentYearSalesQty)],
+            [`${periodLabel} Value`, fmtCurrency(k.currentYearSalesValue)],
             ['YoY Change', <span className={trendClass(k.yoySalesChangePct)}>{trendText(k.yoySalesChangePct)}</span>],
           ]} />
         </Card>
         <Card>
           <h3 className="text-base font-semibold text-secondary-950">Purchase Insight</h3>
           <MetricTable rows={[
-            ['Current Month Qty', fmt(k.currentMonthPurchaseQty)],
-            ['Current Month Value', fmtCurrency(k.currentMonthPurchaseValue)],
-            ['Current Year Purchase', fmtCurrency(k.currentYearPurchaseValue)],
+            [`${periodLabel} Qty`, fmt(k.currentYearPurchaseQty)],
+            [`${periodLabel} Value`, fmtCurrency(k.currentYearPurchaseValue)],
             ['Open PO Count', fmt(k.openPoCount)],
           ]} />
         </Card>
@@ -456,7 +480,7 @@ function ItemReport({ report }: { report: Item360Report }) {
   );
 }
 
-function CustomerReport({ report }: { report: Customer360Report }) {
+function CustomerReport({ report, periodLabel }: { report: Customer360Report; periodLabel: string }) {
   const k = report.kpis;
   const returnInsight = asRecord(report.tables.returnInsight);
   const profitability = asRecord(report.tables.profitability);
@@ -464,20 +488,19 @@ function CustomerReport({ report }: { report: Customer360Report }) {
   return (
     <>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <KpiTile title="Current Month Sales" value={fmtCurrency(k.currentMonthSales)} subtext={trendText(k.momSalesChangePct)} tone={(k.momSalesChangePct ?? 0) >= 0 ? 'good' : 'warn'} />
+        <KpiTile title={`${periodLabel} Sales`} value={fmtCurrency(k.currentYearSales)} subtext={trendText(k.yoySalesChangePct)} tone={(k.yoySalesChangePct ?? 0) >= 0 ? 'good' : 'warn'} />
         <KpiTile title="Outstanding Amount" value={fmtCurrency(k.outstandingAmount)} subtext={`Overdue: ${fmtCurrency(k.overdueAmount)}`} tone={asNumber(k.overdueAmount) > 0 ? 'risk' : 'good'} />
-        <KpiTile title="Current Year Sales" value={fmtCurrency(k.currentYearSales)} subtext={trendText(k.yoySalesChangePct)} />
+        <KpiTile title={`${periodLabel} Invoices`} value={fmt(k.invoiceCount)} subtext={asNumber(k.invoiceCount) > 0 ? `Avg ${fmtCurrency(asNumber(k.currentYearSales) / asNumber(k.invoiceCount))}` : 'No invoices in period'} />
         <KpiTile title="Average Payment Days" value={fmt(k.averagePaymentDays)} subtext={k.lastPaymentAmount == null ? 'No recent payment' : `Last payment ${fmtCurrency(k.lastPaymentAmount)}`} tone={asNumber(k.averagePaymentDays) <= 45 ? 'good' : 'warn'} />
       </div>
       <div className="grid gap-4 xl:grid-cols-3">
         <Card>
           <h3 className="text-base font-semibold text-secondary-950">Sales Growth Insight</h3>
           <MetricTable rows={[
-            ['Current Month Sales', fmtCurrency(k.currentMonthSales)],
-            ['Last Month Sales', fmtCurrency(k.lastMonthSales)],
-            ['MoM Change', <span className={trendClass(k.momSalesChangePct)}>{trendText(k.momSalesChangePct)}</span>],
-            ['Current Year Sales', fmtCurrency(k.currentYearSales)],
-            ['YoY Change', <span className={trendClass(k.yoySalesChangePct)}>{trendText(k.yoySalesChangePct)}</span>],
+            [`${periodLabel} Sales`, fmtCurrency(k.currentYearSales)],
+            ['vs Prior Period', <span className={trendClass(k.yoySalesChangePct)}>{trendText(k.yoySalesChangePct)}</span>],
+            [`${periodLabel} Invoices`, fmt(k.invoiceCount)],
+            ['Avg Order Value', asNumber(k.invoiceCount) > 0 ? fmtCurrency(asNumber(k.currentYearSales) / asNumber(k.invoiceCount)) : '-'],
           ]} />
         </Card>
         <Card>
@@ -554,7 +577,7 @@ function CustomerReport({ report }: { report: Customer360Report }) {
   );
 }
 
-function SupplierReport({ report }: { report: Supplier360Report }) {
+function SupplierReport({ report, periodLabel }: { report: Supplier360Report; periodLabel: string }) {
   const k = report.kpis;
   const delivery = asRecord(report.tables.deliveryPerformance);
   const quality = asRecord(report.tables.quality);
@@ -562,7 +585,7 @@ function SupplierReport({ report }: { report: Supplier360Report }) {
   return (
     <>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <KpiTile title="Current Month Purchase" value={fmtCurrency(k.currentMonthPurchase)} subtext={trendText(k.momPurchaseChangePct)} tone={(k.momPurchaseChangePct ?? 0) >= 0 ? 'good' : 'warn'} />
+        <KpiTile title={`${periodLabel} Purchase`} value={fmtCurrency(k.currentYearPurchase)} subtext={trendText(k.yoyPurchaseChangePct)} tone={(k.yoyPurchaseChangePct ?? 0) >= 0 ? 'good' : 'warn'} />
         <KpiTile title="Payable Amount" value={fmtCurrency(k.payableAmount)} subtext={`Overdue: ${fmtCurrency(k.overduePayable)}`} tone={asNumber(k.overduePayable) > 0 ? 'risk' : 'good'} />
         <KpiTile title="Open PO Value" value={fmtCurrency(k.openPoValue)} subtext={`${fmt(k.openPoCount)} open orders`} tone={asNumber(k.openPoValue) > 0 ? 'warn' : 'good'} />
         <KpiTile title="On-time Delivery" value={k.onTimeDeliveryPct == null ? '-' : fmtPct(k.onTimeDeliveryPct)} subtext={`Score: ${fmt(k.score)}`} tone={asNumber(k.score) >= 75 ? 'good' : 'warn'} />
@@ -571,10 +594,10 @@ function SupplierReport({ report }: { report: Supplier360Report }) {
         <Card>
           <h3 className="text-base font-semibold text-secondary-950">Purchase Growth Insight</h3>
           <MetricTable rows={[
-            ['Current Month Purchase', fmtCurrency(k.currentMonthPurchase)],
-            ['Last Month Purchase', fmtCurrency(k.lastMonthPurchase)],
-            ['MoM Change', <span className={trendClass(k.momPurchaseChangePct)}>{trendText(k.momPurchaseChangePct)}</span>],
-            ['Current Year Purchase', fmtCurrency(k.currentYearPurchase)],
+            [`${periodLabel} Purchase`, fmtCurrency(k.currentYearPurchase)],
+            ['vs Prior Period', <span className={trendClass(k.yoyPurchaseChangePct)}>{trendText(k.yoyPurchaseChangePct)}</span>],
+            [`${periodLabel} Invoices`, fmt(k.purchaseInvoiceCount)],
+            ['Avg Invoice Value', asNumber(k.purchaseInvoiceCount) > 0 ? fmtCurrency(asNumber(k.currentYearPurchase) / asNumber(k.purchaseInvoiceCount)) : '-'],
           ]} />
         </Card>
         <Card>
@@ -1026,9 +1049,9 @@ export default function ThreeSixtyReportsPage() {
       {report && !activeQuery.isLoading && (
         <>
           <ProfileCard activeTab={activeTab} report={report} />
-          {activeTab === 'item' && <ItemReport report={report as Item360Report} />}
-          {activeTab === 'customer' && <CustomerReport report={report as Customer360Report} />}
-          {activeTab === 'supplier' && <SupplierReport report={report as Supplier360Report} />}
+          {activeTab === 'item' && <ItemReport report={report as Item360Report} periodLabel={periodShortLabels[period]} />}
+          {activeTab === 'customer' && <CustomerReport report={report as Customer360Report} periodLabel={periodShortLabels[period]} />}
+          {activeTab === 'supplier' && <SupplierReport report={report as Supplier360Report} periodLabel={periodShortLabels[period]} />}
           <InsightCard insights={report.insights} />
         </>
       )}

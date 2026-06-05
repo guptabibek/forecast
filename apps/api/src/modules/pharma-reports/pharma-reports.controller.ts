@@ -312,12 +312,12 @@ export class PharmaReportsController {
   @ApiOperation({ summary: 'Item 360 report with stock, sales, purchase, PO, expiry, and buyer insights' })
   @ApiResponse({ status: 200, description: 'Item 360 report' })
   @ApiQuery({ name: 'search', required: false, type: String })
-  @ApiQuery({ name: 'period', required: false, enum: ['fy', 'calendar', 'last12'] })
+  @ApiQuery({ name: 'period', required: false, enum: ['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'this_quarter', 'last_quarter', 'fy', 'last_fy', 'calendar', 'last12'] })
   @ApiQuery({ name: 'locationId', required: false, type: String })
   async getItem360(
     @CurrentUser() user: any,
     @Query('search') search?: string,
-    @Query('period') period?: 'fy' | 'calendar' | 'last12',
+    @Query('period') period?: 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'this_quarter' | 'last_quarter' | 'fy' | 'last_fy' | 'calendar' | 'last12',
     @Query('locationId') locationId?: string,
   ) {
     return this.threeSixtyReports.getItem360(user.tenantId, search, period, locationId);
@@ -327,12 +327,12 @@ export class PharmaReportsController {
   @ApiOperation({ summary: 'Customer 360 report with sales, outstanding, ageing, buying pattern, and risk insights' })
   @ApiResponse({ status: 200, description: 'Customer 360 report' })
   @ApiQuery({ name: 'search', required: false, type: String })
-  @ApiQuery({ name: 'period', required: false, enum: ['fy', 'calendar', 'last12'] })
+  @ApiQuery({ name: 'period', required: false, enum: ['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'this_quarter', 'last_quarter', 'fy', 'last_fy', 'calendar', 'last12'] })
   @ApiQuery({ name: 'locationId', required: false, type: String })
   async getCustomer360(
     @CurrentUser() user: any,
     @Query('search') search?: string,
-    @Query('period') period?: 'fy' | 'calendar' | 'last12',
+    @Query('period') period?: 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'this_quarter' | 'last_quarter' | 'fy' | 'last_fy' | 'calendar' | 'last12',
     @Query('locationId') locationId?: string,
   ) {
     return this.threeSixtyReports.getCustomer360(user.tenantId, search, period, locationId);
@@ -342,12 +342,12 @@ export class PharmaReportsController {
   @ApiOperation({ summary: 'Supplier 360 report with purchase, payable, PO, delivery, and item contribution insights' })
   @ApiResponse({ status: 200, description: 'Supplier 360 report' })
   @ApiQuery({ name: 'search', required: false, type: String })
-  @ApiQuery({ name: 'period', required: false, enum: ['fy', 'calendar', 'last12'] })
+  @ApiQuery({ name: 'period', required: false, enum: ['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'this_quarter', 'last_quarter', 'fy', 'last_fy', 'calendar', 'last12'] })
   @ApiQuery({ name: 'locationId', required: false, type: String })
   async getSupplier360(
     @CurrentUser() user: any,
     @Query('search') search?: string,
-    @Query('period') period?: 'fy' | 'calendar' | 'last12',
+    @Query('period') period?: 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'this_quarter' | 'last_quarter' | 'fy' | 'last_fy' | 'calendar' | 'last12',
     @Query('locationId') locationId?: string,
   ) {
     return this.threeSixtyReports.getSupplier360(user.tenantId, search, period, locationId);

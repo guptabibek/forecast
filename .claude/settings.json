@@ -4,7 +4,13 @@
       "Bash(npx prisma *)",
       "Bash(node -e ' *)",
       "Bash(docker compose *)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(echo \"API_EXIT=$?\")",
+      "Bash(echo \"WEB_EXIT=$?\")",
+      "Bash(cd /d/RabbitTech/forecast-saas/apps/api/prisma/migrations && ls -la | grep -i google; echo \"--- dir contents ---\"; ls -la 20260602120000_add_google_sheets_inventory_sync/ 2>&1; echo \"--- total migration dirs ---\"; ls -d */ | wc -l)",
+      "Read(//d/d/RabbitTech/forecast-saas/apps/api/prisma/**)",
+      "Bash(echo \"=== local compiled three-sixty \\(dist\\) ===\"; if [ -f apps/api/dist/modules/pharma-reports/services/three-sixty-reports.service.js ]; then grep -c \"periodEnd\\\\|last_quarter\" apps/api/dist/modules/pharma-reports/services/three-sixty-reports.service.js; else echo \"NOT BUILT locally\"; fi *)",
+      "Read(//d/RabbitTech/forecast-saas/**)"
     ]
   }
 }

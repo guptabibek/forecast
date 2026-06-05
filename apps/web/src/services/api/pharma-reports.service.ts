@@ -845,7 +845,19 @@ export interface ExpiryLossTrendPoint {
   cumulative_loss: number;
 }
 
-export type ThreeSixtyPeriod = 'fy' | 'calendar' | 'last12';
+export type ThreeSixtyPeriod =
+  | 'today'
+  | 'yesterday'
+  | 'this_week'
+  | 'last_week'
+  | 'this_month'
+  | 'last_month'
+  | 'this_quarter'
+  | 'last_quarter'
+  | 'fy'
+  | 'last_fy'
+  | 'calendar'
+  | 'last12';
 export type ThreeSixtySearchType = 'item' | 'customer' | 'supplier';
 
 export interface ThreeSixtySearchOption {
