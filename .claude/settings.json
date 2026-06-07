@@ -10,7 +10,14 @@
       "Bash(cd /d/RabbitTech/forecast-saas/apps/api/prisma/migrations && ls -la | grep -i google; echo \"--- dir contents ---\"; ls -la 20260602120000_add_google_sheets_inventory_sync/ 2>&1; echo \"--- total migration dirs ---\"; ls -d */ | wc -l)",
       "Read(//d/d/RabbitTech/forecast-saas/apps/api/prisma/**)",
       "Bash(echo \"=== local compiled three-sixty \\(dist\\) ===\"; if [ -f apps/api/dist/modules/pharma-reports/services/three-sixty-reports.service.js ]; then grep -c \"periodEnd\\\\|last_quarter\" apps/api/dist/modules/pharma-reports/services/three-sixty-reports.service.js; else echo \"NOT BUILT locally\"; fi *)",
-      "Read(//d/RabbitTech/forecast-saas/**)"
+      "Read(//d/RabbitTech/forecast-saas/**)",
+      "Bash(find . -name \"MIGRATION_PLAN.md\" -not -path \"*/node_modules/*\")",
+      "Bash(ls docs/*.md)",
+      "Bash(ls apps/web/src/pages)",
+      "Bash(node -e \"const p=require\\('./apps/web/package.json'\\); console.log\\('WEB deps:', Object.keys\\(p.dependencies||{}\\).join\\(', '\\)\\);\")",
+      "Bash(node -e \"const p=require\\('./apps/api/package.json'\\); console.log\\('API deps:', Object.keys\\(p.dependencies||{}\\).join\\(', '\\)\\);\")",
+      "Bash(ls package.json tsconfig*.json)",
+      "Bash(node -e \"const s=require\\('./package.json'\\).scripts; console.log\\(JSON.stringify\\(s,null,2\\)\\)\")"
     ]
   }
 }

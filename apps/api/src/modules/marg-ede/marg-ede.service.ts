@@ -2015,7 +2015,7 @@ export class MargEdeService {
 
       await this.auditService.log(
         tenantId,
-        triggeredBy ?? null,
+        this.auditUserId(triggeredBy),
         AuditAction.IMPORT,
         'MargSyncLog',
         syncLog.id,
@@ -2110,7 +2110,7 @@ export class MargEdeService {
 
       await this.auditService.log(
         tenantId,
-        triggeredBy ?? null,
+        this.auditUserId(triggeredBy),
         AuditAction.IMPORT,
         'MargSyncLog',
         syncLog.id,
@@ -4174,7 +4174,7 @@ export class MargEdeService {
 
       await this.auditService.log(
         tenantId,
-        triggeredBy ?? null,
+        this.auditUserId(triggeredBy),
         AuditAction.IMPORT,
         'MargSyncLog',
         syncLogId,
@@ -9981,7 +9981,24 @@ export class MargEdeService {
       averageCost: number | null;
       inventoryValue: number | null;
     }
-    const decisions: LevelDecision[] = [];
+    // Multiple (companyId, pid) aggregates can resolve to the SAME canonical
+    // (productId, locationId): distinct Marg product codes that map to one
+    // product, or companies sharing a location. The bulk INSERT below upserts
+    // on (tenant_id, product_id, location_id), and Postgres rejects a batch
+    // that proposes that key twice ("ON CONFLICT DO UPDATE command cannot
+    // affect row a second time"). So merge the raw stock/opening/cost inputs
+    // per scope key FIRST, then apply the mode + weighted-cost formula once
+    // per (productId, locationId). Folding inputs (not finished totalQty)
+    // also avoids double-counting the COMPUTED movement term, which is
+    // already aggregated per (productId, locationId) in computedMovements.
+    const merged = new Map<string, {
+      productId: string;
+      locationId: string;
+      sumStock: number;
+      sumOpening: number;
+      costValueSum: number;
+      costQtySum: number;
+    }>();
     const activeInventoryKeys = new Set<string>();
     let skipped = 0;
 
@@ -9993,32 +10010,48 @@ export class MargEdeService {
         continue;
       }
 
-      activeInventoryKeys.add(this.buildInventoryScopeKey(productId, locationId));
+      const scopeKey = this.buildInventoryScopeKey(productId, locationId);
+      activeInventoryKeys.add(scopeKey);
 
-      const sumStock = agg._sum.stock != null ? Number(agg._sum.stock) : 0;
-      const sumOpening = agg._sum.opening != null ? Number(agg._sum.opening) : 0;
+      let entry = merged.get(scopeKey);
+      if (!entry) {
+        entry = { productId, locationId, sumStock: 0, sumOpening: 0, costValueSum: 0, costQtySum: 0 };
+        merged.set(scopeKey, entry);
+      }
 
+      entry.sumStock += agg._sum.stock != null ? Number(agg._sum.stock) : 0;
+      entry.sumOpening += agg._sum.opening != null ? Number(agg._sum.opening) : 0;
+
+      const cost = costByKey.get(`${agg.companyId}:${agg.pid}`);
+      if (cost) {
+        entry.costValueSum += cost.totalValue;
+        entry.costQtySum += cost.totalQty;
+      }
+    }
+
+    const decisions: LevelDecision[] = [];
+    for (const entry of merged.values()) {
       let totalQty: number;
       switch (mode) {
         case 'OPENING':
-          totalQty = sumOpening;
+          totalQty = entry.sumOpening;
           break;
         case 'COMPUTED':
-          totalQty = sumOpening + (computedMovements.get(`${productId}|${locationId}`) ?? 0);
+          totalQty = entry.sumOpening +
+            (computedMovements.get(`${entry.productId}|${entry.locationId}`) ?? 0);
           break;
         case 'STOCK':
         default:
-          totalQty = sumStock;
+          totalQty = entry.sumStock;
           break;
       }
 
-      const cost = costByKey.get(`${agg.companyId}:${agg.pid}`);
-      const avgCost = cost && cost.totalQty > 0 ? cost.totalValue / cost.totalQty : null;
+      const avgCost = entry.costQtySum > 0 ? entry.costValueSum / entry.costQtySum : null;
       const inventoryValue = avgCost != null ? totalQty * avgCost : null;
 
       decisions.push({
-        productId,
-        locationId,
+        productId: entry.productId,
+        locationId: entry.locationId,
         onHandQty: totalQty,
         averageCost: avgCost,
         inventoryValue,
@@ -14328,6 +14361,21 @@ export class MargEdeService {
 
   private buildInventoryScopeKey(productId: string, locationId: string): string {
     return `${productId}|${locationId}`;
+  }
+
+  /**
+   * audit_log.user_id is a UUID column. Syncs triggered by the scheduler /
+   * system pass a non-UUID sentinel (e.g. "scheduler") as triggeredBy, which
+   * Postgres rejects with "Error creating UUID, invalid character ... found
+   * `s` at 1". Only forward triggeredBy as the audit userId when it is a real
+   * UUID; otherwise null. The raw sentinel is still preserved in the audit
+   * metadata.triggeredBy field, so no information is lost.
+   */
+  private auditUserId(triggeredBy?: string | null): string | null {
+    return triggeredBy &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(triggeredBy)
+      ? triggeredBy
+      : null;
   }
 
   private buildMargBatchScopeKey(productId: string, locationId: string, batchNumber: string): string {
