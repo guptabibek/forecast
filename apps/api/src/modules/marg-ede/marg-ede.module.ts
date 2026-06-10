@@ -6,14 +6,15 @@ import { isRedisConfigured } from '../../core/queue/queue.module';
 import { ManufacturingModule } from '../manufacturing/manufacturing.module';
 import { MargEdeController } from './marg-ede.controller';
 import { MargEdeService } from './marg-ede.service';
+import { MargOutstandingService } from './marg-outstanding.service';
 import { MargRawPageStorage } from './marg-raw-page-storage';
 import { MargSyncProcessor } from './marg-sync.processor';
 import { MargSyncScheduler } from './marg-sync.scheduler';
 
 // MargSyncProcessor extends BullMQ WorkerHost — only register when Redis is available
 const providers = isRedisConfigured()
-  ? [MargEdeService, MargRawPageStorage, MargSyncProcessor, MargSyncScheduler]
-  : [MargEdeService, MargRawPageStorage, MargSyncScheduler];
+  ? [MargEdeService, MargOutstandingService, MargRawPageStorage, MargSyncProcessor, MargSyncScheduler]
+  : [MargEdeService, MargOutstandingService, MargRawPageStorage, MargSyncScheduler];
 
 const imports = isRedisConfigured()
   ? [DatabaseModule, ManufacturingModule, BullModule.registerQueue({ name: QUEUE_NAMES.MARG_SYNC })]
@@ -23,6 +24,6 @@ const imports = isRedisConfigured()
   imports,
   controllers: [MargEdeController],
   providers,
-  exports: [MargEdeService],
+  exports: [MargEdeService, MargOutstandingService],
 })
 export class MargEdeModule {}

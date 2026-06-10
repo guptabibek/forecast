@@ -9,7 +9,7 @@ import { Prisma } from '@prisma/client';
 import * as ExcelJS from 'exceljs';
 import { PassThrough, Readable } from 'stream';
 import { PrismaService } from '../../../core/database/prisma.service';
-import { MargEdeService } from '../../marg-ede/marg-ede.service';
+import { MargOutstandingService } from '../../marg-ede/marg-outstanding.service';
 import { AccountingReportsService } from './accounting-reports.service';
 import { ExpiryReportsService } from './expiry-reports.service';
 import { InventoryAlertsService } from './inventory-alerts.service';
@@ -44,7 +44,7 @@ export class ReportExportService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly margEdeService: MargEdeService,
+    private readonly margOutstanding: MargOutstandingService,
     private readonly accountingReports: AccountingReportsService,
     private readonly expiryReports: ExpiryReportsService,
     private readonly inventoryAlerts: InventoryAlertsService,
@@ -623,7 +623,7 @@ export class ReportExportService {
   ): Promise<ExportDataSet> {
     // Forward the on-screen aging context so the export matches what the user
     // sees: same as-of anchor, same bucket scheme, same DSO window.
-    const report = await this.margEdeService.getMargOutstandingSummary(tenantId, {
+    const report = await this.margOutstanding.getMargOutstandingSummary(tenantId, {
       partyType: this.partyTypeFilter(filters),
       companyId: this.numberFilter(filters, 'companyId'),
       sortBy: this.stringFilter(filters, 'sortBy'),
@@ -686,7 +686,7 @@ export class ReportExportService {
     tenantId: string,
     filters: Record<string, unknown>,
   ): Promise<ExportDataSet> {
-    const report = await this.margEdeService.getMargOutstandingByGroup(tenantId, {
+    const report = await this.margOutstanding.getMargOutstandingByGroup(tenantId, {
       partyType: this.partyTypeFilter(filters),
       companyId: this.numberFilter(filters, 'companyId'),
       sortBy: this.stringFilter(filters, 'sortBy'),
@@ -746,7 +746,7 @@ export class ReportExportService {
     const partyCode = this.stringFilter(filters, 'partyCode');
     if (!partyCode) throw new BadRequestException('partyCode is required for party outstanding export');
 
-    const report = await this.margEdeService.getMargOutstandingDetail(tenantId, partyCode, {
+    const report = await this.margOutstanding.getMargOutstandingDetail(tenantId, partyCode, {
       companyId: this.numberFilter(filters, 'companyId'),
       includeSettled: this.booleanFilter(filters, 'includeSettled'),
       sortBy: this.stringFilter(filters, 'sortBy'),
@@ -794,7 +794,7 @@ export class ReportExportService {
     const partyCode = this.stringFilter(filters, 'partyCode');
     if (!partyCode) throw new BadRequestException('partyCode is required for party ledger export');
 
-    const report = await this.margEdeService.getMargPartyLedger(tenantId, partyCode, {
+    const report = await this.margOutstanding.getMargPartyLedger(tenantId, partyCode, {
       companyId: this.numberFilter(filters, 'companyId'),
       fromDate: this.stringFilter(filters, 'fromDate'),
       toDate: this.stringFilter(filters, 'toDate'),

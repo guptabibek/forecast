@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/database/prisma.service';
-import { MargEdeService } from '../../marg-ede/marg-ede.service';
+import { MargOutstandingService } from '../../marg-ede/marg-outstanding.service';
 import {
   margPurchaseAmountSignSql,
   margSalesAmountSignSql,
@@ -49,7 +49,7 @@ export class ThreeSixtyReportsService {
     private readonly prisma: PrismaService,
     private readonly inventoryReports: InventoryReportsService,
     private readonly procurementReports: ProcurementReportsService,
-    private readonly margEdeService: MargEdeService,
+    private readonly margOutstanding: MargOutstandingService,
   ) {}
 
   async getItem360(tenantId: string, search?: string, period: PeriodKey = 'fy', locationId?: string) {
@@ -1693,7 +1693,7 @@ export class ThreeSixtyReportsService {
   ) {
     try {
       if (!partyCode || companyId == null) {
-        const summary = await this.margEdeService.getMargOutstandingSummary(tenantId, {
+        const summary = await this.margOutstanding.getMargOutstandingSummary(tenantId, {
           partyType,
           limit: 10000,
         });
@@ -1715,12 +1715,12 @@ export class ThreeSixtyReportsService {
       }
 
       const [summary, detail] = await Promise.all([
-        this.margEdeService.getMargOutstandingSummary(tenantId, {
+        this.margOutstanding.getMargOutstandingSummary(tenantId, {
           partyType,
           companyId,
           limit: 10000,
         }),
-        this.margEdeService.getMargOutstandingDetail(tenantId, partyCode, {
+        this.margOutstanding.getMargOutstandingDetail(tenantId, partyCode, {
           companyId,
           limit: 10000,
         }),

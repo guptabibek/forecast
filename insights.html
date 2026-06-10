@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AI Actionable Insights Dashboard</title>
+
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet"/>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+body{
+    background:#0f172a;
+    padding:25px;
+    color:#fff;
+}
+
+.dashboard-title{
+    font-size:32px;
+    font-weight:700;
+    margin-bottom:25px;
+}
+
+.cards-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(340px,1fr));
+    gap:22px;
+}
+
+.card{
+    position:relative;
+    background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:24px;
+    padding:24px;
+    overflow:hidden;
+    backdrop-filter: blur(12px);
+    transition:0.35s ease;
+    box-shadow:
+        0 10px 30px rgba(0,0,0,0.25);
+}
+
+.card:hover{
+    transform:translateY(-8px);
+    box-shadow:
+        0 15px 40px rgba(0,0,0,0.4);
+}
+
+.card::before{
+    content:'';
+    position:absolute;
+    width:180px;
+    height:180px;
+    background:linear-gradient(135deg,#3b82f6,#9333ea);
+    opacity:0.12;
+    border-radius:50%;
+    top:-60px;
+    right:-60px;
+}
+
+.card-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:20px;
+}
+
+.card-header-left{
+    display:flex;
+    align-items:center;
+    gap:14px;
+}
+
+.icon{
+    width:54px;
+    height:54px;
+    border-radius:18px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:22px;
+    background:linear-gradient(135deg,#2563eb,#9333ea);
+}
+
+.card-title{
+    font-size:20px;
+    font-weight:700;
+}
+
+.badge{
+    padding:6px 12px;
+    border-radius:50px;
+    font-size:12px;
+    font-weight:600;
+}
+
+.critical{
+    background:#dc2626;
+}
+
+.warning{
+    background:#f59e0b;
+}
+
+.success{
+    background:#16a34a;
+}
+
+.info{
+    background:#2563eb;
+}
+
+.metric{
+    font-size:34px;
+    font-weight:800;
+    margin-bottom:8px;
+}
+
+.sub-text{
+    color:#cbd5e1;
+    line-height:1.6;
+    font-size:14px;
+    margin-bottom:18px;
+}
+
+.insights{
+    margin-bottom:20px;
+}
+
+.insights li{
+    list-style:none;
+    margin-bottom:10px;
+    color:#e2e8f0;
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    font-size:14px;
+}
+
+.insights li i{
+    color:#60a5fa;
+    margin-top:3px;
+}
+
+.actions{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+}
+
+.btn{
+    border:none;
+    padding:11px 18px;
+    border-radius:12px;
+    cursor:pointer;
+    color:#fff;
+    font-weight:600;
+    transition:0.3s ease;
+    font-size:13px;
+}
+
+.btn-primary{
+    background:linear-gradient(135deg,#2563eb,#7c3aed);
+}
+
+.btn-secondary{
+    background:rgba(255,255,255,0.1);
+}
+
+.btn:hover{
+    transform:scale(1.05);
+}
+
+.progress{
+    width:100%;
+    height:10px;
+    border-radius:20px;
+    background:rgba(255,255,255,0.08);
+    overflow:hidden;
+    margin:15px 0;
+}
+
+.progress-bar{
+    height:100%;
+    border-radius:20px;
+    background:linear-gradient(90deg,#3b82f6,#8b5cf6);
+}
+
+.footer{
+    margin-top:14px;
+    display:flex;
+    justify-content:space-between;
+    font-size:13px;
+    color:#94a3b8;
+}
+
+@media(max-width:768px){
+    .dashboard-title{
+        font-size:24px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="dashboard-title">
+    AI Actionable Insights Dashboard
+</div>
+
+<div class="cards-grid">
+
+    <!-- Revenue Card -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <div class="icon">
+                    <i class="fa-solid fa-chart-line"></i>
+                </div>
+                <div>
+                    <div class="card-title">Revenue Alert</div>
+                </div>
+            </div>
+            <div class="badge critical">CRITICAL</div>
+        </div>
+
+        <div class="metric">-18%</div>
+
+        <div class="sub-text">
+            Revenue dropped significantly in North Region this week.
+        </div>
+
+        <ul class="insights">
+            <li><i class="fa-solid fa-circle-check"></i> Low stock availability</li>
+            <li><i class="fa-solid fa-circle-check"></i> Distributor inactivity</li>
+            <li><i class="fa-solid fa-circle-check"></i> Reduced repeat orders</li>
+        </ul>
+
+        <div class="progress">
+            <div class="progress-bar" style="width:82%"></div>
+        </div>
+
+        <div class="footer">
+            <span>Predicted Loss</span>
+            <strong>₹8.5L</strong>
+        </div>
+
+        <br>
+
+        <div class="actions">
+            <button class="btn btn-primary">Replenish Stock</button>
+            <button class="btn btn-secondary">View Analysis</button>
+        </div>
+    </div>
+
+    <!-- Inventory Card -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <div class="icon">
+                    <i class="fa-solid fa-box-open"></i>
+                </div>
+                <div>
+                    <div class="card-title">Stock-Out Prediction</div>
+                </div>
+            </div>
+            <div class="badge warning">WARNING</div>
+        </div>
+
+        <div class="metric">3 Days</div>
+
+        <div class="sub-text">
+            Samsung 55" Smart TV stock expected to run out.
+        </div>
+
+        <ul class="insights">
+            <li><i class="fa-solid fa-circle-check"></i> Current Stock: 24 Units</li>
+            <li><i class="fa-solid fa-circle-check"></i> Avg Daily Sales: 8 Units</li>
+            <li><i class="fa-solid fa-circle-check"></i> Suggested Reorder: 150 Units</li>
+        </ul>
+
+        <div class="actions">
+            <button class="btn btn-primary">Create PO</button>
+            <button class="btn btn-secondary">Notify Vendor</button>
+        </div>
+    </div>
+
+    <!-- Customer Card -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <div class="icon">
+                    <i class="fa-solid fa-users"></i>
+                </div>
+                <div>
+                    <div class="card-title">Customer Churn Risk</div>
+                </div>
+            </div>
+            <div class="badge critical">HIGH RISK</div>
+        </div>
+
+        <div class="metric">42</div>
+
+        <div class="sub-text">
+            Premium customers inactive for over 45 days.
+        </div>
+
+        <ul class="insights">
+            <li><i class="fa-solid fa-circle-check"></i> Revenue Risk: ₹4.2L</li>
+            <li><i class="fa-solid fa-circle-check"></i> Personalized campaign suggested</li>
+            <li><i class="fa-solid fa-circle-check"></i> Relationship manager follow-up needed</li>
+        </ul>
+
+        <div class="actions">
+            <button class="btn btn-primary">Send Campaign</button>
+            <button class="btn btn-secondary">Assign Follow-Up</button>
+        </div>
+    </div>
+
+    <!-- Warehouse Card -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <div class="icon">
+                    <i class="fa-solid fa-warehouse"></i>
+                </div>
+                <div>
+                    <div class="card-title">Warehouse Efficiency</div>
+                </div>
+            </div>
+            <div class="badge warning">MEDIUM</div>
+        </div>
+
+        <div class="metric">-12%</div>
+
+        <div class="sub-text">
+            Picking efficiency reduced in Warehouse Zone B.
+        </div>
+
+        <ul class="insights">
+            <li><i class="fa-solid fa-circle-check"></i> Bin congestion detected</li>
+            <li><i class="fa-solid fa-circle-check"></i> Delayed putaway operations</li>
+            <li><i class="fa-solid fa-circle-check"></i> Increased manual handling</li>
+        </ul>
+
+        <div class="actions">
+            <button class="btn btn-primary">Optimize Layout</button>
+            <button class="btn btn-secondary">Generate Report</button>
+        </div>
+    </div>
+
+    <!-- Finance Card -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <div class="icon">
+                    <i class="fa-solid fa-money-bill-wave"></i>
+                </div>
+                <div>
+                    <div class="card-title">Outstanding Payments</div>
+                </div>
+            </div>
+            <div class="badge critical">URGENT</div>
+        </div>
+
+        <div class="metric">₹38.5L</div>
+
+        <div class="sub-text">
+            High overdue collections impacting cash flow.
+        </div>
+
+        <ul class="insights">
+            <li><i class="fa-solid fa-circle-check"></i> 12 high-risk customers</li>
+            <li><i class="fa-solid fa-circle-check"></i> Avg delay: 37 days</li>
+            <li><i class="fa-solid fa-circle-check"></i> Credit dispatch risk identified</li>
+        </ul>
+
+        <div class="actions">
+            <button class="btn btn-primary">Send Reminder</button>
+            <button class="btn btn-secondary">View Aging</button>
+        </div>
+    </div>
+
+    <!-- AI Summary Card -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <div class="icon">
+                    <i class="fa-solid fa-robot"></i>
+                </div>
+                <div>
+                    <div class="card-title">AI Executive Summary</div>
+                </div>
+            </div>
+            <div class="badge success">GOOD</div>
+        </div>
+
+        <div class="metric">81/100</div>
+
+        <div class="sub-text">
+            Overall business health is stable with few operational risks.
+        </div>
+
+        <ul class="insights">
+            <li><i class="fa-solid fa-circle-check"></i> Revenue increased by 14%</li>
+            <li><i class="fa-solid fa-circle-check"></i> Repeat customers growing</li>
+            <li><i class="fa-solid fa-circle-check"></i> Inventory aging rising</li>
+        </ul>
+
+        <div class="progress">
+            <div class="progress-bar" style="width:81%"></div>
+        </div>
+
+        <div class="actions">
+            <button class="btn btn-primary">View Insights</button>
+            <button class="btn btn-secondary">Download Summary</button>
+        </div>
+    </div>
+<!-- Sales Opportunity Card -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-arrow-trend-up"></i>
+            </div>
+            <div>
+                <div class="card-title">Growth Opportunity</div>
+            </div>
+        </div>
+        <div class="badge success">OPPORTUNITY</div>
+    </div>
+
+    <div class="metric">+32%</div>
+
+    <div class="sub-text">
+        Sports Shoes demand increased rapidly in South Region.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> High search & order trend detected</li>
+        <li><i class="fa-solid fa-circle-check"></i> Inventory may become insufficient</li>
+        <li><i class="fa-solid fa-circle-check"></i> Competitor pricing increased</li>
+        <li><i class="fa-solid fa-circle-check"></i> Estimated additional revenue ₹11L</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">Increase Allocation</button>
+        <button class="btn btn-secondary">Launch Campaign</button>
+    </div>
+</div>
+
+<!-- Delivery Delay Card -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-truck-fast"></i>
+            </div>
+            <div>
+                <div class="card-title">Delivery Delay Alert</div>
+            </div>
+        </div>
+        <div class="badge critical">HIGH IMPACT</div>
+    </div>
+
+    <div class="metric">18</div>
+
+    <div class="sub-text">
+        Shipments delayed today affecting SLA commitments.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> Route congestion identified</li>
+        <li><i class="fa-solid fa-circle-check"></i> Vehicle breakdown reported</li>
+        <li><i class="fa-solid fa-circle-check"></i> 22% SLA risk predicted</li>
+        <li><i class="fa-solid fa-circle-check"></i> Customer dissatisfaction risk high</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">Optimize Routes</button>
+        <button class="btn btn-secondary">Notify Customers</button>
+    </div>
+</div>
+
+<!-- Fraud Detection Card -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-shield-halved"></i>
+            </div>
+            <div>
+                <div class="card-title">Fraud Detection</div>
+            </div>
+        </div>
+        <div class="badge critical">HIGH RISK</div>
+    </div>
+
+    <div class="metric">240%</div>
+
+    <div class="sub-text">
+        Abnormal discount usage identified in Store #204.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> Margin impact estimated ₹2.4L</li>
+        <li><i class="fa-solid fa-circle-check"></i> Discount usage unusually high</li>
+        <li><i class="fa-solid fa-circle-check"></i> Possible unauthorized approvals</li>
+        <li><i class="fa-solid fa-circle-check"></i> Compliance audit recommended</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">Freeze Discounts</button>
+        <button class="btn btn-secondary">Audit Transactions</button>
+    </div>
+</div>
+
+<!-- Employee Productivity Card -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-user-clock"></i>
+            </div>
+            <div>
+                <div class="card-title">Team Productivity</div>
+            </div>
+        </div>
+        <div class="badge warning">ATTENTION</div>
+    </div>
+
+    <div class="metric">-9%</div>
+
+    <div class="sub-text">
+        Sales team productivity reduced this week.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> Field visits reduced by 14%</li>
+        <li><i class="fa-solid fa-circle-check"></i> Order conversion ratio declined</li>
+        <li><i class="fa-solid fa-circle-check"></i> 6 inactive sales executives</li>
+        <li><i class="fa-solid fa-circle-check"></i> Incentive review recommended</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">View Team Report</button>
+        <button class="btn btn-secondary">Assign Targets</button>
+    </div>
+</div>
+
+<!-- Dead Stock Card -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-boxes-stacked"></i>
+            </div>
+            <div>
+                <div class="card-title">Dead Stock Alert</div>
+            </div>
+        </div>
+        <div class="badge warning">SLOW MOVING</div>
+    </div>
+
+    <div class="metric">₹14.8L</div>
+
+    <div class="sub-text">
+        Non-moving inventory identified across warehouses.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> 128 SKUs inactive for 90+ days</li>
+        <li><i class="fa-solid fa-circle-check"></i> Storage utilization increasing</li>
+        <li><i class="fa-solid fa-circle-check"></i> Inventory carrying cost rising</li>
+        <li><i class="fa-solid fa-circle-check"></i> Clearance strategy recommended</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">Run Clearance Sale</button>
+        <button class="btn btn-secondary">Transfer Inventory</button>
+    </div>
+</div>
+
+<!-- Purchase Trend Card -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-cart-shopping"></i>
+            </div>
+            <div>
+                <div class="card-title">Purchase Trend</div>
+            </div>
+        </div>
+        <div class="badge info">TRENDING</div>
+    </div>
+
+    <div class="metric">+21%</div>
+
+    <div class="sub-text">
+        Raw material purchase volume increased this month.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> Vendor prices increased by 8%</li>
+        <li><i class="fa-solid fa-circle-check"></i> Demand forecast improved</li>
+        <li><i class="fa-solid fa-circle-check"></i> Bulk purchase opportunity identified</li>
+        <li><i class="fa-solid fa-circle-check"></i> Working capital impact moderate</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">Compare Vendors</button>
+        <button class="btn btn-secondary">Optimize Procurement</button>
+    </div>
+</div>
+
+<!-- Customer Satisfaction Card -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-face-smile"></i>
+            </div>
+            <div>
+                <div class="card-title">Customer Satisfaction</div>
+            </div>
+        </div>
+        <div class="badge success">POSITIVE</div>
+    </div>
+
+    <div class="metric">92%</div>
+
+    <div class="sub-text">
+        Customer satisfaction score improved significantly.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> Faster deliveries improved ratings</li>
+        <li><i class="fa-solid fa-circle-check"></i> Reduced complaint resolution time</li>
+        <li><i class="fa-solid fa-circle-check"></i> Repeat purchase trend improving</li>
+        <li><i class="fa-solid fa-circle-check"></i> Positive brand engagement rising</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">View Feedback</button>
+        <button class="btn btn-secondary">Export Report</button>
+    </div>
+</div>
+
+<!-- AI Forecast Card -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-brain"></i>
+            </div>
+            <div>
+                <div class="card-title">AI Forecast Engine</div>
+            </div>
+        </div>
+        <div class="badge info">PREDICTIVE</div>
+    </div>
+
+    <div class="metric">₹1.8Cr</div>
+
+    <div class="sub-text">
+        Forecasted revenue for next month based on AI models.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> Seasonal growth pattern detected</li>
+        <li><i class="fa-solid fa-circle-check"></i> Festival demand expected to rise</li>
+        <li><i class="fa-solid fa-circle-check"></i> Inventory preparation recommended</li>
+        <li><i class="fa-solid fa-circle-check"></i> Staffing requirement may increase</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">View Forecast</button>
+        <button class="btn btn-secondary">Simulate Scenarios</button>
+    </div>
+</div>
+<!-- Secondary Sales Decline -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-capsules"></i>
+            </div>
+            <div>
+                <div class="card-title">Secondary Sales Decline</div>
+            </div>
+        </div>
+        <div class="badge critical">HIGH IMPACT</div>
+    </div>
+
+    <div class="metric">-14%</div>
+
+    <div class="sub-text">
+        Retail secondary sales dropped significantly in Haryana & Delhi market.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> Antibiotic category movement slowed</li>
+        <li><i class="fa-solid fa-circle-check"></i> 18 chemists inactive for 21+ days</li>
+        <li><i class="fa-solid fa-circle-check"></i> Competitor schemes impacting order frequency</li>
+        <li><i class="fa-solid fa-circle-check"></i> MR visit compliance reduced by 11%</li>
+        <li><i class="fa-solid fa-circle-check"></i> Estimated revenue risk ₹28L this month</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">Launch Retail Scheme</button>
+        <button class="btn btn-secondary">Assign MR Follow-Up</button>
+    </div>
+</div>
+
+<!-- Expiry Risk -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-hourglass-end"></i>
+            </div>
+            <div>
+                <div class="card-title">Expiry Risk Alert</div>
+            </div>
+        </div>
+        <div class="badge critical">EXPIRY RISK</div>
+    </div>
+
+    <div class="metric">₹12.6L</div>
+
+    <div class="sub-text">
+        Near-expiry medicines identified across distribution warehouses.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> 146 SKUs expiring within 90 days</li>
+        <li><i class="fa-solid fa-circle-check"></i> Slow movement in cardiac & diabetic range</li>
+        <li><i class="fa-solid fa-circle-check"></i> Return claim probability increasing</li>
+        <li><i class="fa-solid fa-circle-check"></i> Warehouse aging ratio above safe threshold</li>
+        <li><i class="fa-solid fa-circle-check"></i> Stock transfer opportunity available</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">Run Clearance Push</button>
+        <button class="btn btn-secondary">Transfer Near Expiry Stock</button>
+    </div>
+</div>
+
+<!-- Distributor Health -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-building"></i>
+            </div>
+            <div>
+                <div class="card-title">Distributor Health Score</div>
+            </div>
+        </div>
+        <div class="badge warning">MONITOR</div>
+    </div>
+
+    <div class="metric">68/100</div>
+
+    <div class="sub-text">
+        Distributor performance weakening in Tier-2 territories.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> Primary billing reduced by 9%</li>
+        <li><i class="fa-solid fa-circle-check"></i> Outstanding recovery cycle increasing</li>
+        <li><i class="fa-solid fa-circle-check"></i> Low retailer coverage in rural zones</li>
+        <li><i class="fa-solid fa-circle-check"></i> Order fulfillment SLA dropping</li>
+        <li><i class="fa-solid fa-circle-check"></i> Competitor penetration increasing rapidly</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">View Territory Analysis</button>
+        <button class="btn btn-secondary">Optimize Distribution</button>
+    </div>
+</div>
+
+<!-- Doctor Prescription Trend -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-user-doctor"></i>
+            </div>
+            <div>
+                <div class="card-title">Prescription Trend Analysis</div>
+            </div>
+        </div>
+        <div class="badge success">GROWTH</div>
+    </div>
+
+    <div class="metric">+24%</div>
+
+    <div class="sub-text">
+        Prescription generation increased in Gastro & Pediatric segment.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> Top 25 doctors increased brand adoption</li>
+        <li><i class="fa-solid fa-circle-check"></i> MR engagement effectiveness improving</li>
+        <li><i class="fa-solid fa-circle-check"></i> Retail repeat purchase ratio increased</li>
+        <li><i class="fa-solid fa-circle-check"></i> New clinic onboarding performing well</li>
+        <li><i class="fa-solid fa-circle-check"></i> Opportunity to expand nearby territories</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">Expand Coverage</button>
+        <button class="btn btn-secondary">Analyze Prescription Data</button>
+    </div>
+</div>
+
+<!-- Outstanding Recovery -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-money-check-dollar"></i>
+            </div>
+            <div>
+                <div class="card-title">Outstanding Recovery Risk</div>
+            </div>
+        </div>
+        <div class="badge critical">CASH FLOW</div>
+    </div>
+
+    <div class="metric">₹3.8Cr</div>
+
+    <div class="sub-text">
+        Outstanding payments crossing healthy collection cycle.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> 32 distributors overdue beyond 45 days</li>
+        <li><i class="fa-solid fa-circle-check"></i> Credit exposure rising in North region</li>
+        <li><i class="fa-solid fa-circle-check"></i> Collection efficiency reduced by 13%</li>
+        <li><i class="fa-solid fa-circle-check"></i> Risk of blocked working capital increasing</li>
+        <li><i class="fa-solid fa-circle-check"></i> High-risk accounts require escalation</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">Initiate Recovery Workflow</button>
+        <button class="btn btn-secondary">Block Credit Dispatch</button>
+    </div>
+</div>
+
+<!-- Fast Moving Brands -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-fire"></i>
+            </div>
+            <div>
+                <div class="card-title">Fast Moving Brands</div>
+            </div>
+        </div>
+        <div class="badge success">TOP GROWTH</div>
+    </div>
+
+    <div class="metric">+38%</div>
+
+    <div class="sub-text">
+        Fever & immunity product range witnessing exceptional demand.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> Seasonal demand surge detected</li>
+        <li><i class="fa-solid fa-circle-check"></i> Retail stock depletion risk increasing</li>
+        <li><i class="fa-solid fa-circle-check"></i> Competitor stock shortages observed</li>
+        <li><i class="fa-solid fa-circle-check"></i> Additional production planning advised</li>
+        <li><i class="fa-solid fa-circle-check"></i> Opportunity for margin optimization</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">Increase Supply</button>
+        <button class="btn btn-secondary">Optimize Pricing</button>
+    </div>
+</div>
+
+<!-- Retailer Coverage -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-store"></i>
+            </div>
+            <div>
+                <div class="card-title">Retailer Coverage Gap</div>
+            </div>
+        </div>
+        <div class="badge warning">EXPANSION</div>
+    </div>
+
+    <div class="metric">1,280</div>
+
+    <div class="sub-text">
+        Potential chemist outlets identified with low market penetration.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> High opportunity in semi-urban territories</li>
+        <li><i class="fa-solid fa-circle-check"></i> Competitor brands dominating shelf space</li>
+        <li><i class="fa-solid fa-circle-check"></i> Low MR visit frequency in uncovered zones</li>
+        <li><i class="fa-solid fa-circle-check"></i> Retail conversion opportunity high</li>
+        <li><i class="fa-solid fa-circle-check"></i> Expected sales uplift ₹42L quarterly</li>
+    </ul>
+
+    <div class="actions">
+        <button class="btn btn-primary">Assign New Retailers</button>
+        <button class="btn btn-secondary">Expand Territory Coverage</button>
+    </div>
+</div>
+
+<!-- Business Health Score -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-header-left">
+            <div class="icon">
+                <i class="fa-solid fa-heart-pulse"></i>
+            </div>
+            <div>
+                <div class="card-title">Pharma Business Health</div>
+            </div>
+        </div>
+        <div class="badge success">STABLE</div>
+    </div>
+
+    <div class="metric">82/100</div>
+
+    <div class="sub-text">
+        Overall business performance remains healthy with strong growth opportunities.
+    </div>
+
+    <ul class="insights">
+        <li><i class="fa-solid fa-circle-check"></i> Primary sales growth consistent</li>
+        <li><i class="fa-solid fa-circle-check"></i> Secondary sales volatility detected</li>
+        <li><i class="fa-solid fa-circle-check"></i> Expiry exposure manageable currently</li>
+        <li><i class="fa-solid fa-circle-check"></i> Distributor recovery needs attention</li>
+        <li><i class="fa-solid fa-circle-check"></i> Prescription growth supporting expansion</li>
+    </ul>
+
+    <div class="progress">
+        <div class="progress-bar" style="width:82%"></div>
+    </div>
+
+    <div class="actions">
+        <button class="btn btn-primary">View Health Report</button>
+        <button class="btn btn-secondary">Download AI Summary</button>
+    </div>
+</div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,2787 @@
+{
+  "D:\\RabbitTech\\forecast-saas\\.vscode\\settings.json": {
+    "mtime": 1778128886.9690151,
+    "ast_hash": "93d15b53053fd6b16fd3355c354d0c2f",
+    "semantic_hash": "93d15b53053fd6b16fd3355c354d0c2f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\ai-reporting\\prompts\\clarification.prompt.ts": {
+    "mtime": 1778727466.0641806,
+    "ast_hash": "0904424cfa0e8dce3d264c23cc9b4f36",
+    "semantic_hash": "0904424cfa0e8dce3d264c23cc9b4f36"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\ai-reporting\\prompts\\dashboard-planner.prompt.ts": {
+    "mtime": 1778727466.0651824,
+    "ast_hash": "604a9a583598730c401b8e594cc30681",
+    "semantic_hash": "604a9a583598730c401b8e594cc30681"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\ai-reporting\\prompts\\nlq-system.prompt.ts": {
+    "mtime": 1778727466.0651824,
+    "ast_hash": "5e07c2f096f9d11a9d2828aeaafe201f",
+    "semantic_hash": "5e07c2f096f9d11a9d2828aeaafe201f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\ai-reporting\\prompts\\result-summary.prompt.ts": {
+    "mtime": 1778727466.0651824,
+    "ast_hash": "fbde21ae209dcc2eadd7f7ee1041e7c3",
+    "semantic_hash": "fbde21ae209dcc2eadd7f7ee1041e7c3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\ai-reporting\\prompts\\semantic-query-generation.prompt.ts": {
+    "mtime": 1778727466.0661805,
+    "ast_hash": "ccfeab2ed29573446c476e29a1e546a9",
+    "semantic_hash": "ccfeab2ed29573446c476e29a1e546a9"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\ai-reporting\\semantic-catalog.json": {
+    "mtime": 1779448470.159541,
+    "ast_hash": "c3dd5c974a9961578442e92f1142b1fc",
+    "semantic_hash": "c3dd5c974a9961578442e92f1142b1fc"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\nest-cli.json": {
+    "mtime": 1769699647.2422464,
+    "ast_hash": "ecafdaa066c890495d867102985bea10",
+    "semantic_hash": "ecafdaa066c890495d867102985bea10"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\package.json": {
+    "mtime": 1779725689.6166859,
+    "ast_hash": "e5901bbbed2510d5615c13a06194a3f3",
+    "semantic_hash": "e5901bbbed2510d5615c13a06194a3f3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\add_notifications.sql": {
+    "mtime": 1770789646.2155,
+    "ast_hash": "2d9ebc995ef93e684e50e729ac317535",
+    "semantic_hash": "2d9ebc995ef93e684e50e729ac317535"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260101000000_bootstrap_extensions\\migration.sql": {
+    "mtime": 1776486169.253295,
+    "ast_hash": "6efbe16c79204bc4fb563403d443a750",
+    "semantic_hash": "6efbe16c79204bc4fb563403d443a750"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260212000000_add_costing_engine\\migration.sql": {
+    "mtime": 1776486169.2544916,
+    "ast_hash": "9258cf54368c58f643c77e806f2dcb57",
+    "semantic_hash": "9258cf54368c58f643c77e806f2dcb57"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260212010000_add_uom_master\\migration.sql": {
+    "mtime": 1776486169.2544916,
+    "ast_hash": "baca46716e139a95cd1ab2585875e536",
+    "semantic_hash": "baca46716e139a95cd1ab2585875e536"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260217134555_init\\migration.sql": {
+    "mtime": 1776486169.255754,
+    "ast_hash": "c1f1769c0a9b8cbe51a25d28a7420bc7",
+    "semantic_hash": "c1f1769c0a9b8cbe51a25d28a7420bc7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260217134600_enterprise_extras\\migration.sql": {
+    "mtime": 1771337373.5414276,
+    "ast_hash": "a2134e7167c57b6f4695907b280f89cd",
+    "semantic_hash": "a2134e7167c57b6f4695907b280f89cd"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260217210023_add_product_category_master\\migration.sql": {
+    "mtime": 1771342331.1876073,
+    "ast_hash": "99e115250e6c8c21c502fd5562167b02",
+    "semantic_hash": "99e115250e6c8c21c502fd5562167b02"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260218000000_fix_costing_schema_drift\\migration.sql": {
+    "mtime": 1771418092.307452,
+    "ast_hash": "489259ecbe97b47f7ca455b438e6d2cb",
+    "semantic_hash": "489259ecbe97b47f7ca455b438e6d2cb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260218100000_add_table_partitioning\\migration.sql": {
+    "mtime": 1771397299.1668591,
+    "ast_hash": "d43070d25cdf4b1dac8b28e327102d95",
+    "semantic_hash": "d43070d25cdf4b1dac8b28e327102d95"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260218120000_add_gr_line_batch_id\\migration.sql": {
+    "mtime": 1771414953.5814624,
+    "ast_hash": "d47ce7194824944e5ebf1e42d2778f02",
+    "semantic_hash": "d47ce7194824944e5ebf1e42d2778f02"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260218200000_add_production_branch\\migration.sql": {
+    "mtime": 1771418092.307452,
+    "ast_hash": "d5ca2cf13f6cd1943426837e62fa0609",
+    "semantic_hash": "d5ca2cf13f6cd1943426837e62fa0609"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260219000000_reconcile_uom_fk_order\\migration.sql": {
+    "mtime": 1775644157.7083755,
+    "ast_hash": "d81d694545ef19e54b9f923c90bcb246",
+    "semantic_hash": "d81d694545ef19e54b9f923c90bcb246"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260408120000_normalize_product_master_relations\\migration.sql": {
+    "mtime": 1775660944.948892,
+    "ast_hash": "ad087bff1aa680839a61a97e961b5cde",
+    "semantic_hash": "ad087bff1aa680839a61a97e961b5cde"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260408133000_add_sop_cycle_manager_relations\\migration.sql": {
+    "mtime": 1775660944.9738307,
+    "ast_hash": "5deb88024905b2913e02e90c1864ec9d",
+    "semantic_hash": "5deb88024905b2913e02e90c1864ec9d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260408143000_add_cost_center_manager_relations\\migration.sql": {
+    "mtime": 1775662531.6806233,
+    "ast_hash": "e85eed6f0e113152c498b982312b31f2",
+    "semantic_hash": "e85eed6f0e113152c498b982312b31f2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260408153000_normalize_posting_profile_product_category\\migration.sql": {
+    "mtime": 1775662531.6883078,
+    "ast_hash": "f8d1a8da330e1309071b0f7d87273c4b",
+    "semantic_hash": "f8d1a8da330e1309071b0f7d87273c4b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260408170000_add_promotion_target_relations\\migration.sql": {
+    "mtime": 1775713940.7221818,
+    "ast_hash": "fbc37dd4e4d6487965de43da4ee2f54c",
+    "semantic_hash": "fbc37dd4e4d6487965de43da4ee2f54c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260409120000_add_product_brand_subcategory_channel_masters\\migration.sql": {
+    "mtime": 1775716156.0733702,
+    "ast_hash": "9d5d1bd4345f09e097b79308bf781cd7",
+    "semantic_hash": "9d5d1bd4345f09e097b79308bf781cd7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260414000000_add_marg_ede_integration\\migration.sql": {
+    "mtime": 1776163087.5548086,
+    "ast_hash": "abba01d8cd582f06b64ebf527bc5e48b",
+    "semantic_hash": "abba01d8cd582f06b64ebf527bc5e48b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260414100000_add_marg_branch_location_link\\migration.sql": {
+    "mtime": 1776233851.1190124,
+    "ast_hash": "5405eba54bae99b4eb11388f0846df7c",
+    "semantic_hash": "5405eba54bae99b4eb11388f0846df7c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260416000000_add_tenant_to_refresh_tokens\\migration.sql": {
+    "mtime": 1776486169.255754,
+    "ast_hash": "96fa75ea4eba92ed68030034e9001559",
+    "semantic_hash": "96fa75ea4eba92ed68030034e9001559"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260416100000_add_row_level_security\\migration.sql": {
+    "mtime": 1776486169.255754,
+    "ast_hash": "67d1d4fe862853b7e64be64eaeea90f4",
+    "semantic_hash": "67d1d4fe862853b7e64be64eaeea90f4"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260416200000_add_super_admin_and_tenant_modules\\migration.sql": {
+    "mtime": 1776486169.2570527,
+    "ast_hash": "15dcf88ed90cb905a251499b3e3bf83b",
+    "semantic_hash": "15dcf88ed90cb905a251499b3e3bf83b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260416200000_optimize_tenant_composite_indexes\\migration.sql": {
+    "mtime": 1776486169.2570527,
+    "ast_hash": "58129ef23bf5f5631640c857028b93d8",
+    "semantic_hash": "58129ef23bf5f5631640c857028b93d8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260417000000_add_marg_vouchers_saletypes_fields\\migration.sql": {
+    "mtime": 1776486169.2570527,
+    "ast_hash": "357c5f5c351dd251c8aa1a810bbff167",
+    "semantic_hash": "357c5f5c351dd251c8aa1a810bbff167"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260417010000_production_hardening_fixes\\migration.sql": {
+    "mtime": 1776486169.258062,
+    "ast_hash": "44f26d17d5d6d3b82d1d208edf5fb7a5",
+    "semantic_hash": "44f26d17d5d6d3b82d1d208edf5fb7a5"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260418000000_add_dynamic_rbac_roles\\migration.sql": {
+    "mtime": 1776486169.258062,
+    "ast_hash": "f0f9bfd41815c4aee5819ea45a788619",
+    "semantic_hash": "f0f9bfd41815c4aee5819ea45a788619"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260418000000_pharma_reporting_indexes\\migration.sql": {
+    "mtime": 1776491222.1177704,
+    "ast_hash": "3dddc315f336200594c021836654bd55",
+    "semantic_hash": "3dddc315f336200594c021836654bd55"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260418110000_add_tenant_license_controls\\migration.sql": {
+    "mtime": 1776486169.2585847,
+    "ast_hash": "64543478ffbc8a80656e96ccfc2d3f18",
+    "semantic_hash": "64543478ffbc8a80656e96ccfc2d3f18"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260418200000_add_must_reset_password\\migration.sql": {
+    "mtime": 1776486169.2585847,
+    "ast_hash": "c3121435f9895d68606105107652e0fc",
+    "semantic_hash": "c3121435f9895d68606105107652e0fc"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260421130000_harden_marg_sync_inventory_idempotency\\migration.sql": {
+    "mtime": 1776775696.3926244,
+    "ast_hash": "a17d6c9efec040dd289e234d64de37e3",
+    "semantic_hash": "a17d6c9efec040dd289e234d64de37e3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260421143000_add_marg_accounting_stage\\migration.sql": {
+    "mtime": 1776775696.3926244,
+    "ast_hash": "20e069bfcd38a3ba5fedfb740d79fdda",
+    "semantic_hash": "20e069bfcd38a3ba5fedfb740d79fdda"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260421153000_add_marg_gl_mapping_and_reconciliation\\migration.sql": {
+    "mtime": 1776777228.4927244,
+    "ast_hash": "ba8675629023ee3574963b834af9ac31",
+    "semantic_hash": "ba8675629023ee3574963b834af9ac31"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260504200000_add_marg_stock_projection_mode\\migration.sql": {
+    "mtime": 1777858805.8175292,
+    "ast_hash": "2911afff5a10971662b5401ef117f681",
+    "semantic_hash": "2911afff5a10971662b5401ef117f681"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260506120000_add_marg_product_master_fields\\migration.sql": {
+    "mtime": 1778026374.2917805,
+    "ast_hash": "2ba140a9f697369c90a93c45daebd073",
+    "semantic_hash": "2ba140a9f697369c90a93c45daebd073"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260507101000_add_marg_named_masters\\migration.sql": {
+    "mtime": 1778124135.2448723,
+    "ast_hash": "720855e71fca0b3b9834444b0dac01e0",
+    "semantic_hash": "720855e71fca0b3b9834444b0dac01e0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260509100000_add_tenant_company_type\\migration.sql": {
+    "mtime": 1778332195.4833577,
+    "ast_hash": "d4c8571f612523df28970cff3072cd21",
+    "semantic_hash": "d4c8571f612523df28970cff3072cd21"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260512120000_add_ai_reporting_views\\migration.sql": {
+    "mtime": 1778727466.0681808,
+    "ast_hash": "e2ce1067f3833e9d6d1d241222e5661a",
+    "semantic_hash": "e2ce1067f3833e9d6d1d241222e5661a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260512123000_add_ai_reporting_audit\\migration.sql": {
+    "mtime": 1778727466.0681808,
+    "ast_hash": "4c02226f9dbc217606a5d85872eb06ae",
+    "semantic_hash": "4c02226f9dbc217606a5d85872eb06ae"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260513100000_harden_ai_reporting_security\\migration.sql": {
+    "mtime": 1778727466.0691817,
+    "ast_hash": "e9d27a776166ba562843d66080248375",
+    "semantic_hash": "e9d27a776166ba562843d66080248375"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260513104000_backfill_ai_reporting_role_permissions\\migration.sql": {
+    "mtime": 1778727466.0691817,
+    "ast_hash": "69c2e55558651a6ec7337fe1165c1438",
+    "semantic_hash": "69c2e55558651a6ec7337fe1165c1438"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260513120000_add_tenant_ai_provider_config\\migration.sql": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "e0d10af930663772342f10aabcaccff7",
+    "semantic_hash": "e0d10af930663772342f10aabcaccff7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260514120000_add_tenant_ai_operational_config\\migration.sql": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "abcfb33360c2fb1cdc7cf5631af1c6b1",
+    "semantic_hash": "abcfb33360c2fb1cdc7cf5631af1c6b1"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260516120000_add_marg_resumable_sync_pipeline\\migration.sql": {
+    "mtime": 1778904805.9757166,
+    "ast_hash": "0f06e8b52170d0e421db93eb9b7d3dc9",
+    "semantic_hash": "0f06e8b52170d0e421db93eb9b7d3dc9"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260516130000_add_marg_sync_log_window_metadata\\migration.sql": {
+    "mtime": 1778908561.2497332,
+    "ast_hash": "dca27ef0dc5091c9e5d702784669815d",
+    "semantic_hash": "dca27ef0dc5091c9e5d702784669815d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260520120000_add_marg_cancellation_columns\\migration.sql": {
+    "mtime": 1779267804.7554219,
+    "ast_hash": "cd19f3dee19997c6d5f08ce48b09b79c",
+    "semantic_hash": "cd19f3dee19997c6d5f08ce48b09b79c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260520120100_add_marg_outstanding_snapshot_closure\\migration.sql": {
+    "mtime": 1779267818.6602557,
+    "ast_hash": "6a31eb1031361afd67fa42ce6a100fff",
+    "semantic_hash": "6a31eb1031361afd67fa42ce6a100fff"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260520130000_add_marg_voucher_family_generated_column\\migration.sql": {
+    "mtime": 1779285305.064497,
+    "ast_hash": "2250e98df34970a4dfda795befdac42c",
+    "semantic_hash": "2250e98df34970a4dfda795befdac42c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260520130100_backfill_marg_cancellation_state\\migration.sql": {
+    "mtime": 1779285325.7433262,
+    "ast_hash": "da1aafc2101fea4823d1d01f0da8198e",
+    "semantic_hash": "da1aafc2101fea4823d1d01f0da8198e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260521080000_fix_marg_voucher_family_classifier\\migration.sql": {
+    "mtime": 1779346631.3961222,
+    "ast_hash": "f1929e2977c8ecf586ccda1054a6b4b7",
+    "semantic_hash": "f1929e2977c8ecf586ccda1054a6b4b7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260521090000_add_marg_bill_rollup_table\\migration.sql": {
+    "mtime": 1779346706.070412,
+    "ast_hash": "296378574081ac3e57d70c611ce5601e",
+    "semantic_hash": "296378574081ac3e57d70c611ce5601e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260521100000_marg_voucher_family_addfield_classifier\\migration.sql": {
+    "mtime": 1779373570.586686,
+    "ast_hash": "0c634c94a550800f86bf744b30b34eda",
+    "semantic_hash": "0c634c94a550800f86bf744b30b34eda"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260522100000_ai_views_family_pure_invoice\\migration.sql": {
+    "mtime": 1779430700.1839247,
+    "ast_hash": "f1ace0d40fc200b103f907ab04061974",
+    "semantic_hash": "f1ace0d40fc200b103f907ab04061974"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260522110000_ai_views_returns_datasets\\migration.sql": {
+    "mtime": 1779434079.4121192,
+    "ast_hash": "138d3fd2924e997e5c5db5c99dae6a08",
+    "semantic_hash": "138d3fd2924e997e5c5db5c99dae6a08"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260522120000_ai_views_net_and_returns_rollups\\migration.sql": {
+    "mtime": 1779448298.878357,
+    "ast_hash": "edb4e2ccbde99bf5ecefab12b07a4f3f",
+    "semantic_hash": "edb4e2ccbde99bf5ecefab12b07a4f3f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260524000000_add_forecast_model_config\\migration.sql": {
+    "mtime": 1779638489.3675232,
+    "ast_hash": "77d5b62e58d944d4076e76a7f4e6c1bb",
+    "semantic_hash": "77d5b62e58d944d4076e76a7f4e6c1bb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260525090000_add_inventory_policy_scopes\\migration.sql": {
+    "mtime": 1779697702.396631,
+    "ast_hash": "0052df7009e187588d68edcba2d30f7d",
+    "semantic_hash": "0052df7009e187588d68edcba2d30f7d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260525190000_raise_ai_reporting_timeout_default\\migration.sql": {
+    "mtime": 1779714947.3610818,
+    "ast_hash": "20f9553f09035eb89b616014c053e9f3",
+    "semantic_hash": "20f9553f09035eb89b616014c053e9f3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260525203000_add_marg_movement_rollup\\migration.sql": {
+    "mtime": 1779895194.6744735,
+    "ast_hash": "1e3c150e997cd6648f4dea041d89e8d1",
+    "semantic_hash": "1e3c150e997cd6648f4dea041d89e8d1"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260525210000_ai_purchase_invoice_rollup_view\\migration.sql": {
+    "mtime": 1779880029.7722888,
+    "ast_hash": "fd7c11dc8e605b97b3e74766e6cb6aba",
+    "semantic_hash": "fd7c11dc8e605b97b3e74766e6cb6aba"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260526100000_marg_reporting_performance_indexes\\migration.sql": {
+    "mtime": 1779855345.9315689,
+    "ast_hash": "e8552e4e2c6adfce65b41e0ad59cce9e",
+    "semantic_hash": "e8552e4e2c6adfce65b41e0ad59cce9e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260526110000_inventory_ledger_stockout_index\\migration.sql": {
+    "mtime": 1779855345.9315689,
+    "ast_hash": "aa34227be4964f91a9cd68de6dec7d40",
+    "semantic_hash": "aa34227be4964f91a9cd68de6dec7d40"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\prisma\\migrations\\20260526120000_supplementary_reporting_indexes\\migration.sql": {
+    "mtime": 1779855345.9325774,
+    "ast_hash": "620d877209b54b757404e03ca1db3ce0",
+    "semantic_hash": "620d877209b54b757404e03ca1db3ce0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\app.controller.ts": {
+    "mtime": 1777294885.061964,
+    "ast_hash": "9c39b80bf5a93c8f12c5459039bc0e79",
+    "semantic_hash": "9c39b80bf5a93c8f12c5459039bc0e79"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\app.module.ts": {
+    "mtime": 1780622744.7902894,
+    "ast_hash": "dfd6459904aaebbf0d1f776b5ab6e3d8",
+    "semantic_hash": "dfd6459904aaebbf0d1f776b5ab6e3d8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\audit\\audit.module.ts": {
+    "mtime": 1770646360.7148795,
+    "ast_hash": "43199d3ea921b7f1602300ea082e9a0c",
+    "semantic_hash": "43199d3ea921b7f1602300ea082e9a0c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\audit\\audit.service.ts": {
+    "mtime": 1777789573.716679,
+    "ast_hash": "ec7c4cb60d78c5677a3fd4d5d6b7c634",
+    "semantic_hash": "ec7c4cb60d78c5677a3fd4d5d6b7c634"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\cache\\cache.module.ts": {
+    "mtime": 1776486169.2607453,
+    "ast_hash": "02c857c8624069b2f971bd7de473f70f",
+    "semantic_hash": "02c857c8624069b2f971bd7de473f70f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\cache\\tenant-cache.service.ts": {
+    "mtime": 1776486169.2618246,
+    "ast_hash": "7e05643deb4e7c80d46f591cc7ab631a",
+    "semantic_hash": "7e05643deb4e7c80d46f591cc7ab631a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\config\\env.validation.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "4bc9aa917ce785ab523ad25729cb8e1e",
+    "semantic_hash": "4bc9aa917ce785ab523ad25729cb8e1e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\database\\database.module.ts": {
+    "mtime": 1776486169.2618246,
+    "ast_hash": "5235bc215b9b8378c5a205c937a39131",
+    "semantic_hash": "5235bc215b9b8378c5a205c937a39131"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\database\\prisma.service.spec.ts": {
+    "mtime": 1776486169.2618246,
+    "ast_hash": "1091f0fa5062ae9984c67d1da3fc2d81",
+    "semantic_hash": "1091f0fa5062ae9984c67d1da3fc2d81"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\database\\prisma.service.ts": {
+    "mtime": 1778037130.4930074,
+    "ast_hash": "2bb1dc48d4605bf5cbf273ebe2a369ab",
+    "semantic_hash": "2bb1dc48d4605bf5cbf273ebe2a369ab"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\database\\tenant-access.service.ts": {
+    "mtime": 1776486169.2632408,
+    "ast_hash": "b1ccfadc63598104e52b99093d4eea0b",
+    "semantic_hash": "b1ccfadc63598104e52b99093d4eea0b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\filtering\\filter.types.ts": {
+    "mtime": 1777688137.4987583,
+    "ast_hash": "cd694ba70a3b71a572d06621e284eadb",
+    "semantic_hash": "cd694ba70a3b71a572d06621e284eadb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\filtering\\filter.util.ts": {
+    "mtime": 1777688159.260478,
+    "ast_hash": "6274554d7a6f05dd95b09a77e47c526f",
+    "semantic_hash": "6274554d7a6f05dd95b09a77e47c526f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\filtering\\grid-query.helper.ts": {
+    "mtime": 1777724571.8351262,
+    "ast_hash": "764288f20331cb3771ba86eae925526b",
+    "semantic_hash": "764288f20331cb3771ba86eae925526b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\filters\\all-exceptions.filter.ts": {
+    "mtime": 1771581913.212584,
+    "ast_hash": "8a2f3c030f75c605d754ae800d36b4fb",
+    "semantic_hash": "8a2f3c030f75c605d754ae800d36b4fb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\finance\\fx-rate.module.ts": {
+    "mtime": 1770646347.9888933,
+    "ast_hash": "0199afd991b7b4576f668288f106bb0a",
+    "semantic_hash": "0199afd991b7b4576f668288f106bb0a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\finance\\fx-rate.service.spec.ts": {
+    "mtime": 1770648670.866492,
+    "ast_hash": "1ab22c6164fdc23ce62caffad582568e",
+    "semantic_hash": "1ab22c6164fdc23ce62caffad582568e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\finance\\fx-rate.service.ts": {
+    "mtime": 1770646353.5296302,
+    "ast_hash": "2c704081b0c340b40ec7acdffcd39668",
+    "semantic_hash": "2c704081b0c340b40ec7acdffcd39668"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\guards\\index.ts": {
+    "mtime": 1771335342.552227,
+    "ast_hash": "1aa87e67f47fa460702dc784f04723df",
+    "semantic_hash": "1aa87e67f47fa460702dc784f04723df"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\guards\\tenant.guard.ts": {
+    "mtime": 1777307009.8967092,
+    "ast_hash": "57a7b048b56833651f924657d1519554",
+    "semantic_hash": "57a7b048b56833651f924657d1519554"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\middleware\\logger.middleware.ts": {
+    "mtime": 1771421642.6423302,
+    "ast_hash": "4d34182eede8b889b28ae98f330dd3ba",
+    "semantic_hash": "4d34182eede8b889b28ae98f330dd3ba"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\middleware\\tenant.middleware.ts": {
+    "mtime": 1778037136.5712802,
+    "ast_hash": "5433cca342608d1ae0a8b37af5df8522",
+    "semantic_hash": "5433cca342608d1ae0a8b37af5df8522"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\notification\\email.service.ts": {
+    "mtime": 1776486169.26444,
+    "ast_hash": "9f10c39896457607746fad70eca46197",
+    "semantic_hash": "9f10c39896457607746fad70eca46197"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\notification\\notification.module.ts": {
+    "mtime": 1771422381.2514515,
+    "ast_hash": "3a4c795f2f0e19e934715ce6aad840a7",
+    "semantic_hash": "3a4c795f2f0e19e934715ce6aad840a7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\notification\\notification.service.ts": {
+    "mtime": 1770789646.2712083,
+    "ast_hash": "c6954da322bdfcb18e5bfd464118bb28",
+    "semantic_hash": "c6954da322bdfcb18e5bfd464118bb28"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\queue\\processors\\forecast.processor.ts": {
+    "mtime": 1776486169.265674,
+    "ast_hash": "7bd59c54093583826a8d7d2d8d4aa49d",
+    "semantic_hash": "7bd59c54093583826a8d7d2d8d4aa49d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\queue\\processors\\import.processor.spec.ts": {
+    "mtime": 1775660945.256292,
+    "ast_hash": "119bbcb103bbea195f818c6e92861356",
+    "semantic_hash": "119bbcb103bbea195f818c6e92861356"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\queue\\processors\\import.processor.ts": {
+    "mtime": 1778026945.0330024,
+    "ast_hash": "ff3ebb6e5d6115c614db616f4bdd7ddd",
+    "semantic_hash": "ff3ebb6e5d6115c614db616f4bdd7ddd"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\queue\\queue.constants.ts": {
+    "mtime": 1780622744.7902894,
+    "ast_hash": "98353f1ccdad6bd54e57bde76a78b463",
+    "semantic_hash": "98353f1ccdad6bd54e57bde76a78b463"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\queue\\queue.module.ts": {
+    "mtime": 1780622744.7902894,
+    "ast_hash": "0aa72192a5be957ae301e30b6006f004",
+    "semantic_hash": "0aa72192a5be957ae301e30b6006f004"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\redis\\redis-config.util.ts": {
+    "mtime": 1776486169.267445,
+    "ast_hash": "e0da763d34ce9c5037e6060738710ca6",
+    "semantic_hash": "e0da763d34ce9c5037e6060738710ca6"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\tiering\\build-tier.generated.ts": {
+    "mtime": 1776486169.267445,
+    "ast_hash": "6e80dcbda7011ed8f16037701d57ba8f",
+    "semantic_hash": "6e80dcbda7011ed8f16037701d57ba8f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\time\\time-bucket.module.ts": {
+    "mtime": 1770647672.412903,
+    "ast_hash": "0941f1f84ade7defc812ee8d4af91fa8",
+    "semantic_hash": "0941f1f84ade7defc812ee8d4af91fa8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\time\\time-bucket.service.spec.ts": {
+    "mtime": 1778393424.384942,
+    "ast_hash": "44a96b12acbc116b943c9eab76742ba4",
+    "semantic_hash": "44a96b12acbc116b943c9eab76742ba4"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\time\\time-bucket.service.ts": {
+    "mtime": 1771637753.7064564,
+    "ast_hash": "64eee9d7d6f46ab5dddb919a5c66287e",
+    "semantic_hash": "64eee9d7d6f46ab5dddb919a5c66287e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\workflow\\workflow.module.ts": {
+    "mtime": 1770647672.3685112,
+    "ast_hash": "0f43db06055fce927ffe2d5817a5e9ba",
+    "semantic_hash": "0f43db06055fce927ffe2d5817a5e9ba"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\workflow\\workflow.service.spec.ts": {
+    "mtime": 1771482589.1437242,
+    "ast_hash": "6865acbcf157429f88ec892f4bba8b04",
+    "semantic_hash": "6865acbcf157429f88ec892f4bba8b04"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\core\\workflow\\workflow.service.ts": {
+    "mtime": 1779629959.3824978,
+    "ast_hash": "bb1a8624cdbb4416e08b9abd65d4382f",
+    "semantic_hash": "bb1a8624cdbb4416e08b9abd65d4382f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\forecast-engine.module.ts": {
+    "mtime": 1769696437.5509915,
+    "ast_hash": "e26eedf8b9bec71f163aa2e057d3c015",
+    "semantic_hash": "e26eedf8b9bec71f163aa2e057d3c015"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\forecast-engine.service.ts": {
+    "mtime": 1771636846.7352653,
+    "ast_hash": "2cdd7f9a331f0879381465b209de6a99",
+    "semantic_hash": "2cdd7f9a331f0879381465b209de6a99"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\interfaces\\forecast-model.interface.ts": {
+    "mtime": 1770647672.199923,
+    "ast_hash": "a121b465373e923b2a1e48b88a9ad341",
+    "semantic_hash": "a121b465373e923b2a1e48b88a9ad341"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\model-registry.ts": {
+    "mtime": 1770711762.7212212,
+    "ast_hash": "4819c8cf27efc91c1c88392dcc8d94da",
+    "semantic_hash": "4819c8cf27efc91c1c88392dcc8d94da"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\ai-hybrid.model.ts": {
+    "mtime": 1771639145.0617013,
+    "ast_hash": "9d1122222b253aa3c874d90219b7adc7",
+    "semantic_hash": "9d1122222b253aa3c874d90219b7adc7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\arima.model.ts": {
+    "mtime": 1779637999.5027668,
+    "ast_hash": "dbddec64190fc5f7a84d255f08b4c092",
+    "semantic_hash": "dbddec64190fc5f7a84d255f08b4c092"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\holt-winters.model.ts": {
+    "mtime": 1770647672.2773144,
+    "ast_hash": "4e84d5916d228f7b8e4e58bd60bcbe08",
+    "semantic_hash": "4e84d5916d228f7b8e4e58bd60bcbe08"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\index.ts": {
+    "mtime": 1770711762.9028993,
+    "ast_hash": "3bf1088ebb4a5ea467bea65a82955584",
+    "semantic_hash": "3bf1088ebb4a5ea467bea65a82955584"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\linear-regression.model.ts": {
+    "mtime": 1770647672.2743146,
+    "ast_hash": "0cfdf6d0be920b24416d5b16ad5936b5",
+    "semantic_hash": "0cfdf6d0be920b24416d5b16ad5936b5"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\linear-solver.ts": {
+    "mtime": 1779631163.3003955,
+    "ast_hash": "41a47256750cce2ad3fb4eb5f2ea911a",
+    "semantic_hash": "41a47256750cce2ad3fb4eb5f2ea911a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\moving-average.model.ts": {
+    "mtime": 1770647672.2562299,
+    "ast_hash": "35c3ae4d4a6d24210d2dfd83d84e7862",
+    "semantic_hash": "35c3ae4d4a6d24210d2dfd83d84e7862"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\prophet.model.ts": {
+    "mtime": 1779631210.1550944,
+    "ast_hash": "d1efd4e4ad5178e6abc813457e7b3a08",
+    "semantic_hash": "d1efd4e4ad5178e6abc813457e7b3a08"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\seasonal-naive.model.ts": {
+    "mtime": 1770647672.3644938,
+    "ast_hash": "a1d0deb256064963f41f6d1eac2678fa",
+    "semantic_hash": "a1d0deb256064963f41f6d1eac2678fa"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\trend-percent.model.ts": {
+    "mtime": 1770647672.348642,
+    "ast_hash": "25c5e4df4ac6626aa506ec0126bdba7d",
+    "semantic_hash": "25c5e4df4ac6626aa506ec0126bdba7d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\weighted-average.model.ts": {
+    "mtime": 1770647672.2562299,
+    "ast_hash": "f1d50f41020add3cd7b29e9aa308f929",
+    "semantic_hash": "f1d50f41020add3cd7b29e9aa308f929"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\forecast-engine\\models\\yoy-growth.model.ts": {
+    "mtime": 1770647672.348642,
+    "ast_hash": "0c74a8502d3c21f5c652d35e33dc9ac2",
+    "semantic_hash": "0c74a8502d3c21f5c652d35e33dc9ac2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\main.ts": {
+    "mtime": 1779000993.775021,
+    "ast_hash": "53440d3685da808c03c8db99279924b2",
+    "semantic_hash": "53440d3685da808c03c8db99279924b2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-provider.service.spec.ts": {
+    "mtime": 1779715390.3868496,
+    "ast_hash": "89ca7f274157004667428321723d4834",
+    "semantic_hash": "89ca7f274157004667428321723d4834"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-provider.service.ts": {
+    "mtime": 1779715362.3100128,
+    "ast_hash": "b3dd2b695b69013073e25a4df71e2e9f",
+    "semantic_hash": "b3dd2b695b69013073e25a4df71e2e9f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-reporting-usage.guard.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "733cbfc81c1d0d18190d17e37d8a7252",
+    "semantic_hash": "733cbfc81c1d0d18190d17e37d8a7252"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-reporting.audit.ts": {
+    "mtime": 1780902237.8169222,
+    "ast_hash": "ae7f8e85b890a870c2d960e914993c83",
+    "semantic_hash": "ae7f8e85b890a870c2d960e914993c83"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-reporting.controller.spec.ts": {
+    "mtime": 1778746095.702827,
+    "ast_hash": "2997289e0af36fc6c540fb2b1934feed",
+    "semantic_hash": "2997289e0af36fc6c540fb2b1934feed"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-reporting.controller.ts": {
+    "mtime": 1780902237.8169222,
+    "ast_hash": "dc58b8d4a69b34b91282611832c8117c",
+    "semantic_hash": "dc58b8d4a69b34b91282611832c8117c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-reporting.errors.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "8ff6db6d6de49435d7214c1b0080e9cf",
+    "semantic_hash": "8ff6db6d6de49435d7214c1b0080e9cf"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-reporting.module.ts": {
+    "mtime": 1780902237.817922,
+    "ast_hash": "405d3e458a4eaa88d6bbe7ae207170f0",
+    "semantic_hash": "405d3e458a4eaa88d6bbe7ae207170f0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-reporting.routes.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "8387a78b00512ec9ef0ecca23611ed1d",
+    "semantic_hash": "8387a78b00512ec9ef0ecca23611ed1d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-reporting.service.spec.ts": {
+    "mtime": 1778749091.8652813,
+    "ast_hash": "822e224ff6c22c7b6164c8c82e74a078",
+    "semantic_hash": "822e224ff6c22c7b6164c8c82e74a078"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-reporting.service.ts": {
+    "mtime": 1780902237.817922,
+    "ast_hash": "ca9d912e20e0b14aefff538b7ae47614",
+    "semantic_hash": "ca9d912e20e0b14aefff538b7ae47614"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-views-net-rollups.contract.spec.ts": {
+    "mtime": 1779448624.216636,
+    "ast_hash": "a5c53d954290ad547a4a4c77098a66f1",
+    "semantic_hash": "a5c53d954290ad547a4a4c77098a66f1"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-views-pure-invoice.contract.spec.ts": {
+    "mtime": 1779431670.5600064,
+    "ast_hash": "e0a0e584c4208633d60e223af6d4656b",
+    "semantic_hash": "e0a0e584c4208633d60e223af6d4656b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\ai-views-returns.contract.spec.ts": {
+    "mtime": 1779445912.6702297,
+    "ast_hash": "3fdbb00da14926679ed9942e4ed4ff20",
+    "semantic_hash": "3fdbb00da14926679ed9942e4ed4ff20"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\nlq-parser.service.spec.ts": {
+    "mtime": 1778747863.2456796,
+    "ast_hash": "eae0bdaef73916fe135c95f3c8265696",
+    "semantic_hash": "eae0bdaef73916fe135c95f3c8265696"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\nlq-parser.service.ts": {
+    "mtime": 1780902237.8189223,
+    "ast_hash": "13bb756e0e0a7d8a8e798f9b7f16dda8",
+    "semantic_hash": "13bb756e0e0a7d8a8e798f9b7f16dda8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\prompt-injection.validator.spec.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "64065216c611eee21bef84f71e537d2e",
+    "semantic_hash": "64065216c611eee21bef84f71e537d2e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\prompt-injection.validator.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "e913dcbbad5a18816e1a830e5a18b5de",
+    "semantic_hash": "e913dcbbad5a18816e1a830e5a18b5de"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\prompts\\clarification.prompt.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "87661644d7fc203e7b6a9b80c30e6de9",
+    "semantic_hash": "87661644d7fc203e7b6a9b80c30e6de9"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\prompts\\dashboard-planner.prompt.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "0bff661446887b2e2a4bfb85d5545edd",
+    "semantic_hash": "0bff661446887b2e2a4bfb85d5545edd"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\prompts\\nlq-system.prompt.ts": {
+    "mtime": 1778747724.6606092,
+    "ast_hash": "b02e50114d01c1de80de70e802e4e95e",
+    "semantic_hash": "b02e50114d01c1de80de70e802e4e95e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\prompts\\result-summary.prompt.ts": {
+    "mtime": 1780902237.8189223,
+    "ast_hash": "71c77e07069c2c3751885dc4e777b0cb",
+    "semantic_hash": "71c77e07069c2c3751885dc4e777b0cb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\prompts\\semantic-query-generation.prompt.ts": {
+    "mtime": 1778747713.1180031,
+    "ast_hash": "e20ea94d13640a60691708db45b73077",
+    "semantic_hash": "e20ea94d13640a60691708db45b73077"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\report-executor.service.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "52146b8c8bb786c87e1ad24b3c07bf3d",
+    "semantic_hash": "52146b8c8bb786c87e1ad24b3c07bf3d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\result-summarizer.service.ts": {
+    "mtime": 1780902237.8199246,
+    "ast_hash": "f4624a49ee09b467cdf6ff409f63a4ca",
+    "semantic_hash": "f4624a49ee09b467cdf6ff409f63a4ca"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\semantic-catalog.loader.spec.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "27507f4a0e43cc80140f7ef056fb6957",
+    "semantic_hash": "27507f4a0e43cc80140f7ef056fb6957"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\semantic-catalog.loader.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "0e9128be1b4abf01b009d2de34f3572a",
+    "semantic_hash": "0e9128be1b4abf01b009d2de34f3572a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\semantic-query.types.ts": {
+    "mtime": 1780902237.820922,
+    "ast_hash": "814c255e793a6a3e9c564a90f5b26282",
+    "semantic_hash": "814c255e793a6a3e9c564a90f5b26282"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\semantic-query.validator.spec.ts": {
+    "mtime": 1780902237.8219237,
+    "ast_hash": "d89473d191f817a4b4c633fd164e3364",
+    "semantic_hash": "d89473d191f817a4b4c633fd164e3364"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\semantic-query.validator.ts": {
+    "mtime": 1780902237.8219237,
+    "ast_hash": "04acf7f77311c067ae61971372900429",
+    "semantic_hash": "04acf7f77311c067ae61971372900429"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\sql-compiler.service.spec.ts": {
+    "mtime": 1780902237.8229225,
+    "ast_hash": "69436646aee81ccb279cbe26d8190819",
+    "semantic_hash": "69436646aee81ccb279cbe26d8190819"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\sql-compiler.service.ts": {
+    "mtime": 1780902237.8229225,
+    "ast_hash": "d0d8d0503902b04228506e75e6d465fa",
+    "semantic_hash": "d0d8d0503902b04228506e75e6d465fa"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\sql-safety.validator.spec.ts": {
+    "mtime": 1778727466.0701814,
+    "ast_hash": "d4bb53978e6efcab34f38f980afa7c92",
+    "semantic_hash": "d4bb53978e6efcab34f38f980afa7c92"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\ai-reporting\\sql-safety.validator.ts": {
+    "mtime": 1778727466.0859725,
+    "ast_hash": "4684f9a3ac8f870ff8fc97fe6d2b18c7",
+    "semantic_hash": "4684f9a3ac8f870ff8fc97fe6d2b18c7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\audit\\audit.controller.ts": {
+    "mtime": 1777789544.0322845,
+    "ast_hash": "f4b3c7df4409a5dac4f84ab9ba7c9f67",
+    "semantic_hash": "f4b3c7df4409a5dac4f84ab9ba7c9f67"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\audit\\audit.module.ts": {
+    "mtime": 1770789646.3047135,
+    "ast_hash": "df9b23be8f75f35cbf4be5bd826f113e",
+    "semantic_hash": "df9b23be8f75f35cbf4be5bd826f113e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\auth.controller.ts": {
+    "mtime": 1776486169.267445,
+    "ast_hash": "b77905579666b0a29dae40c249090197",
+    "semantic_hash": "b77905579666b0a29dae40c249090197"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\auth.module.ts": {
+    "mtime": 1778246609.5873923,
+    "ast_hash": "9b13faf77b6716d751edaadcf3b8a6f2",
+    "semantic_hash": "9b13faf77b6716d751edaadcf3b8a6f2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\auth.service.ts": {
+    "mtime": 1780902237.8239224,
+    "ast_hash": "c61f772fa5fb69ab8c0d5c46d3e65e4f",
+    "semantic_hash": "c61f772fa5fb69ab8c0d5c46d3e65e4f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\decorators\\current-user.decorator.ts": {
+    "mtime": 1769700029.313331,
+    "ast_hash": "a968606a26d2b8c34db52eac1f79319f",
+    "semantic_hash": "a968606a26d2b8c34db52eac1f79319f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\decorators\\permissions.decorator.ts": {
+    "mtime": 1769696437.5509915,
+    "ast_hash": "320dd49f4fc2effdafcb72edbfbe061f",
+    "semantic_hash": "320dd49f4fc2effdafcb72edbfbe061f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\decorators\\public.decorator.ts": {
+    "mtime": 1769696437.5509915,
+    "ast_hash": "82c29e3a7a0a8de27073960842a01c53",
+    "semantic_hash": "82c29e3a7a0a8de27073960842a01c53"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\decorators\\roles.decorator.ts": {
+    "mtime": 1769696437.5509915,
+    "ast_hash": "6ecfd73c2d7490b4a9b3192a8d31d310",
+    "semantic_hash": "6ecfd73c2d7490b4a9b3192a8d31d310"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\decorators\\tenant.decorator.ts": {
+    "mtime": 1770021898.283628,
+    "ast_hash": "17f193e91f402a537da5d0efa04e4214",
+    "semantic_hash": "17f193e91f402a537da5d0efa04e4214"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\dto\\auth.dto.ts": {
+    "mtime": 1777297241.9505806,
+    "ast_hash": "db37f039146ecfd73274a1eb72fe92eb",
+    "semantic_hash": "db37f039146ecfd73274a1eb72fe92eb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\guards\\jwt-auth.guard.ts": {
+    "mtime": 1778246652.867443,
+    "ast_hash": "ddecc4010f100eef8f38acb51326f097",
+    "semantic_hash": "ddecc4010f100eef8f38acb51326f097"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\guards\\roles.guard.ts": {
+    "mtime": 1776486169.2698808,
+    "ast_hash": "f0e4f0262d8d1e2824a042219633b1da",
+    "semantic_hash": "f0e4f0262d8d1e2824a042219633b1da"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\auth\\strategies\\jwt.strategy.ts": {
+    "mtime": 1780902237.8249228,
+    "ast_hash": "79a14df823bf21113aae482455857f8c",
+    "semantic_hash": "79a14df823bf21113aae482455857f8c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\data\\data.controller.ts": {
+    "mtime": 1776486169.2711737,
+    "ast_hash": "df1c995c251483c3c439610c6da649c8",
+    "semantic_hash": "df1c995c251483c3c439610c6da649c8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\data\\data.module.ts": {
+    "mtime": 1776486169.2711737,
+    "ast_hash": "f99df09f20fb6b2d44ea1031a071589d",
+    "semantic_hash": "f99df09f20fb6b2d44ea1031a071589d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\data\\data.service.spec.ts": {
+    "mtime": 1776433688.2810726,
+    "ast_hash": "c0753a62ff3739db1c37489c245e3556",
+    "semantic_hash": "c0753a62ff3739db1c37489c245e3556"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\data\\data.service.ts": {
+    "mtime": 1778026932.543614,
+    "ast_hash": "30ecb7b5d26eec5a4093e1fc3eaa5fd8",
+    "semantic_hash": "30ecb7b5d26eec5a4093e1fc3eaa5fd8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\data\\dto\\actuals-query.dto.ts": {
+    "mtime": 1769698657.328691,
+    "ast_hash": "014b4860f01291fd0674f439955b5ee3",
+    "semantic_hash": "014b4860f01291fd0674f439955b5ee3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\data\\dto\\create-dimension.dto.ts": {
+    "mtime": 1778026381.3015811,
+    "ast_hash": "b59f92b3722254aed7933d6da545e102",
+    "semantic_hash": "b59f92b3722254aed7933d6da545e102"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\data\\dto\\dimension-query.dto.ts": {
+    "mtime": 1777688208.6165788,
+    "ast_hash": "e50ef1733e7a6bde3fdda956cbe2efa3",
+    "semantic_hash": "e50ef1733e7a6bde3fdda956cbe2efa3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\data\\dto\\import-data.dto.ts": {
+    "mtime": 1769698657.328691,
+    "ast_hash": "440d5ab07a149e7c1324f1fe31b876de",
+    "semantic_hash": "440d5ab07a149e7c1324f1fe31b876de"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\data\\dto\\update-dimension.dto.ts": {
+    "mtime": 1769698657.328691,
+    "ast_hash": "809b5dba39cd408c654627eb98f68d06",
+    "semantic_hash": "809b5dba39cd408c654627eb98f68d06"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\dto\\accuracy-metrics.dto.ts": {
+    "mtime": 1770711762.901893,
+    "ast_hash": "06ff57c822556e782e428fc9b6fd6871",
+    "semantic_hash": "06ff57c822556e782e428fc9b6fd6871"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\dto\\approve-override.dto.ts": {
+    "mtime": 1770647672.4169185,
+    "ast_hash": "94459ad0a1e6c07dcbd17e81c1e9a4d0",
+    "semantic_hash": "94459ad0a1e6c07dcbd17e81c1e9a4d0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\dto\\create-forecast.dto.ts": {
+    "mtime": 1771639145.0617013,
+    "ast_hash": "3f0ad06762c0da10a549c655c193df4e",
+    "semantic_hash": "3f0ad06762c0da10a549c655c193df4e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\dto\\create-override.dto.ts": {
+    "mtime": 1770647672.4169185,
+    "ast_hash": "dc778e85148ce258e036ef81368466d8",
+    "semantic_hash": "dc778e85148ce258e036ef81368466d8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\dto\\forecast-query.dto.ts": {
+    "mtime": 1776486169.273629,
+    "ast_hash": "1fd948cd683da578f3e746f3fe77b894",
+    "semantic_hash": "1fd948cd683da578f3e746f3fe77b894"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\dto\\generate-forecast.dto.ts": {
+    "mtime": 1771639145.0155149,
+    "ast_hash": "f2f0290e032481fcdeb05573aadc7ffc",
+    "semantic_hash": "f2f0290e032481fcdeb05573aadc7ffc"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\dto\\reconcile-forecast.dto.ts": {
+    "mtime": 1771639145.0617013,
+    "ast_hash": "15709c018f27ebbdd0e61ac2551b7e31",
+    "semantic_hash": "15709c018f27ebbdd0e61ac2551b7e31"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\dto\\run-forecast.dto.ts": {
+    "mtime": 1769698451.2960222,
+    "ast_hash": "d129e998a86be1fe65e20932a9b8f5ac",
+    "semantic_hash": "d129e998a86be1fe65e20932a9b8f5ac"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\dto\\snapshot-forecast.dto.ts": {
+    "mtime": 1771639145.0617013,
+    "ast_hash": "ce74f441b4b8701bdc8674a93b4417ef",
+    "semantic_hash": "ce74f441b4b8701bdc8674a93b4417ef"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\forecasts.controller.ts": {
+    "mtime": 1779638811.7274427,
+    "ast_hash": "b5ec7aa56c83128e7e021e25fe2e2fdd",
+    "semantic_hash": "b5ec7aa56c83128e7e021e25fe2e2fdd"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\forecasts.module.ts": {
+    "mtime": 1776486169.2746332,
+    "ast_hash": "e53a805aceca3f5fd71ec4fcac13c4bb",
+    "semantic_hash": "e53a805aceca3f5fd71ec4fcac13c4bb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\forecasts\\forecasts.service.ts": {
+    "mtime": 1779879461.703503,
+    "ast_hash": "8342f970cda246d151ddff5bd6385f6d",
+    "semantic_hash": "8342f970cda246d151ddff5bd6385f6d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\dto\\enterprise.dto.ts": {
+    "mtime": 1775662531.7020383,
+    "ast_hash": "ba1253625848e3ac1c19a1da9c6336b0",
+    "semantic_hash": "ba1253625848e3ac1c19a1da9c6336b0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\dto\\index.ts": {
+    "mtime": 1771333573.0511587,
+    "ast_hash": "271b92e86a4960a0b6b885bcc1ce4e47",
+    "semantic_hash": "271b92e86a4960a0b6b885bcc1ce4e47"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\dto\\manufacturing.dto.ts": {
+    "mtime": 1775716156.178934,
+    "ast_hash": "2b8b632232bc1667ef378000c2307a3b",
+    "semantic_hash": "2b8b632232bc1667ef378000c2307a3b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\dto\\query.dto.ts": {
+    "mtime": 1777789408.7332823,
+    "ast_hash": "7d60e9745209d29f0596e97876309468",
+    "semantic_hash": "7d60e9745209d29f0596e97876309468"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\manufacturing.controller.ts": {
+    "mtime": 1778247000.935772,
+    "ast_hash": "ef189eb675e6c60e1848ad1de48f8254",
+    "semantic_hash": "ef189eb675e6c60e1848ad1de48f8254"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\manufacturing.error-handling.spec.ts": {
+    "mtime": 1771508080.4605105,
+    "ast_hash": "654b8254698edec4971e4e4db78e9125",
+    "semantic_hash": "654b8254698edec4971e4e4db78e9125"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\manufacturing.module.ts": {
+    "mtime": 1778059676.9933443,
+    "ast_hash": "278d9efcb896f893e1f8121c0167b712",
+    "semantic_hash": "278d9efcb896f893e1f8121c0167b712"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\manufacturing.promotion-targets.spec.ts": {
+    "mtime": 1775716156.3590858,
+    "ast_hash": "81cf4efa10de818ba73914f0d9e352e9",
+    "semantic_hash": "81cf4efa10de818ba73914f0d9e352e9"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\manufacturing.service.ts": {
+    "mtime": 1778247336.6176312,
+    "ast_hash": "04a38f05c50fd6d2a2c71472d47e13e0",
+    "semantic_hash": "04a38f05c50fd6d2a2c71472d47e13e0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\manufacturing.sop-cycle.spec.ts": {
+    "mtime": 1775660945.291304,
+    "ast_hash": "487eea55aa71284a47752858688b2680",
+    "semantic_hash": "487eea55aa71284a47752858688b2680"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\manufacturing.workflow-metrics.spec.ts": {
+    "mtime": 1771508080.4605105,
+    "ast_hash": "bd5b8408b8877bc700b8408be4712a98",
+    "semantic_hash": "bd5b8408b8877bc700b8408be4712a98"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\production\\production-branch.controller.ts": {
+    "mtime": 1776486169.3007257,
+    "ast_hash": "037b281601b1443200c40394084b5c22",
+    "semantic_hash": "037b281601b1443200c40394084b5c22"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\production\\production-branch.service.ts": {
+    "mtime": 1771420154.2998028,
+    "ast_hash": "f4ab139e87ade37423591a8aa3967595",
+    "semantic_hash": "f4ab139e87ade37423591a8aa3967595"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\services\\accounting.service.spec.ts": {
+    "mtime": 1775662531.752421,
+    "ast_hash": "0bf99d4b9de363607783e9653f8847a9",
+    "semantic_hash": "0bf99d4b9de363607783e9653f8847a9"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\services\\accounting.service.ts": {
+    "mtime": 1777772272.9188592,
+    "ast_hash": "f5c2334498faaa905db858b0dd530641",
+    "semantic_hash": "f5c2334498faaa905db858b0dd530641"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\services\\costing-engine.service.ts": {
+    "mtime": 1777789401.4324472,
+    "ast_hash": "9720be06ab23d6139ac7718192ef11c7",
+    "semantic_hash": "9720be06ab23d6139ac7718192ef11c7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\services\\costing.service.ts": {
+    "mtime": 1771333573.0531638,
+    "ast_hash": "d8757ccc63599b85f9c8e74ba66e5d5c",
+    "semantic_hash": "d8757ccc63599b85f9c8e74ba66e5d5c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\services\\idempotency.service.ts": {
+    "mtime": 1771335342.5545025,
+    "ast_hash": "9996bb1de32baad139166cca325fe9d5",
+    "semantic_hash": "9996bb1de32baad139166cca325fe9d5"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\services\\inventory-ledger.service.ts": {
+    "mtime": 1771421642.6338935,
+    "ast_hash": "f69f85cc7540aa2eda6b039936130641",
+    "semantic_hash": "f69f85cc7540aa2eda6b039936130641"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\services\\purchase-invoices.service.ts": {
+    "mtime": 1778247504.9495578,
+    "ast_hash": "53b844548306f2b674328dae05b886cd",
+    "semantic_hash": "53b844548306f2b674328dae05b886cd"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\services\\quality.service.ts": {
+    "mtime": 1777772328.5918536,
+    "ast_hash": "51f658dd375736e812e7b65d735d8eaf",
+    "semantic_hash": "51f658dd375736e812e7b65d735d8eaf"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\services\\retry.utility.ts": {
+    "mtime": 1771414953.7552004,
+    "ast_hash": "0af198ba96a1e3f22814f2308b1f1e6a",
+    "semantic_hash": "0af198ba96a1e3f22814f2308b1f1e6a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\manufacturing\\services\\sequence.service.ts": {
+    "mtime": 1771421642.637023,
+    "ast_hash": "b8ac0d93b5753d1bac457387d34d4378",
+    "semantic_hash": "b8ac0d93b5753d1bac457387d34d4378"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\dto\\create-marg-config.dto.ts": {
+    "mtime": 1777859521.2119584,
+    "ast_hash": "e87c7e0b4e74dc15e76dd0c395600bf2",
+    "semantic_hash": "e87c7e0b4e74dc15e76dd0c395600bf2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\dto\\create-marg-gl-mapping-rule.dto.ts": {
+    "mtime": 1776777228.5575674,
+    "ast_hash": "b3c7b80470092f3dfdc21856c5ea27cf",
+    "semantic_hash": "b3c7b80470092f3dfdc21856c5ea27cf"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\dto\\index.ts": {
+    "mtime": 1778922412.3356836,
+    "ast_hash": "db631ba28480e176bf48ae8cab582f44",
+    "semantic_hash": "db631ba28480e176bf48ae8cab582f44"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\dto\\marg-sync-log-status.dto.ts": {
+    "mtime": 1778910378.5528998,
+    "ast_hash": "68087c088eccebfe8723ee276d2d25e6",
+    "semantic_hash": "68087c088eccebfe8723ee276d2d25e6"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\dto\\update-marg-config.dto.ts": {
+    "mtime": 1777859542.1364326,
+    "ast_hash": "6a430c8c428e3d0a75089fc0da22a6c1",
+    "semantic_hash": "6a430c8c428e3d0a75089fc0da22a6c1"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\dto\\update-marg-gl-mapping-rule.dto.ts": {
+    "mtime": 1776777228.5575674,
+    "ast_hash": "27f087a6c0ee42566a3adfd610bbd505",
+    "semantic_hash": "27f087a6c0ee42566a3adfd610bbd505"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\index.ts": {
+    "mtime": 1776163087.6889205,
+    "ast_hash": "444d9e5b9b06c80fae98b829084184b9",
+    "semantic_hash": "444d9e5b9b06c80fae98b829084184b9"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-decrypt.util.ts": {
+    "mtime": 1776207654.6495075,
+    "ast_hash": "e3c5767b508aa63dfdae1554a700dd8a",
+    "semantic_hash": "e3c5767b508aa63dfdae1554a700dd8a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-ede.controller.ts": {
+    "mtime": 1779426820.5090263,
+    "ast_hash": "d3523df3da6f915e0769c4acc385fc5d",
+    "semantic_hash": "d3523df3da6f915e0769c4acc385fc5d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-ede.module.ts": {
+    "mtime": 1778905108.7640712,
+    "ast_hash": "4100567f65d35a851bcfe96b81407e46",
+    "semantic_hash": "4100567f65d35a851bcfe96b81407e46"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-ede.service.spec.ts": {
+    "mtime": 1779725689.6207066,
+    "ast_hash": "ae2a70cc5ab772d73119149a750fc27b",
+    "semantic_hash": "ae2a70cc5ab772d73119149a750fc27b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-ede.service.ts": {
+    "mtime": 1780804009.4126363,
+    "ast_hash": "52dd51ea5fdafad7773b7dbc5737b988",
+    "semantic_hash": "52dd51ea5fdafad7773b7dbc5737b988"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-raw-page-storage.ts": {
+    "mtime": 1778981917.9511063,
+    "ast_hash": "1b21e41d926f7893b34a4b2e1f4f9fe6",
+    "semantic_hash": "1b21e41d926f7893b34a4b2e1f4f9fe6"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-sync-pipeline.spec.ts": {
+    "mtime": 1779000269.6966288,
+    "ast_hash": "db84babc1205c10c7256b10e5cd2e199",
+    "semantic_hash": "db84babc1205c10c7256b10e5cd2e199"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-sync.processor.ts": {
+    "mtime": 1779012631.5793214,
+    "ast_hash": "c7e7523ecf6938980460b195d791c844",
+    "semantic_hash": "c7e7523ecf6938980460b195d791c844"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-sync.scheduler.ts": {
+    "mtime": 1779336967.6220186,
+    "ast_hash": "aa504dd3a6bbc9c1ff4b996194ad4cc0",
+    "semantic_hash": "aa504dd3a6bbc9c1ff4b996194ad4cc0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-sync.types.ts": {
+    "mtime": 1778905035.4749262,
+    "ast_hash": "99148ff902626a9a477125f72b19b0e4",
+    "semantic_hash": "99148ff902626a9a477125f72b19b0e4"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-voucher-family.sql.spec.ts": {
+    "mtime": 1779372715.2638676,
+    "ast_hash": "770163d316c654d5628ca1c46ee0668b",
+    "semantic_hash": "770163d316c654d5628ca1c46ee0668b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\marg-voucher-family.sql.ts": {
+    "mtime": 1779372689.9414313,
+    "ast_hash": "1e2aecea6a675e89322c490d92d3ae29",
+    "semantic_hash": "1e2aecea6a675e89322c490d92d3ae29"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\sync-logger.ts": {
+    "mtime": 1779001012.4478273,
+    "ast_hash": "ab84b3d33a6ea17f4205061ad6ed5a34",
+    "semantic_hash": "ab84b3d33a6ea17f4205061ad6ed5a34"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\notifications\\notification.controller.ts": {
+    "mtime": 1776486169.3033035,
+    "ast_hash": "63c74dc831b29cd0e8aaeda5fdeaec4e",
+    "semantic_hash": "63c74dc831b29cd0e8aaeda5fdeaec4e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\notifications\\notification.module.ts": {
+    "mtime": 1770788949.1062822,
+    "ast_hash": "2d4dbd85deea0acf24a14750e7c9f838",
+    "semantic_hash": "2d4dbd85deea0acf24a14750e7c9f838"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\dto\\common-filters.dto.ts": {
+    "mtime": 1780038842.9050586,
+    "ast_hash": "30bf0f87fa69d09d6bf9bb493f71ed5f",
+    "semantic_hash": "30bf0f87fa69d09d6bf9bb493f71ed5f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\dto\\index.ts": {
+    "mtime": 1779697740.6145062,
+    "ast_hash": "4f39c61c75a90b3e7698c2ecc113df92",
+    "semantic_hash": "4f39c61c75a90b3e7698c2ecc113df92"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\dto\\reorder-config.dto.ts": {
+    "mtime": 1779697727.8317945,
+    "ast_hash": "2359640f61e996cf4adffc8827f04005",
+    "semantic_hash": "2359640f61e996cf4adffc8827f04005"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\index.ts": {
+    "mtime": 1776489423.3322082,
+    "ast_hash": "1a8441b3f95b896ef6c158bcc31219cc",
+    "semantic_hash": "1a8441b3f95b896ef6c158bcc31219cc"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\pdf-cleanup.scheduler.ts": {
+    "mtime": 1778258532.493703,
+    "ast_hash": "655f9ba5a4a91cc8e52148c6c2123d2e",
+    "semantic_hash": "655f9ba5a4a91cc8e52148c6c2123d2e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\pharma-filter.helper.ts": {
+    "mtime": 1779602967.2215166,
+    "ast_hash": "ea99a3dd1c6d353d86f2152a853ff744",
+    "semantic_hash": "ea99a3dd1c6d353d86f2152a853ff744"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\pharma-reports.controller.ts": {
+    "mtime": 1780623991.9452844,
+    "ast_hash": "eed17d859c77c5e0d76454a9cbb419ac",
+    "semantic_hash": "eed17d859c77c5e0d76454a9cbb419ac"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\pharma-reports.module.ts": {
+    "mtime": 1778258549.3053355,
+    "ast_hash": "4dd07dbe29ac0b9d3ccef81e7725f79e",
+    "semantic_hash": "4dd07dbe29ac0b9d3ccef81e7725f79e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\accounting-reports.service.ts": {
+    "mtime": 1778079694.4011846,
+    "ast_hash": "c4777b4ecbf20f23da84b7a30a5b8484",
+    "semantic_hash": "c4777b4ecbf20f23da84b7a30a5b8484"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\dashboard-kpi.service.ts": {
+    "mtime": 1779603058.4125996,
+    "ast_hash": "a04e53c9ed28b4fc0afa13ad92abf9df",
+    "semantic_hash": "a04e53c9ed28b4fc0afa13ad92abf9df"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\expiry-reports.service.ts": {
+    "mtime": 1777811453.6145175,
+    "ast_hash": "83e780fdea2cf335888f6ea45701ac47",
+    "semantic_hash": "83e780fdea2cf335888f6ea45701ac47"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\index.ts": {
+    "mtime": 1778059976.6972392,
+    "ast_hash": "67a7c2a32e041cef2767b044ff9aa483",
+    "semantic_hash": "67a7c2a32e041cef2767b044ff9aa483"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\inventory-alerts.service.ts": {
+    "mtime": 1776491048.5690718,
+    "ast_hash": "4a6a592db026c14841edd225275afce8",
+    "semantic_hash": "4a6a592db026c14841edd225275afce8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\inventory-reports.service.spec.ts": {
+    "mtime": 1779699496.6405642,
+    "ast_hash": "841c355ef191259f474e59492abf08aa",
+    "semantic_hash": "841c355ef191259f474e59492abf08aa"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\inventory-reports.service.ts": {
+    "mtime": 1779984948.0124938,
+    "ast_hash": "d080c1035907052b04bf9034cd6f2f90",
+    "semantic_hash": "d080c1035907052b04bf9034cd6f2f90"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\pdf-share.service.ts": {
+    "mtime": 1779629346.9381862,
+    "ast_hash": "74a5f3ffb442a2516cf79b0f57621ecc",
+    "semantic_hash": "74a5f3ffb442a2516cf79b0f57621ecc"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\procurement-reports.service.ts": {
+    "mtime": 1779855345.9359112,
+    "ast_hash": "622919b9afcae0c2153bfd9e8b18fbf5",
+    "semantic_hash": "622919b9afcae0c2153bfd9e8b18fbf5"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\report-export.service.ts": {
+    "mtime": 1779699444.0933094,
+    "ast_hash": "60df3ae2f09bd8e7f9fbfa9c471ab9be",
+    "semantic_hash": "60df3ae2f09bd8e7f9fbfa9c471ab9be"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\sales-purchase-analysis.service.spec.ts": {
+    "mtime": 1779725689.6227138,
+    "ast_hash": "40940530386ef1fdcffac0b578f85cf9",
+    "semantic_hash": "40940530386ef1fdcffac0b578f85cf9"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\sales-purchase-analysis.service.ts": {
+    "mtime": 1780153783.0810604,
+    "ast_hash": "a7fbec0f495ab6c22414d33f6a692788",
+    "semantic_hash": "a7fbec0f495ab6c22414d33f6a692788"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\stock-analysis.service.ts": {
+    "mtime": 1779984948.0134935,
+    "ast_hash": "e7bee5a180350c962f92940f5a6ab05e",
+    "semantic_hash": "e7bee5a180350c962f92940f5a6ab05e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\services\\three-sixty-reports.service.ts": {
+    "mtime": 1780630186.0214574,
+    "ast_hash": "d53c2d09261512b45c48f89d5b516d06",
+    "semantic_hash": "d53c2d09261512b45c48f89d5b516d06"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\pharma-reports\\shared-pdf.controller.ts": {
+    "mtime": 1778257750.9045632,
+    "ast_hash": "2d90d2c93e89efc9b2b5eec22a95e336",
+    "semantic_hash": "2d90d2c93e89efc9b2b5eec22a95e336"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\plans\\dto\\create-plan.dto.ts": {
+    "mtime": 1769831974.202523,
+    "ast_hash": "9bd49863061543fbbe3bd10647ce90ec",
+    "semantic_hash": "9bd49863061543fbbe3bd10647ce90ec"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\plans\\dto\\plan-query.dto.ts": {
+    "mtime": 1769698451.2960222,
+    "ast_hash": "ead8b5f0c27f9a9441a4f3e6ab58fc34",
+    "semantic_hash": "ead8b5f0c27f9a9441a4f3e6ab58fc34"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\plans\\dto\\update-plan.dto.ts": {
+    "mtime": 1769698451.2960222,
+    "ast_hash": "990322e59cdc567ebf007de2a9b7433d",
+    "semantic_hash": "990322e59cdc567ebf007de2a9b7433d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\plans\\plans.controller.ts": {
+    "mtime": 1776486169.3033035,
+    "ast_hash": "39640dc9f0e6f6407ce92bf4ca1cb389",
+    "semantic_hash": "39640dc9f0e6f6407ce92bf4ca1cb389"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\plans\\plans.module.ts": {
+    "mtime": 1769698451.2960222,
+    "ast_hash": "6599f7a19b65e7dd3c3f5d5f94a7d6dc",
+    "semantic_hash": "6599f7a19b65e7dd3c3f5d5f94a7d6dc"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\plans\\plans.service.ts": {
+    "mtime": 1779631006.006556,
+    "ast_hash": "c0e848fc6e61ff2560324d592cbfa20e",
+    "semantic_hash": "c0e848fc6e61ff2560324d592cbfa20e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\platform\\module.guard.ts": {
+    "mtime": 1778117344.212595,
+    "ast_hash": "96e8b0d6e2d15b937ee7ccd5e644a807",
+    "semantic_hash": "96e8b0d6e2d15b937ee7ccd5e644a807"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\platform\\platform.constants.ts": {
+    "mtime": 1780622744.7902894,
+    "ast_hash": "90eb00f0f2d63fe423705af42e530acf",
+    "semantic_hash": "90eb00f0f2d63fe423705af42e530acf"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\platform\\platform.controller.ts": {
+    "mtime": 1779638642.1119745,
+    "ast_hash": "bf1b7455234e0bca20c7bbc0e53232e3",
+    "semantic_hash": "bf1b7455234e0bca20c7bbc0e53232e3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\platform\\platform.module.ts": {
+    "mtime": 1779638532.1582108,
+    "ast_hash": "30d8853f418f23c332bad9b7f5af00e0",
+    "semantic_hash": "30d8853f418f23c332bad9b7f5af00e0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\platform\\platform.service.ts": {
+    "mtime": 1780622744.7902894,
+    "ast_hash": "0973eb219ae561dcf91ec8f2fb9a11a3",
+    "semantic_hash": "0973eb219ae561dcf91ec8f2fb9a11a3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\platform\\require-module.decorator.ts": {
+    "mtime": 1778117261.7038786,
+    "ast_hash": "89182e5ff82b016c3552ad367250e72b",
+    "semantic_hash": "89182e5ff82b016c3552ad367250e72b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\reports\\dto\\index.ts": {
+    "mtime": 1770025500.0824344,
+    "ast_hash": "5cb3cdd651399be9cc544c19c62e7913",
+    "semantic_hash": "5cb3cdd651399be9cc544c19c62e7913"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\reports\\reports-management.service.ts": {
+    "mtime": 1779328189.367116,
+    "ast_hash": "1d9da4ea49d6513b248699fd10a49633",
+    "semantic_hash": "1d9da4ea49d6513b248699fd10a49633"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\reports\\reports.controller.ts": {
+    "mtime": 1779855345.9374268,
+    "ast_hash": "d51ec0136faea48b744624bf66383421",
+    "semantic_hash": "d51ec0136faea48b744624bf66383421"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\reports\\reports.module.ts": {
+    "mtime": 1778056312.459772,
+    "ast_hash": "a1f9704c7a77b31306ebb239db9b8938",
+    "semantic_hash": "a1f9704c7a77b31306ebb239db9b8938"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\reports\\reports.service.ts": {
+    "mtime": 1779941128.960789,
+    "ast_hash": "f4b3c8bd1e9a96111c332ac25d230005",
+    "semantic_hash": "f4b3c8bd1e9a96111c332ac25d230005"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\roles\\dto\\role.dto.ts": {
+    "mtime": 1776486169.3076577,
+    "ast_hash": "abd7265d0aa9804b7b90b7a06021b0b0",
+    "semantic_hash": "abd7265d0aa9804b7b90b7a06021b0b0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\roles\\rbac.constants.ts": {
+    "mtime": 1778727466.0879822,
+    "ast_hash": "27c7b3f50566abe47e24d11d2c350d96",
+    "semantic_hash": "27c7b3f50566abe47e24d11d2c350d96"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\roles\\roles.controller.ts": {
+    "mtime": 1778246372.3260453,
+    "ast_hash": "a4c0c9a5269381436bd40fea81e6e4c9",
+    "semantic_hash": "a4c0c9a5269381436bd40fea81e6e4c9"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\roles\\roles.module.ts": {
+    "mtime": 1776486169.3076577,
+    "ast_hash": "e1a754c43bfee81183fb28b5b22fbd32",
+    "semantic_hash": "e1a754c43bfee81183fb28b5b22fbd32"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\roles\\roles.service.spec.ts": {
+    "mtime": 1778727466.0879822,
+    "ast_hash": "f48c15a1f45e50e1001347ddb86b0ac0",
+    "semantic_hash": "f48c15a1f45e50e1001347ddb86b0ac0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\roles\\roles.service.ts": {
+    "mtime": 1778727466.0899894,
+    "ast_hash": "b16af52f95b2340bd2f67e28b95d394c",
+    "semantic_hash": "b16af52f95b2340bd2f67e28b95d394c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\scenarios\\dto\\create-scenario.dto.ts": {
+    "mtime": 1769704032.2689252,
+    "ast_hash": "51baa6b689da3c13191ee6521db43f3f",
+    "semantic_hash": "51baa6b689da3c13191ee6521db43f3f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\scenarios\\dto\\update-scenario.dto.ts": {
+    "mtime": 1769698451.3193083,
+    "ast_hash": "7ddf071fbf6343df8b945d77478332c3",
+    "semantic_hash": "7ddf071fbf6343df8b945d77478332c3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\scenarios\\scenarios.controller.ts": {
+    "mtime": 1776486169.3091204,
+    "ast_hash": "c051bf864d28060a3c09490763c7a037",
+    "semantic_hash": "c051bf864d28060a3c09490763c7a037"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\scenarios\\scenarios.module.ts": {
+    "mtime": 1769698508.273483,
+    "ast_hash": "c325103cde61585c8542d2335e9cc529",
+    "semantic_hash": "c325103cde61585c8542d2335e9cc529"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\scenarios\\scenarios.service.ts": {
+    "mtime": 1779630014.218316,
+    "ast_hash": "9d71e380b057e7cbb2c4d049d7b465b3",
+    "semantic_hash": "9d71e380b057e7cbb2c4d049d7b465b3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\settings\\dto\\update-settings.dto.ts": {
+    "mtime": 1778745948.920496,
+    "ast_hash": "cfaa0486314db867b885e1606d49640b",
+    "semantic_hash": "cfaa0486314db867b885e1606d49640b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\settings\\settings.controller.ts": {
+    "mtime": 1778727466.0899894,
+    "ast_hash": "fb5c2fa5a875b684f04f9ff0df4916ea",
+    "semantic_hash": "fb5c2fa5a875b684f04f9ff0df4916ea"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\settings\\settings.module.ts": {
+    "mtime": 1769698657.3301964,
+    "ast_hash": "6592bbda52fe8f6032f0c4006cde7845",
+    "semantic_hash": "6592bbda52fe8f6032f0c4006cde7845"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\settings\\settings.service.ts": {
+    "mtime": 1778745789.5061157,
+    "ast_hash": "3cf243dec609705a015e5cc287c94a3c",
+    "semantic_hash": "3cf243dec609705a015e5cc287c94a3c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\users\\dto\\create-user.dto.ts": {
+    "mtime": 1776486169.3101263,
+    "ast_hash": "ad841afef2ef502d73cc737c25e43dd8",
+    "semantic_hash": "ad841afef2ef502d73cc737c25e43dd8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\users\\dto\\update-user.dto.ts": {
+    "mtime": 1770727214.9697492,
+    "ast_hash": "daacf943a0dd651c68d2cddd2f779009",
+    "semantic_hash": "daacf943a0dd651c68d2cddd2f779009"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\users\\dto\\user-query.dto.ts": {
+    "mtime": 1777789460.494195,
+    "ast_hash": "f73efeca880addfd3066589c5ee489fe",
+    "semantic_hash": "f73efeca880addfd3066589c5ee489fe"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\users\\users.controller.ts": {
+    "mtime": 1778246360.5752587,
+    "ast_hash": "8ac09a34652f8831c4a6e51718445b3f",
+    "semantic_hash": "8ac09a34652f8831c4a6e51718445b3f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\users\\users.module.ts": {
+    "mtime": 1769698657.328691,
+    "ast_hash": "0bce4c75a3025dc9ea38d6ee657fa3bf",
+    "semantic_hash": "0bce4c75a3025dc9ea38d6ee657fa3bf"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\users\\users.service.ts": {
+    "mtime": 1777900844.1872096,
+    "ast_hash": "e18dca1e635d82b9979ee74db352b8c6",
+    "semantic_hash": "e18dca1e635d82b9979ee74db352b8c6"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\test\\auth-controller.e2e-spec.ts": {
+    "mtime": 1771425919.144889,
+    "ast_hash": "5d5508d7a433fd4dc6caffc190d87b16",
+    "semantic_hash": "5d5508d7a433fd4dc6caffc190d87b16"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\test\\costing-engine-hardfail.e2e-spec.ts": {
+    "mtime": 1771425919.144889,
+    "ast_hash": "dd16121be7e7070bc751e830c80f1488",
+    "semantic_hash": "dd16121be7e7070bc751e830c80f1488"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\test\\forecast.e2e-spec.ts": {
+    "mtime": 1770648670.973742,
+    "ast_hash": "9ec2508e059452dabf46e66f057c0268",
+    "semantic_hash": "9ec2508e059452dabf46e66f057c0268"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\test\\jest-e2e.json": {
+    "mtime": 1770648670.133391,
+    "ast_hash": "1988f3b2da1144feef39107af055698e",
+    "semantic_hash": "1988f3b2da1144feef39107af055698e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\test\\manufacturing-costing-query.e2e-spec.ts": {
+    "mtime": 1771425919.198824,
+    "ast_hash": "bdb13e6840b580c3da0bcae61badf8b2",
+    "semantic_hash": "bdb13e6840b580c3da0bcae61badf8b2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\test\\manufacturing-route-validation.e2e-spec.ts": {
+    "mtime": 1771511990.9932437,
+    "ast_hash": "c555677f9589bef0c12471b1264c47eb",
+    "semantic_hash": "c555677f9589bef0c12471b1264c47eb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\test\\manufacturing-workflow.e2e-spec.ts": {
+    "mtime": 1771508080.4605105,
+    "ast_hash": "f5515c249f9c3e4fd08867c079463dd2",
+    "semantic_hash": "f5515c249f9c3e4fd08867c079463dd2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\tsconfig.json": {
+    "mtime": 1776178203.324649,
+    "ast_hash": "a9df4bf36707a060456b4a8d6fd1eb99",
+    "semantic_hash": "a9df4bf36707a060456b4a8d6fd1eb99"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\01-auth.e2e.spec.ts": {
+    "mtime": 1776178203.4426737,
+    "ast_hash": "1531d8b3d099f17fc81702129e1ef890",
+    "semantic_hash": "1531d8b3d099f17fc81702129e1ef890"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\02-dashboard.e2e.spec.ts": {
+    "mtime": 1771516825.121646,
+    "ast_hash": "7a12a6eb757d16b6c9b81ba677214365",
+    "semantic_hash": "7a12a6eb757d16b6c9b81ba677214365"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\03-plans.e2e.spec.ts": {
+    "mtime": 1771586474.1970263,
+    "ast_hash": "59dec8f56defa3a1a8895550318d1b45",
+    "semantic_hash": "59dec8f56defa3a1a8895550318d1b45"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\04-forecasts.e2e.spec.ts": {
+    "mtime": 1771586474.2105916,
+    "ast_hash": "5e6e2685065752b3904fcba3f8581058",
+    "semantic_hash": "5e6e2685065752b3904fcba3f8581058"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\05-scenarios.e2e.spec.ts": {
+    "mtime": 1771586474.2105916,
+    "ast_hash": "1378e884f0b83c17bfd11202b55f4675",
+    "semantic_hash": "1378e884f0b83c17bfd11202b55f4675"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\06-data.e2e.spec.ts": {
+    "mtime": 1771586474.1970263,
+    "ast_hash": "15bc2ef79637b6c936bfd98a02772f9b",
+    "semantic_hash": "15bc2ef79637b6c936bfd98a02772f9b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\07-manufacturing.e2e.spec.ts": {
+    "mtime": 1771586474.2139032,
+    "ast_hash": "deeb2b17c582e941eac6b8518017d35b",
+    "semantic_hash": "deeb2b17c582e941eac6b8518017d35b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\08-reports.e2e.spec.ts": {
+    "mtime": 1771586474.1984622,
+    "ast_hash": "963e7edd1afa8ad2b28f95e403ad0dba",
+    "semantic_hash": "963e7edd1afa8ad2b28f95e403ad0dba"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\09-settings.e2e.spec.ts": {
+    "mtime": 1776178203.42611,
+    "ast_hash": "dc09fca4b37629bcc18dae1041d97711",
+    "semantic_hash": "dc09fca4b37629bcc18dae1041d97711"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\10-cross-module-integrity.e2e.spec.ts": {
+    "mtime": 1776178203.4426737,
+    "ast_hash": "e5547b11c33b1816424634dc6786a435",
+    "semantic_hash": "e5547b11c33b1816424634dc6786a435"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\app-smoke.e2e.spec.ts": {
+    "mtime": 1778393292.0062783,
+    "ast_hash": "8ddbd2f924da8c798cf31f6647984e19",
+    "semantic_hash": "8ddbd2f924da8c798cf31f6647984e19"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\fixtures.ts": {
+    "mtime": 1771586474.1984622,
+    "ast_hash": "d044623761a74fd44697277027df560c",
+    "semantic_hash": "d044623761a74fd44697277027df560c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\global-setup.ts": {
+    "mtime": 1771513692.078359,
+    "ast_hash": "21ce9f65b64ffb1943a05f6b396dfbfe",
+    "semantic_hash": "21ce9f65b64ffb1943a05f6b396dfbfe"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\helpers\\api-client.ts": {
+    "mtime": 1771586474.1941285,
+    "ast_hash": "a77082890ca75ff2c510b51c331c3f31",
+    "semantic_hash": "a77082890ca75ff2c510b51c331c3f31"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\helpers\\logger.ts": {
+    "mtime": 1771513692.0803618,
+    "ast_hash": "8accb374ca88efc61b4803b781f8b8ca",
+    "semantic_hash": "8accb374ca88efc61b4803b781f8b8ca"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\e2e\\helpers\\navigation.ts": {
+    "mtime": 1771513692.0959048,
+    "ast_hash": "6211bfec658bd9bbcc7ecfd22c903e6c",
+    "semantic_hash": "6211bfec658bd9bbcc7ecfd22c903e6c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\package.json": {
+    "mtime": 1776314347.8073063,
+    "ast_hash": "cc7c20f97698a35c55ef649e8d639320",
+    "semantic_hash": "cc7c20f97698a35c55ef649e8d639320"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\playwright.config.ts": {
+    "mtime": 1771586474.173992,
+    "ast_hash": "9c43124ebee70dab517712693358560f",
+    "semantic_hash": "9c43124ebee70dab517712693358560f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\playwright\\.auth\\user.json": {
+    "mtime": 1776169890.723134,
+    "ast_hash": "0c6405d431c8235fa5fe84155e56ad63",
+    "semantic_hash": "0c6405d431c8235fa5fe84155e56ad63"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\postcss.config.js": {
+    "mtime": 1769697185.8319044,
+    "ast_hash": "33fad9c02cb0ec6d6030369ef6347d57",
+    "semantic_hash": "33fad9c02cb0ec6d6030369ef6347d57"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\App.tsx": {
+    "mtime": 1780902237.825444,
+    "ast_hash": "199851d91b463df48b4db76496e59b42",
+    "semantic_hash": "199851d91b463df48b4db76496e59b42"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\ThemeProvider.tsx": {
+    "mtime": 1778727466.0919964,
+    "ast_hash": "b33f7d0a625d25aa036a10c97db2cf45",
+    "semantic_hash": "b33f7d0a625d25aa036a10c97db2cf45"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\charts\\AreaChart.tsx": {
+    "mtime": 1778393360.590695,
+    "ast_hash": "eea30997f2e45d77e0e0ffb93ccbba08",
+    "semantic_hash": "eea30997f2e45d77e0e0ffb93ccbba08"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\charts\\BarChart.tsx": {
+    "mtime": 1778727466.0919964,
+    "ast_hash": "554a2502e9d136ab3a9c4db7ff7efe55",
+    "semantic_hash": "554a2502e9d136ab3a9c4db7ff7efe55"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\charts\\ForecastChart.tsx": {
+    "mtime": 1777907134.1570263,
+    "ast_hash": "18d6e89c36618531276723775f52021a",
+    "semantic_hash": "18d6e89c36618531276723775f52021a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\charts\\LineChart.tsx": {
+    "mtime": 1777907103.4442294,
+    "ast_hash": "c49c2dba05cbbd4327e87cc199c2d7f1",
+    "semantic_hash": "c49c2dba05cbbd4327e87cc199c2d7f1"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\charts\\PieChart.tsx": {
+    "mtime": 1777907126.6370628,
+    "ast_hash": "49f9719a479c3c4cef88515b4817aabd",
+    "semantic_hash": "49f9719a479c3c4cef88515b4817aabd"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\charts\\index.ts": {
+    "mtime": 1769699257.1304824,
+    "ast_hash": "54c687cf2924081a75952f43d066681d",
+    "semantic_hash": "54c687cf2924081a75952f43d066681d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\common\\ConfirmDialog.tsx": {
+    "mtime": 1771328204.0638483,
+    "ast_hash": "ed6e352afe8e8dc51391af25f1a150cf",
+    "semantic_hash": "ed6e352afe8e8dc51391af25f1a150cf"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\common\\ErrorBoundary.tsx": {
+    "mtime": 1771421642.637023,
+    "ast_hash": "834e91ed53049286ae896737d452bb47",
+    "semantic_hash": "834e91ed53049286ae896737d452bb47"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\common\\GlobalLoadingOverlay.tsx": {
+    "mtime": 1776239878.2129314,
+    "ast_hash": "d94fc65e6f70b3c42204153f4ce07967",
+    "semantic_hash": "d94fc65e6f70b3c42204153f4ce07967"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\common\\RoleGuard.tsx": {
+    "mtime": 1775716156.5825286,
+    "ast_hash": "ab5bcc3d6a7d315768d8a9e365390ab7",
+    "semantic_hash": "ab5bcc3d6a7d315768d8a9e365390ab7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\common\\SessionRenewalPrompt.tsx": {
+    "mtime": 1778246763.238893,
+    "ast_hash": "1d946a75490228f284954a938f0f4373",
+    "semantic_hash": "1d946a75490228f284954a938f0f4373"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\index.ts": {
+    "mtime": 1771333573.071151,
+    "ast_hash": "5d1e004f3e0cc6c7417a8c6b20b41beb",
+    "semantic_hash": "5d1e004f3e0cc6c7417a8c6b20b41beb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\layout\\AuthLayout.tsx": {
+    "mtime": 1771343767.9238584,
+    "ast_hash": "db0617cdd2c56dd4037c22546d2e4031",
+    "semantic_hash": "db0617cdd2c56dd4037c22546d2e4031"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\layout\\Header.tsx": {
+    "mtime": 1778374219.162486,
+    "ast_hash": "657299decb1d03de7b4a29e40c6f1381",
+    "semantic_hash": "657299decb1d03de7b4a29e40c6f1381"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\layout\\MainLayout.tsx": {
+    "mtime": 1778727466.0919964,
+    "ast_hash": "3ae7f90a6fe23474164d9a5791ef758d",
+    "semantic_hash": "3ae7f90a6fe23474164d9a5791ef758d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\layout\\Sidebar.tsx": {
+    "mtime": 1780902237.8264413,
+    "ast_hash": "3724ebd62b51ef1103ad24661eacc9cf",
+    "semantic_hash": "3724ebd62b51ef1103ad24661eacc9cf"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\layout\\index.ts": {
+    "mtime": 1769697628.0221846,
+    "ast_hash": "790ef8b621fc4d6fd613cda62d08732c",
+    "semantic_hash": "790ef8b621fc4d6fd613cda62d08732c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiAssumptionsPanel.tsx": {
+    "mtime": 1778727466.0940032,
+    "ast_hash": "e1511021ffeb5be9904b5daabdc87155",
+    "semantic_hash": "e1511021ffeb5be9904b5daabdc87155"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiChartRenderer.tsx": {
+    "mtime": 1778749081.995125,
+    "ast_hash": "dc48a1200b719688fbfd0a2e0fec93b3",
+    "semantic_hash": "dc48a1200b719688fbfd0a2e0fec93b3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiDashboardRenderer.tsx": {
+    "mtime": 1778727466.0940032,
+    "ast_hash": "4e2bdaf65ee349679b27d48f7154ab77",
+    "semantic_hash": "4e2bdaf65ee349679b27d48f7154ab77"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiErrorState.tsx": {
+    "mtime": 1778727466.0960097,
+    "ast_hash": "792e5af0d03cc833415dbdeacc789d20",
+    "semantic_hash": "792e5af0d03cc833415dbdeacc789d20"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiFollowUpQuestions.tsx": {
+    "mtime": 1778727466.0960097,
+    "ast_hash": "c96de8147e89d67fe018e46d656cffdb",
+    "semantic_hash": "c96de8147e89d67fe018e46d656cffdb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiKpiCard.tsx": {
+    "mtime": 1778727466.0960097,
+    "ast_hash": "48826187f8234739bb80b60b0f3beb27",
+    "semantic_hash": "48826187f8234739bb80b60b0f3beb27"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiLoadingState.tsx": {
+    "mtime": 1778727466.0960097,
+    "ast_hash": "10fba3f2e2a9c4bf242401ace3f2a762",
+    "semantic_hash": "10fba3f2e2a9c4bf242401ace3f2a762"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiReportResult.test.tsx": {
+    "mtime": 1778749106.0905244,
+    "ast_hash": "6f8297f926a9e1d5f2a7be71fc45a555",
+    "semantic_hash": "6f8297f926a9e1d5f2a7be71fc45a555"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiReportResult.tsx": {
+    "mtime": 1780902237.8264413,
+    "ast_hash": "919353a4393872938fb0d53abbf84290",
+    "semantic_hash": "919353a4393872938fb0d53abbf84290"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiReportTable.tsx": {
+    "mtime": 1778749073.6196122,
+    "ast_hash": "88b48e2dc4ff503d87728064521b7318",
+    "semantic_hash": "88b48e2dc4ff503d87728064521b7318"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiReportingAssistant.tsx": {
+    "mtime": 1780902237.8274405,
+    "ast_hash": "72cf6ed06984dfd6f45a50f74e9935ab",
+    "semantic_hash": "72cf6ed06984dfd6f45a50f74e9935ab"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\AiSummaryPanel.tsx": {
+    "mtime": 1780902237.8274405,
+    "ast_hash": "a9b568a00177cca1515c082ba571eed3",
+    "semantic_hash": "a9b568a00177cca1515c082ba571eed3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\DetailPopupActions.tsx": {
+    "mtime": 1778257850.0667605,
+    "ast_hash": "2fbdab5cefac4e8f9a0d3350518985dc",
+    "semantic_hash": "2fbdab5cefac4e8f9a0d3350518985dc"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\reports\\ai-reporting-utils.ts": {
+    "mtime": 1778749065.550782,
+    "ast_hash": "d37d56ae752a5d2de8951f015dce70c0",
+    "semantic_hash": "d37d56ae752a5d2de8951f015dce70c0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\ui\\Button.tsx": {
+    "mtime": 1771345314.4153714,
+    "ast_hash": "808fb9addb04d18c39666f4434d6d19a",
+    "semantic_hash": "808fb9addb04d18c39666f4434d6d19a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\ui\\Common.tsx": {
+    "mtime": 1770818258.6206875,
+    "ast_hash": "feaff07ad4b8db8123f4596f93492d6e",
+    "semantic_hash": "feaff07ad4b8db8123f4596f93492d6e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\ui\\DataTable.tsx": {
+    "mtime": 1778374188.4319417,
+    "ast_hash": "477b7a4107e2370e2e5116e9e32821b4",
+    "semantic_hash": "477b7a4107e2370e2e5116e9e32821b4"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\ui\\Form.tsx": {
+    "mtime": 1769698912.7829037,
+    "ast_hash": "5565c13268a2d57c4d899effb40cfe99",
+    "semantic_hash": "5565c13268a2d57c4d899effb40cfe99"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\ui\\Modal.tsx": {
+    "mtime": 1778374209.6269045,
+    "ast_hash": "bd917ff04059fa209f899c496d18f0b6",
+    "semantic_hash": "bd917ff04059fa209f899c496d18f0b6"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\ui\\ProductSelector.tsx": {
+    "mtime": 1777907354.320392,
+    "ast_hash": "38cd0872cd640994406e14c947e052fc",
+    "semantic_hash": "38cd0872cd640994406e14c947e052fc"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\ui\\ResponsivePageLayout.tsx": {
+    "mtime": 1778259858.3935373,
+    "ast_hash": "ff288db712ce5dacec5c68011eeaa4c7",
+    "semantic_hash": "ff288db712ce5dacec5c68011eeaa4c7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\components\\ui\\index.ts": {
+    "mtime": 1778324850.6642265,
+    "ast_hash": "0c1eba2d179233d213d4b7253db887c4",
+    "semantic_hash": "0c1eba2d179233d213d4b7253db887c4"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\index.ts": {
+    "mtime": 1777457936.519011,
+    "ast_hash": "e60ba0b60a85224387abc24e07c39d21",
+    "semantic_hash": "e60ba0b60a85224387abc24e07c39d21"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useAiReporting.ts": {
+    "mtime": 1778727466.0980163,
+    "ast_hash": "55f14fab26d14f16930a72308030ab50",
+    "semantic_hash": "55f14fab26d14f16930a72308030ab50"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useAuditNotifications.ts": {
+    "mtime": 1776486169.312568,
+    "ast_hash": "33102fc92980998900d40ed7df9753aa",
+    "semantic_hash": "33102fc92980998900d40ed7df9753aa"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useAuth.ts": {
+    "mtime": 1775716156.5825286,
+    "ast_hash": "763db090e98f2b67fdfcd42525d1d873",
+    "semantic_hash": "763db090e98f2b67fdfcd42525d1d873"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useBOM.ts": {
+    "mtime": 1770818258.6183608,
+    "ast_hash": "5c8d02408366305cf3973ab56d3b7477",
+    "semantic_hash": "5c8d02408366305cf3973ab56d3b7477"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useCapacity.ts": {
+    "mtime": 1770818258.6206875,
+    "ast_hash": "7956b024caa19826651857427d4d439d",
+    "semantic_hash": "7956b024caa19826651857427d4d439d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useConfirmAction.ts": {
+    "mtime": 1771482588.8867793,
+    "ast_hash": "7543927160d8f6bc9f7bd9ceaf6c61f7",
+    "semantic_hash": "7543927160d8f6bc9f7bd9ceaf6c61f7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useData.ts": {
+    "mtime": 1769833283.153461,
+    "ast_hash": "69bc8763f8c1e18a173b52a21ee0bf29",
+    "semantic_hash": "69bc8763f8c1e18a173b52a21ee0bf29"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useFiscalPeriods.ts": {
+    "mtime": 1771335342.5545025,
+    "ast_hash": "95955f84dc86c9788e6083f716459d18",
+    "semantic_hash": "95955f84dc86c9788e6083f716459d18"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useForecasts.ts": {
+    "mtime": 1770689980.556428,
+    "ast_hash": "11df99c43f4b3c534c8b1855a9638eac",
+    "semantic_hash": "11df99c43f4b3c534c8b1855a9638eac"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useGridState.ts": {
+    "mtime": 1778036361.6682618,
+    "ast_hash": "0b215571268b013988ab543560164b53",
+    "semantic_hash": "0b215571268b013988ab543560164b53"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useInventory.ts": {
+    "mtime": 1770818258.6183608,
+    "ast_hash": "55fe2f263fe34e8d2e7e89a2b22575bf",
+    "semantic_hash": "55fe2f263fe34e8d2e7e89a2b22575bf"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useMRP.ts": {
+    "mtime": 1770818258.6206875,
+    "ast_hash": "ad537869fd94133bbbb6ec7ba3c95768",
+    "semantic_hash": "ad537869fd94133bbbb6ec7ba3c95768"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useMargEde.ts": {
+    "mtime": 1779001247.452469,
+    "ast_hash": "a04a600c5dc53fd13ac5284264073c05",
+    "semantic_hash": "a04a600c5dc53fd13ac5284264073c05"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useMutationWithConflict.ts": {
+    "mtime": 1771335342.556992,
+    "ast_hash": "08da069f48bfb6a80190745977058916",
+    "semantic_hash": "08da069f48bfb6a80190745977058916"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\usePdfPayload.ts": {
+    "mtime": 1778257873.4164443,
+    "ast_hash": "892861ec09b811d05252fd2366180098",
+    "semantic_hash": "892861ec09b811d05252fd2366180098"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\usePharmaGrid.ts": {
+    "mtime": 1778036366.5093796,
+    "ast_hash": "bfae5b6e4be87c3e75726ccdecf0950f",
+    "semantic_hash": "bfae5b6e4be87c3e75726ccdecf0950f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\usePharmaReports.ts": {
+    "mtime": 1779698331.6883671,
+    "ast_hash": "d7a3b578408791ba5b3b6b2c17a6e120",
+    "semantic_hash": "d7a3b578408791ba5b3b6b2c17a6e120"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\usePlans.ts": {
+    "mtime": 1770001516.85274,
+    "ast_hash": "266be9b2bcce56d791bb72bb76721bde",
+    "semantic_hash": "266be9b2bcce56d791bb72bb76721bde"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useResponsive.ts": {
+    "mtime": 1778259857.373835,
+    "ast_hash": "5670686ad1f63905aaaa7f9aed9d8387",
+    "semantic_hash": "5670686ad1f63905aaaa7f9aed9d8387"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useScenarios.ts": {
+    "mtime": 1769833283.042956,
+    "ast_hash": "f7af95691f1c311e9c13278f05c8d093",
+    "semantic_hash": "f7af95691f1c311e9c13278f05c8d093"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useSettings.ts": {
+    "mtime": 1778727466.0980163,
+    "ast_hash": "7b0df63ac8c99bf591429316fbbd208e",
+    "semantic_hash": "7b0df63ac8c99bf591429316fbbd208e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useTableFilters.ts": {
+    "mtime": 1777688330.7115366,
+    "ast_hash": "e04f886dacee9550b95adf19ad193ae1",
+    "semantic_hash": "e04f886dacee9550b95adf19ad193ae1"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useTenantConfig.ts": {
+    "mtime": 1778332813.9874902,
+    "ast_hash": "6085fec58d0965203232067de23df93a",
+    "semantic_hash": "6085fec58d0965203232067de23df93a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useUsers.ts": {
+    "mtime": 1775660945.256292,
+    "ast_hash": "f1abff4c693a6e36820db2e993e986d5",
+    "semantic_hash": "f1abff4c693a6e36820db2e993e986d5"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\hooks\\useWorkflow.ts": {
+    "mtime": 1770818258.6206875,
+    "ast_hash": "ea75f1efc62f4e63eaade7c0612ed847",
+    "semantic_hash": "ea75f1efc62f4e63eaade7c0612ed847"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\main.tsx": {
+    "mtime": 1776239878.2312322,
+    "ast_hash": "5676e5a5e5c8e6e0e823d29e4bfee4d5",
+    "semantic_hash": "5676e5a5e5c8e6e0e823d29e4bfee4d5"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\Dashboard.tsx": {
+    "mtime": 1780155491.778236,
+    "ast_hash": "c098bc01bec669cfddb5c588e5627228",
+    "semantic_hash": "c098bc01bec669cfddb5c588e5627228"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\NotFound.tsx": {
+    "mtime": 1769698451.2960222,
+    "ast_hash": "75db7427beb87b77c2df7b1434d87241",
+    "semantic_hash": "75db7427beb87b77c2df7b1434d87241"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\auth\\ForceResetPassword.tsx": {
+    "mtime": 1778325099.2547085,
+    "ast_hash": "ae39250dd2dd85d5443d9dad7ab3c80a",
+    "semantic_hash": "ae39250dd2dd85d5443d9dad7ab3c80a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\auth\\ForgotPassword.tsx": {
+    "mtime": 1778393292.0082822,
+    "ast_hash": "8b32dd5382ecb3d16ab614fdf372f02f",
+    "semantic_hash": "8b32dd5382ecb3d16ab614fdf372f02f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\auth\\Login.tsx": {
+    "mtime": 1780039744.6970985,
+    "ast_hash": "c3c6b35dbf9e99010f91d14284e1d8f3",
+    "semantic_hash": "c3c6b35dbf9e99010f91d14284e1d8f3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\auth\\ResetPassword.tsx": {
+    "mtime": 1776486169.314603,
+    "ast_hash": "fc4fb3acbe39bf33c6108aa5a2742998",
+    "semantic_hash": "fc4fb3acbe39bf33c6108aa5a2742998"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\data\\Actuals.tsx": {
+    "mtime": 1778324659.6702385,
+    "ast_hash": "95f5b520fa9d49ef62713ad2c4693d45",
+    "semantic_hash": "95f5b520fa9d49ef62713ad2c4693d45"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\data\\DataImport.tsx": {
+    "mtime": 1778324659.7579703,
+    "ast_hash": "d9023e941077008642afd81bccb122c9",
+    "semantic_hash": "d9023e941077008642afd81bccb122c9"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\data\\Dimensions.tsx": {
+    "mtime": 1778324659.856068,
+    "ast_hash": "f0154b04d27c86315c86913d6c3bb123",
+    "semantic_hash": "f0154b04d27c86315c86913d6c3bb123"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\data\\Locations.tsx": {
+    "mtime": 1778393292.0087817,
+    "ast_hash": "c2da8438f4d789eb35501fa39a257788",
+    "semantic_hash": "c2da8438f4d789eb35501fa39a257788"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\data\\ProductMaster.tsx": {
+    "mtime": 1778324660.0505385,
+    "ast_hash": "9f036621e3a5454dd5e7b047d2739a0b",
+    "semantic_hash": "9f036621e3a5454dd5e7b047d2739a0b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\forecasts\\ForecastDashboard.tsx": {
+    "mtime": 1778324666.3466804,
+    "ast_hash": "c34ef0dfabcd99389bc2afb02ab0a477",
+    "semantic_hash": "c34ef0dfabcd99389bc2afb02ab0a477"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\forecasts\\ForecastDetail.tsx": {
+    "mtime": 1778324666.425995,
+    "ast_hash": "80037172cf43b4b6eb7c9d0a81340936",
+    "semantic_hash": "80037172cf43b4b6eb7c9d0a81340936"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\forecasts\\Forecasts.tsx": {
+    "mtime": 1778393300.9199824,
+    "ast_hash": "e05f9f9f82184eaa59be796ac09d0884",
+    "semantic_hash": "e05f9f9f82184eaa59be796ac09d0884"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\index.ts": {
+    "mtime": 1778727466.0980163,
+    "ast_hash": "645330abade8749f138a28bdeb7dcb28",
+    "semantic_hash": "645330abade8749f138a28bdeb7dcb28"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\BOM.tsx": {
+    "mtime": 1778324601.4449394,
+    "ast_hash": "ccc1095730d1b71ed856d3721d4dc1d0",
+    "semantic_hash": "ccc1095730d1b71ed856d3721d4dc1d0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\BatchManagement.tsx": {
+    "mtime": 1778260124.845328,
+    "ast_hash": "6d739cdb5f9833126c7293b1d183469a",
+    "semantic_hash": "6d739cdb5f9833126c7293b1d183469a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\Capacity.tsx": {
+    "mtime": 1778324601.5425148,
+    "ast_hash": "672e66fce1d76548d8b1ef10fb04b806",
+    "semantic_hash": "672e66fce1d76548d8b1ef10fb04b806"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\CapacityPlansPage.tsx": {
+    "mtime": 1778324601.6384962,
+    "ast_hash": "4c2e7585eb547419875ff37b2856c2e9",
+    "semantic_hash": "4c2e7585eb547419875ff37b2856c2e9"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\CostingEngine.tsx": {
+    "mtime": 1778324613.5754278,
+    "ast_hash": "0bcc248e1da91682782da89fd0f82a51",
+    "semantic_hash": "0bcc248e1da91682782da89fd0f82a51"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\FiscalCalendar.tsx": {
+    "mtime": 1778324601.835742,
+    "ast_hash": "3dd5e26e9cb29d626e7064ff9146cc3a",
+    "semantic_hash": "3dd5e26e9cb29d626e7064ff9146cc3a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\ForecastAccuracy.tsx": {
+    "mtime": 1778324601.9238346,
+    "ast_hash": "f1ebf045a320143d50d94afd97d808f6",
+    "semantic_hash": "f1ebf045a320143d50d94afd97d808f6"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\GLAccounts.tsx": {
+    "mtime": 1778324622.884641,
+    "ast_hash": "2b6b93e38b0b1387e4e6023e6b0548eb",
+    "semantic_hash": "2b6b93e38b0b1387e4e6023e6b0548eb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\Inventory.tsx": {
+    "mtime": 1778324613.6264286,
+    "ast_hash": "546d3e778d1a0f233d13393760e1e924",
+    "semantic_hash": "546d3e778d1a0f233d13393760e1e924"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\JournalEntries.tsx": {
+    "mtime": 1778324468.2098427,
+    "ast_hash": "bfd4bf75ad45b42f05fd979be4ef16c7",
+    "semantic_hash": "bfd4bf75ad45b42f05fd979be4ef16c7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\LocationHierarchyPage.tsx": {
+    "mtime": 1778324602.1095066,
+    "ast_hash": "f04bba370851422ab33ec8d5a03d5e38",
+    "semantic_hash": "f04bba370851422ab33ec8d5a03d5e38"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\MRP.tsx": {
+    "mtime": 1778324602.1727555,
+    "ast_hash": "6773a4ccbccb0fbbe811d309cfd58fb5",
+    "semantic_hash": "6773a4ccbccb0fbbe811d309cfd58fb5"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\ManufacturingDashboard.tsx": {
+    "mtime": 1778324622.8871825,
+    "ast_hash": "af8ff0f9c60fd05c6f183b7498bbf1ee",
+    "semantic_hash": "af8ff0f9c60fd05c6f183b7498bbf1ee"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\ManufacturingRoutes.tsx": {
+    "mtime": 1778246824.966067,
+    "ast_hash": "9b1f23d2ba2531fa1bfc1a069f7fa85a",
+    "semantic_hash": "9b1f23d2ba2531fa1bfc1a069f7fa85a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\NPI.tsx": {
+    "mtime": 1778324602.268952,
+    "ast_hash": "78ff956ccc89c052e4d7b40e560e4864",
+    "semantic_hash": "78ff956ccc89c052e4d7b40e560e4864"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\ProductCategoryMaster.tsx": {
+    "mtime": 1778324602.36594,
+    "ast_hash": "fc3fe5dc2d8a7c7bd24e5838a3ee75ee",
+    "semantic_hash": "fc3fe5dc2d8a7c7bd24e5838a3ee75ee"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\ProductCosting.tsx": {
+    "mtime": 1778324602.4817367,
+    "ast_hash": "6428ee0464d56f1b7388f069f3a840b5",
+    "semantic_hash": "6428ee0464d56f1b7388f069f3a840b5"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\Production.tsx": {
+    "mtime": 1778324622.9148908,
+    "ast_hash": "fc8c1e8ff5c7a58ff6fc6628670eab90",
+    "semantic_hash": "fc8c1e8ff5c7a58ff6fc6628670eab90"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\Promotions.tsx": {
+    "mtime": 1778324834.6302557,
+    "ast_hash": "2249e28f8c7c2db92c293df6a9f8a76b",
+    "semantic_hash": "2249e28f8c7c2db92c293df6a9f8a76b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\PurchaseContracts.tsx": {
+    "mtime": 1778324602.573206,
+    "ast_hash": "d72ef8b0addbc397cdd5740e6ad00efc",
+    "semantic_hash": "d72ef8b0addbc397cdd5740e6ad00efc"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\PurchaseInvoices.tsx": {
+    "mtime": 1778393292.0087817,
+    "ast_hash": "2151ad21d73018e607c424993017b7e1",
+    "semantic_hash": "2151ad21d73018e607c424993017b7e1"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\PurchaseOrders.tsx": {
+    "mtime": 1778393459.7262528,
+    "ast_hash": "3fd042f1e7cdf7b340845f111ee52d76",
+    "semantic_hash": "3fd042f1e7cdf7b340845f111ee52d76"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\QualityInspections.tsx": {
+    "mtime": 1778324509.979675,
+    "ast_hash": "33dd80f7aaff79a4f19bf1198cb91eb3",
+    "semantic_hash": "33dd80f7aaff79a4f19bf1198cb91eb3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\SOP.tsx": {
+    "mtime": 1778324602.7654164,
+    "ast_hash": "016b24585317fec0934cd1889856ecde",
+    "semantic_hash": "016b24585317fec0934cd1889856ecde"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\SOPGapAnalysis.tsx": {
+    "mtime": 1778324602.8605504,
+    "ast_hash": "3ee4740a8411f9b3fe464d75f69d67d3",
+    "semantic_hash": "3ee4740a8411f9b3fe464d75f69d67d3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\Suppliers.tsx": {
+    "mtime": 1778260254.1174994,
+    "ast_hash": "f6c3a094d5b212019f69f060764fd60e",
+    "semantic_hash": "f6c3a094d5b212019f69f060764fd60e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\UomConversions.tsx": {
+    "mtime": 1778324602.9493642,
+    "ast_hash": "7938d62e012fd6ea69e0262dafa2893a",
+    "semantic_hash": "7938d62e012fd6ea69e0262dafa2893a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\UomMaster.tsx": {
+    "mtime": 1778324603.0358436,
+    "ast_hash": "789168a6d0168169869537b643eb0860",
+    "semantic_hash": "789168a6d0168169869537b643eb0860"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\WorkOrders.tsx": {
+    "mtime": 1778260129.7232256,
+    "ast_hash": "ec9eca544cbcf2868c407caa491ae976",
+    "semantic_hash": "ec9eca544cbcf2868c407caa491ae976"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\Workflow.tsx": {
+    "mtime": 1779630159.7133996,
+    "ast_hash": "9dd787b5ff32037b85bc1be00f9f2bfe",
+    "semantic_hash": "9dd787b5ff32037b85bc1be00f9f2bfe"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\index.ts": {
+    "mtime": 1778060331.8842587,
+    "ast_hash": "19e2b379e4bbc800499f7c1ff709e89b",
+    "semantic_hash": "19e2b379e4bbc800499f7c1ff709e89b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\manufacturing\\schemas.ts": {
+    "mtime": 1777907545.2003295,
+    "ast_hash": "feebf89ceb5aff006cef95f0c7bcbb85",
+    "semantic_hash": "feebf89ceb5aff006cef95f0c7bcbb85"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\AlertsPage.tsx": {
+    "mtime": 1779604613.7280414,
+    "ast_hash": "e48d33362d143069446b23aa6c05e00f",
+    "semantic_hash": "e48d33362d143069446b23aa6c05e00f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\ExpiryManagementPage.tsx": {
+    "mtime": 1779604583.173167,
+    "ast_hash": "57de2562c8c4a2f1b5a79de94276ad0e",
+    "semantic_hash": "57de2562c8c4a2f1b5a79de94276ad0e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\ExportToolbar.tsx": {
+    "mtime": 1778326307.9944515,
+    "ast_hash": "1d87815816f91ffe8fa6a997ebfd674c",
+    "semantic_hash": "1d87815816f91ffe8fa6a997ebfd674c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\FinancialReportsPage.tsx": {
+    "mtime": 1779984948.0154934,
+    "ast_hash": "0ff77ae8614e487ff1bbe290c96507fd",
+    "semantic_hash": "0ff77ae8614e487ff1bbe290c96507fd"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\GrowthAnalysisPage.tsx": {
+    "mtime": 1780155518.6181722,
+    "ast_hash": "5e827aaf6cb12ab5812719682d743e25",
+    "semantic_hash": "5e827aaf6cb12ab5812719682d743e25"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\InventoryReportsPage.tsx": {
+    "mtime": 1779984948.016493,
+    "ast_hash": "9ffbb90886b9a2b3a71056732013c5db",
+    "semantic_hash": "9ffbb90886b9a2b3a71056732013c5db"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\KpiCard.tsx": {
+    "mtime": 1778326552.226158,
+    "ast_hash": "f95a0a68c99e4c79d71aed7be2ac2a35",
+    "semantic_hash": "f95a0a68c99e4c79d71aed7be2ac2a35"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\PharmaExecutiveOverview.tsx": {
+    "mtime": 1778260171.0210624,
+    "ast_hash": "ee28f39700187c11efb736771eb41e6b",
+    "semantic_hash": "ee28f39700187c11efb736771eb41e6b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\PharmaReportsRoutes.tsx": {
+    "mtime": 1779585316.1980276,
+    "ast_hash": "9ebfb4c61bd08797b08ed40650bbb450",
+    "semantic_hash": "9ebfb4c61bd08797b08ed40650bbb450"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\ProcurementPage.tsx": {
+    "mtime": 1779855345.9414356,
+    "ast_hash": "7b31fa21d7532a32c0b94f4ec00000dc",
+    "semantic_hash": "7b31fa21d7532a32c0b94f4ec00000dc"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\ReorderConfigPage.tsx": {
+    "mtime": 1779700631.7268388,
+    "ast_hash": "740846fa8886ba093f632108ef46a7b1",
+    "semantic_hash": "740846fa8886ba093f632108ef46a7b1"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\SalesPurchaseAnalysisPage.tsx": {
+    "mtime": 1780155513.1535962,
+    "ast_hash": "03af93a65bf3028aad8774e32c5d27d2",
+    "semantic_hash": "03af93a65bf3028aad8774e32c5d27d2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\StockAnalysisPage.tsx": {
+    "mtime": 1779604581.572516,
+    "ast_hash": "6cfe5faa2bfe6f41d5ea0e8815bc3c8b",
+    "semantic_hash": "6cfe5faa2bfe6f41d5ea0e8815bc3c8b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\ThreeSixtyReportsPage.tsx": {
+    "mtime": 1780630122.636173,
+    "ast_hash": "e711c3e2296988c83658c68b5c26a123",
+    "semantic_hash": "e711c3e2296988c83658c68b5c26a123"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\TrialBalancePage.tsx": {
+    "mtime": 1779855345.9424348,
+    "ast_hash": "f349a3306f8d1a9f444255bbddfcb788",
+    "semantic_hash": "f349a3306f8d1a9f444255bbddfcb788"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\reorderConfigCsv.test.ts": {
+    "mtime": 1779699467.6130884,
+    "ast_hash": "afbe25884dec41df6aedb5fe41b6a369",
+    "semantic_hash": "afbe25884dec41df6aedb5fe41b6a369"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\reorderConfigCsv.ts": {
+    "mtime": 1779699081.140924,
+    "ast_hash": "6b508c7733cacd34d88bcb48dd59eff1",
+    "semantic_hash": "6b508c7733cacd34d88bcb48dd59eff1"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\pharma-reports\\shared.tsx": {
+    "mtime": 1779855345.9434352,
+    "ast_hash": "8292a728443a134da8c73894ed3b7438",
+    "semantic_hash": "8292a728443a134da8c73894ed3b7438"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\plans\\CreatePlan.tsx": {
+    "mtime": 1779631142.8666384,
+    "ast_hash": "3581fd2d28c0cfbdc595c95d3a703cd3",
+    "semantic_hash": "3581fd2d28c0cfbdc595c95d3a703cd3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\plans\\PlanDetail.tsx": {
+    "mtime": 1779672080.9640477,
+    "ast_hash": "f10dcc7a3b4e8d4032f405d1caaaa7bf",
+    "semantic_hash": "f10dcc7a3b4e8d4032f405d1caaaa7bf"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\plans\\Plans.tsx": {
+    "mtime": 1778325312.0595584,
+    "ast_hash": "3cf3efc335389241ae4d822021348f9b",
+    "semantic_hash": "3cf3efc335389241ae4d822021348f9b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\platform\\PlatformDashboard.tsx": {
+    "mtime": 1778393292.0159678,
+    "ast_hash": "d420501083d1332dfb6c6cf7a85c2f9f",
+    "semantic_hash": "d420501083d1332dfb6c6cf7a85c2f9f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\platform\\TenantManage.tsx": {
+    "mtime": 1780622744.7946675,
+    "ast_hash": "77f70100631d339c9142a06aa86fc85d",
+    "semantic_hash": "77f70100631d339c9142a06aa86fc85d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\reports\\AiReporting.test.tsx": {
+    "mtime": 1778748149.551522,
+    "ast_hash": "5a631daf6eeab7739e60f659808dbad8",
+    "semantic_hash": "5a631daf6eeab7739e60f659808dbad8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\reports\\AiReporting.tsx": {
+    "mtime": 1778727466.1016395,
+    "ast_hash": "985ef2c5d75c94bef6cf79d3e1843e0a",
+    "semantic_hash": "985ef2c5d75c94bef6cf79d3e1843e0a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\reports\\Reports.tsx": {
+    "mtime": 1777907085.24785,
+    "ast_hash": "fdee7072266b5b47745cbeeb52ce4ced",
+    "semantic_hash": "fdee7072266b5b47745cbeeb52ce4ced"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\scenarios\\Scenarios.tsx": {
+    "mtime": 1778325312.2337422,
+    "ast_hash": "51420c35b1c1a1c939146cfc1db35e00",
+    "semantic_hash": "51420c35b1c1a1c939146cfc1db35e00"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\settings\\AiProviderSettingsPanel.tsx": {
+    "mtime": 1779714963.8788476,
+    "ast_hash": "44d8fd6d62959e0a2f2d17ef811bd9de",
+    "semantic_hash": "44d8fd6d62959e0a2f2d17ef811bd9de"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\settings\\AuditLog.tsx": {
+    "mtime": 1778325312.274838,
+    "ast_hash": "fcd321d6edaa510ee90c53f9fe51a351",
+    "semantic_hash": "fcd321d6edaa510ee90c53f9fe51a351"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\settings\\MargEde.tsx": {
+    "mtime": 1779029356.8754644,
+    "ast_hash": "29d6d908a7a0e0f39c97d3f4531f954b",
+    "semantic_hash": "29d6d908a7a0e0f39c97d3f4531f954b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\settings\\Notifications.tsx": {
+    "mtime": 1778325312.3730981,
+    "ast_hash": "7918d08d71c9c81fef95ec7ee52b22d2",
+    "semantic_hash": "7918d08d71c9c81fef95ec7ee52b22d2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\settings\\Profile.tsx": {
+    "mtime": 1778325312.418125,
+    "ast_hash": "318e13633078bd13559fc8e8a465045b",
+    "semantic_hash": "318e13633078bd13559fc8e8a465045b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\settings\\Roles.tsx": {
+    "mtime": 1778393292.0179665,
+    "ast_hash": "ad013629c4613b311aaee68ffa590637",
+    "semantic_hash": "ad013629c4613b311aaee68ffa590637"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\settings\\Settings.tsx": {
+    "mtime": 1780622744.7957616,
+    "ast_hash": "de96f2fd26ef373d29de5912c063345d",
+    "semantic_hash": "de96f2fd26ef373d29de5912c063345d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\pages\\settings\\Users.tsx": {
+    "mtime": 1778325312.5695567,
+    "ast_hash": "450164203e985fbf99e62a9ca626a408",
+    "semantic_hash": "450164203e985fbf99e62a9ca626a408"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\permissions.test.ts": {
+    "mtime": 1778727466.1016395,
+    "ast_hash": "354d66add0bdc7a698a35a191d9ef4a2",
+    "semantic_hash": "354d66add0bdc7a698a35a191d9ef4a2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\permissions.ts": {
+    "mtime": 1778745831.239365,
+    "ast_hash": "317e456f674ddbafc2beba43aa8fb320",
+    "semantic_hash": "317e456f674ddbafc2beba43aa8fb320"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\ai-reporting.service.test.ts": {
+    "mtime": 1779714969.0532074,
+    "ast_hash": "5abbeb8f63da7ebcac38d2d84165afc1",
+    "semantic_hash": "5abbeb8f63da7ebcac38d2d84165afc1"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\ai-reporting.service.ts": {
+    "mtime": 1780902237.8274405,
+    "ast_hash": "edc9bfdf0ae7deca534500889378e837",
+    "semantic_hash": "edc9bfdf0ae7deca534500889378e837"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\audit.service.ts": {
+    "mtime": 1770818976.2490635,
+    "ast_hash": "31710d52f8ac60b5e5639adff3d8a5fa",
+    "semantic_hash": "31710d52f8ac60b5e5639adff3d8a5fa"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\auth.service.test.ts": {
+    "mtime": 1776486169.3193953,
+    "ast_hash": "4f0e0d8797655ab68fcd6523f4b4b4b9",
+    "semantic_hash": "4f0e0d8797655ab68fcd6523f4b4b4b9"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\auth.service.ts": {
+    "mtime": 1776828836.726689,
+    "ast_hash": "2c33f386808c3542bbb72856fbbf4426",
+    "semantic_hash": "2c33f386808c3542bbb72856fbbf4426"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\batch.service.ts": {
+    "mtime": 1777688429.0170763,
+    "ast_hash": "be9e18ae4275919616ebbaea324e3a79",
+    "semantic_hash": "be9e18ae4275919616ebbaea324e3a79"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\bom.service.ts": {
+    "mtime": 1777725224.2162523,
+    "ast_hash": "5243cc20f25c399814928c32e7f1ff69",
+    "semantic_hash": "5243cc20f25c399814928c32e7f1ff69"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\capacity-plan.service.ts": {
+    "mtime": 1771309356.6795068,
+    "ast_hash": "a57280f23945d34e4cf15ebcc42261d3",
+    "semantic_hash": "a57280f23945d34e4cf15ebcc42261d3"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\capacity.service.ts": {
+    "mtime": 1770713122.8109963,
+    "ast_hash": "6869d25f9b60b39155f5aaf4ce05d46e",
+    "semantic_hash": "6869d25f9b60b39155f5aaf4ce05d46e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\client.ts": {
+    "mtime": 1780039728.7990308,
+    "ast_hash": "63d03ead07cd4eec49f07e2c270dba68",
+    "semantic_hash": "63d03ead07cd4eec49f07e2c270dba68"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\costing-engine.service.ts": {
+    "mtime": 1771393655.5842674,
+    "ast_hash": "b7d92da789d37f1551ef586ac612d206",
+    "semantic_hash": "b7d92da789d37f1551ef586ac612d206"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\data.service.ts": {
+    "mtime": 1776433688.2916517,
+    "ast_hash": "bb38b2e9d67ec618c4dbd5ed16503826",
+    "semantic_hash": "bb38b2e9d67ec618c4dbd5ed16503826"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\fiscal-calendar.service.ts": {
+    "mtime": 1771335342.5545025,
+    "ast_hash": "c6cb4dbc401cf694a071825c118f8b4d",
+    "semantic_hash": "c6cb4dbc401cf694a071825c118f8b4d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\forecast-accuracy.service.ts": {
+    "mtime": 1771309356.6598294,
+    "ast_hash": "3858b089fc1a171ff505ffec6f22a75d",
+    "semantic_hash": "3858b089fc1a171ff505ffec6f22a75d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\forecast.service.test.ts": {
+    "mtime": 1770648670.8533273,
+    "ast_hash": "a7793c32ba8fcae8cd57f1ce2bd873e7",
+    "semantic_hash": "a7793c32ba8fcae8cd57f1ce2bd873e7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\forecast.service.ts": {
+    "mtime": 1779672066.019534,
+    "ast_hash": "43d57d92de8a869352bad2d2741ef4f8",
+    "semantic_hash": "43d57d92de8a869352bad2d2741ef4f8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\index.ts": {
+    "mtime": 1778727466.1016395,
+    "ast_hash": "dd06fce48629d1ca8075b8a2fea9cdbb",
+    "semantic_hash": "dd06fce48629d1ca8075b8a2fea9cdbb"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\inventory.service.test.ts": {
+    "mtime": 1771509746.0870824,
+    "ast_hash": "4bc2b8656891437baa8fd8530022b9b4",
+    "semantic_hash": "4bc2b8656891437baa8fd8530022b9b4"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\inventory.service.ts": {
+    "mtime": 1777725243.0300927,
+    "ast_hash": "a0f236e05eed8305faa026802985352e",
+    "semantic_hash": "a0f236e05eed8305faa026802985352e"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\location-hierarchy.service.ts": {
+    "mtime": 1771309356.6795068,
+    "ast_hash": "fa52b03ca793bf159f1763654f7aa2a6",
+    "semantic_hash": "fa52b03ca793bf159f1763654f7aa2a6"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\manufacturing.service.ts": {
+    "mtime": 1777789636.070367,
+    "ast_hash": "b6fb8ea271511aa7cf0c7d412ad60949",
+    "semantic_hash": "b6fb8ea271511aa7cf0c7d412ad60949"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\marg-ede.service.test.ts": {
+    "mtime": 1776818419.5232592,
+    "ast_hash": "4ad64fe38569bd73c7246fcc91130da2",
+    "semantic_hash": "4ad64fe38569bd73c7246fcc91130da2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\marg-ede.service.ts": {
+    "mtime": 1779001235.5096037,
+    "ast_hash": "8f25d506f54853ce118e694d0e3b418a",
+    "semantic_hash": "8f25d506f54853ce118e694d0e3b418a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\mrp.service.ts": {
+    "mtime": 1777725276.440038,
+    "ast_hash": "83c323600e09ba0133d93f3b6bc6205a",
+    "semantic_hash": "83c323600e09ba0133d93f3b6bc6205a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\notification.service.ts": {
+    "mtime": 1770789646.3206685,
+    "ast_hash": "35e2d68a5ad4e962d4a865100c013ae8",
+    "semantic_hash": "35e2d68a5ad4e962d4a865100c013ae8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\npi.service.ts": {
+    "mtime": 1777725303.0846107,
+    "ast_hash": "7f1d460d848bab2930e44e9befc683a8",
+    "semantic_hash": "7f1d460d848bab2930e44e9befc683a8"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\order-execution.service.ts": {
+    "mtime": 1777725341.398914,
+    "ast_hash": "5c43428d5e94bcef5a09c865322d0635",
+    "semantic_hash": "5c43428d5e94bcef5a09c865322d0635"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\pharma-reports.service.test.ts": {
+    "mtime": 1779714977.9659984,
+    "ast_hash": "c94016aa8b019667ca7cdf48bd9c84ba",
+    "semantic_hash": "c94016aa8b019667ca7cdf48bd9c84ba"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\pharma-reports.service.ts": {
+    "mtime": 1780623999.783497,
+    "ast_hash": "124b1c1552e2dfcebcd9614f4ad02f26",
+    "semantic_hash": "124b1c1552e2dfcebcd9614f4ad02f26"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\plan.service.ts": {
+    "mtime": 1775660945.1320798,
+    "ast_hash": "dfd36b6692c5b8c40983fd567d42ce37",
+    "semantic_hash": "dfd36b6692c5b8c40983fd567d42ce37"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\platform.service.ts": {
+    "mtime": 1779638843.4305308,
+    "ast_hash": "cedb2e8d180e3ddee1264f7f138fbded",
+    "semantic_hash": "cedb2e8d180e3ddee1264f7f138fbded"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\product-category.service.ts": {
+    "mtime": 1777725309.0119586,
+    "ast_hash": "bb1ca744775b79d992729b713abe2b68",
+    "semantic_hash": "bb1ca744775b79d992729b713abe2b68"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\product-costing.service.ts": {
+    "mtime": 1771309356.680512,
+    "ast_hash": "8e44dfd8c8be22249a098c0bd2b40094",
+    "semantic_hash": "8e44dfd8c8be22249a098c0bd2b40094"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\production.service.ts": {
+    "mtime": 1771422381.3264904,
+    "ast_hash": "17942007be1f8d7f2a46ce1956feaf52",
+    "semantic_hash": "17942007be1f8d7f2a46ce1956feaf52"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\promotion.service.ts": {
+    "mtime": 1775716156.354492,
+    "ast_hash": "83645e4a040d5c6435ebabced4749509",
+    "semantic_hash": "83645e4a040d5c6435ebabced4749509"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\purchase-contract.service.ts": {
+    "mtime": 1771309356.6795068,
+    "ast_hash": "7b08b56ac03952746f0710f98f39ecb0",
+    "semantic_hash": "7b08b56ac03952746f0710f98f39ecb0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\purchase-invoice.service.ts": {
+    "mtime": 1778246965.0092204,
+    "ast_hash": "d1ac395ac34541eb3136b6e1aa1cc405",
+    "semantic_hash": "d1ac395ac34541eb3136b6e1aa1cc405"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\quality-inspection.service.ts": {
+    "mtime": 1771309356.6795068,
+    "ast_hash": "f517e3c71d5529524ec19d454c8ba557",
+    "semantic_hash": "f517e3c71d5529524ec19d454c8ba557"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\report.service.ts": {
+    "mtime": 1779855345.9454346,
+    "ast_hash": "17392eb85d2f5095d058e065ef920b57",
+    "semantic_hash": "17392eb85d2f5095d058e065ef920b57"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\roles.service.ts": {
+    "mtime": 1776486169.322618,
+    "ast_hash": "882b58446e17d82daad4c43faab73437",
+    "semantic_hash": "882b58446e17d82daad4c43faab73437"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\scenario.service.ts": {
+    "mtime": 1770717819.3591762,
+    "ast_hash": "9f22b74f1bd5e5e5ab670012dd8b7aa2",
+    "semantic_hash": "9f22b74f1bd5e5e5ab670012dd8b7aa2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\settings.service.ts": {
+    "mtime": 1780622744.7957616,
+    "ast_hash": "673adf3b806c77810284b2be9d309ef0",
+    "semantic_hash": "673adf3b806c77810284b2be9d309ef0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\sop-gap.service.ts": {
+    "mtime": 1771309356.6795068,
+    "ast_hash": "cd63eb96cb084ab7d8884abbc285a851",
+    "semantic_hash": "cd63eb96cb084ab7d8884abbc285a851"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\sop.service.ts": {
+    "mtime": 1775660945.2901685,
+    "ast_hash": "0a0523788ec6606d5c35755276378e0d",
+    "semantic_hash": "0a0523788ec6606d5c35755276378e0d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\supplier.service.ts": {
+    "mtime": 1778079505.5309508,
+    "ast_hash": "e596538cbd23662339aeb90b1871aa88",
+    "semantic_hash": "e596538cbd23662339aeb90b1871aa88"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\uom-conversion.service.ts": {
+    "mtime": 1777725297.093896,
+    "ast_hash": "03b8801ac12116a9158e75e06d9db935",
+    "semantic_hash": "03b8801ac12116a9158e75e06d9db935"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\uom.service.ts": {
+    "mtime": 1777725291.0944037,
+    "ast_hash": "74021a63f821ba0c52e6827df0854293",
+    "semantic_hash": "74021a63f821ba0c52e6827df0854293"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\user.service.ts": {
+    "mtime": 1777789531.5935957,
+    "ast_hash": "fa543d6bffe7653ee895ef96017db033",
+    "semantic_hash": "fa543d6bffe7653ee895ef96017db033"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\api\\workflow.service.ts": {
+    "mtime": 1779630170.496575,
+    "ast_hash": "52d02a27185b2251a74f9c3704679b49",
+    "semantic_hash": "52d02a27185b2251a74f9c3704679b49"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\error-reporting.ts": {
+    "mtime": 1771421642.6423302,
+    "ast_hash": "523947d2f84e0d8670106050c59d3102",
+    "semantic_hash": "523947d2f84e0d8670106050c59d3102"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\report-pdf.service.ts": {
+    "mtime": 1778393292.0199673,
+    "ast_hash": "9525a75f9675d5f856f9380d7ee4fd2c",
+    "semantic_hash": "9525a75f9675d5f856f9380d7ee4fd2c"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\services\\route-prefetch.ts": {
+    "mtime": 1778727466.1016395,
+    "ast_hash": "edf58e86cb18d45d6138f4e7315128db",
+    "semantic_hash": "edf58e86cb18d45d6138f4e7315128db"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\stores\\api-loading.store.ts": {
+    "mtime": 1776239878.2110045,
+    "ast_hash": "c3284464fcf9349310dac0542347a05a",
+    "semantic_hash": "c3284464fcf9349310dac0542347a05a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\stores\\auth.store.ts": {
+    "mtime": 1777307009.8967092,
+    "ast_hash": "d87ef465bf528e9973c94c4fe9149ac0",
+    "semantic_hash": "d87ef465bf528e9973c94c4fe9149ac0"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\tiering\\build-pages.generated.ts": {
+    "mtime": 1776486169.3240135,
+    "ast_hash": "9a187401d6df90967ba9204cd1e3f03d",
+    "semantic_hash": "9a187401d6df90967ba9204cd1e3f03d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\tiering\\build-prefetch.generated.ts": {
+    "mtime": 1778393459.7272618,
+    "ast_hash": "68fa79d00818dba3bef995fbd10843d2",
+    "semantic_hash": "68fa79d00818dba3bef995fbd10843d2"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\tiering\\build-tier.generated.ts": {
+    "mtime": 1778393459.7282536,
+    "ast_hash": "229dfc32e45d4740eb197f61508b1b97",
+    "semantic_hash": "229dfc32e45d4740eb197f61508b1b97"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\types\\index.ts": {
+    "mtime": 1779879489.3440022,
+    "ast_hash": "fcc3a43c467dde6197cfc20640c9212d",
+    "semantic_hash": "fcc3a43c467dde6197cfc20640c9212d"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\utils\\date-presets.ts": {
+    "mtime": 1778118036.305413,
+    "ast_hash": "62aa053b99c77e776874ac96469abcf4",
+    "semantic_hash": "62aa053b99c77e776874ac96469abcf4"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\utils\\number-format.ts": {
+    "mtime": 1777907031.3478858,
+    "ast_hash": "c38e748de75805b6dcc11aef5f1d2016",
+    "semantic_hash": "c38e748de75805b6dcc11aef5f1d2016"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\src\\vite-env.d.ts": {
+    "mtime": 1769833283.0442111,
+    "ast_hash": "cfa7ca527b2543962a0b1b88c07113c7",
+    "semantic_hash": "cfa7ca527b2543962a0b1b88c07113c7"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\tailwind.config.js": {
+    "mtime": 1778259864.7961564,
+    "ast_hash": "31b57f93f200a070ed04a6427209d74f",
+    "semantic_hash": "31b57f93f200a070ed04a6427209d74f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\tsconfig.json": {
+    "mtime": 1769697185.8319044,
+    "ast_hash": "049eed7c13ac21b9776c3dd996108617",
+    "semantic_hash": "049eed7c13ac21b9776c3dd996108617"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\tsconfig.node.json": {
+    "mtime": 1769697185.8319044,
+    "ast_hash": "1b9d83e27fae726e66ba0661575c7f15",
+    "semantic_hash": "1b9d83e27fae726e66ba0661575c7f15"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\vite.config.ts": {
+    "mtime": 1778393556.8671536,
+    "ast_hash": "b482714b8b8df2c83130edb8fdee9329",
+    "semantic_hash": "b482714b8b8df2c83130edb8fdee9329"
+  },
+  "D:\\RabbitTech\\forecast-saas\\package.json": {
+    "mtime": 1779629346.9381862,
+    "ast_hash": "1a140be2c9562399fa3a1e8f1140299f",
+    "semantic_hash": "1a140be2c9562399fa3a1e8f1140299f"
+  },
+  "D:\\RabbitTech\\forecast-saas\\scripts\\check-actuals.js": {
+    "mtime": 1776486169.3276978,
+    "ast_hash": "256b09d814bd0164ab1ad6813eb0000a",
+    "semantic_hash": "256b09d814bd0164ab1ad6813eb0000a"
+  },
+  "D:\\RabbitTech\\forecast-saas\\scripts\\check-runs.js": {
+    "mtime": 1776486169.3276978,
+    "ast_hash": "3f6c4c31665a94afee492a635f92e421",
+    "semantic_hash": "3f6c4c31665a94afee492a635f92e421"
+  },
+  "D:\\RabbitTech\\forecast-saas\\scripts\\docker-entrypoint.sh": {
+    "mtime": 1776486169.3276978,
+    "ast_hash": "f135f97dd18135dc90c75461ff9e0941",
+    "semantic_hash": "f135f97dd18135dc90c75461ff9e0941"
+  },
+  "D:\\RabbitTech\\forecast-saas\\scripts\\seed-forecasts.js": {
+    "mtime": 1776486169.3289235,
+    "ast_hash": "32994943f7d2f73b0319c2b90d0e4861",
+    "semantic_hash": "32994943f7d2f73b0319c2b90d0e4861"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\api\\src\\modules\\marg-ede\\DEPLOYMENT.md": {
+    "mtime": 1778922981.2840614,
+    "ast_hash": "29721196a42521eda249c8a47a1d6e6b",
+    "semantic_hash": "29721196a42521eda249c8a47a1d6e6b"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\FRONTEND_AUDIT.md": {
+    "mtime": 1770818258.034341,
+    "ast_hash": "66dc0afc38cc3bd753689536b0913d16",
+    "semantic_hash": "66dc0afc38cc3bd753689536b0913d16"
+  },
+  "D:\\RabbitTech\\forecast-saas\\apps\\web\\index.html": {
+    "mtime": 1769697185.8319044,
+    "ast_hash": "11a1f7d7f4fe0f2d568b7f3138fe1192",
+    "semantic_hash": "11a1f7d7f4fe0f2d568b7f3138fe1192"
+  },
+  "D:\\RabbitTech\\forecast-saas\\docker-compose.yml": {
+    "mtime": 1780214395.2051437,
+    "ast_hash": "693bf6a431179473b068b5d79a73dc65",
+    "semantic_hash": "693bf6a431179473b068b5d79a73dc65"
+  },
+  "D:\\RabbitTech\\forecast-saas\\insights.html": {
+    "mtime": 1780812686.167727,
+    "ast_hash": "2c9860703f207950967b3dc4aa6ea1cb",
+    "semantic_hash": "2c9860703f207950967b3dc4aa6ea1cb"
+  }
+}
