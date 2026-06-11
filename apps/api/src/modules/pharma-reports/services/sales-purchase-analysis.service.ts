@@ -16,6 +16,34 @@ import {
 
 type AnalysisKind = 'sales' | 'purchase';
 
+// One row of a growth/degrowth dimensional breakdown (current vs compare period).
+// Shared by both the rollup fast path and the live path so they are shape-stable.
+type ComparisonBreakdownRow = {
+  key: string;
+  label: string;
+  currentAmount: number;
+  compareAmount: number;
+  delta: number;
+  growthPct: number | null;
+  currentBills: number;
+  compareBills: number;
+  currentQty: number;
+  compareQty: number;
+};
+
+// Raw SQL projection a comparison query emits (snake_case), before mapping to
+// the camelCase ComparisonBreakdownRow.
+type ComparisonRawRow = {
+  dim_key: string;
+  dim_label: string;
+  current_amount: number;
+  compare_amount: number;
+  current_bills: number;
+  compare_bills: number;
+  current_qty: number;
+  compare_qty: number;
+};
+
 // Report scope (Part 2 — returns + net):
 //   'invoice' (default) → pure commercial invoices only (Part 1 behaviour).
 //   'return'            → returns / CN / DN / BRK-EXP, shown as POSITIVE
@@ -1742,6 +1770,18 @@ export class SalesPurchaseAnalysisService {
               ) sb
             ) city_dim ON TRUE`,
         };
+      case 'customer':
+        return {
+          // Customer = the party on the SALES voucher (mv.cid). Sales-side mirror
+          // of `supplier`. mp is always LEFT JOINed in both dimensionComparison
+          // and getDimensionAnalysis so mp.par_name is safe here without
+          // needsProduct. perVoucher → one customer per bill, so it qualifies for
+          // the marg_bill_rollup fast path (see rollupDimensionParts).
+          keyExpr: Prisma.sql`COALESCE(NULLIF(TRIM(mv.cid), ''), '__UNMAPPED__')`,
+          labelExpr: Prisma.sql`COALESCE(NULLIF(TRIM(mp.par_name), ''), mv.cid, 'Unmapped customer')`,
+          needsProduct: false,
+          perVoucher: true,
+        };
       case 'supplier':
         return {
           // Supplier = the party on the purchase voucher (mv.cid). mp is always
@@ -1948,33 +1988,26 @@ export class SalesPurchaseAnalysisService {
       throw new BadRequestException('compareStartDate and compareEndDate are required for comparison');
     }
     const dimension = filters.dimension && filters.dimension !== 'none' ? filters.dimension : null;
+    // Resolve (and validate) the dimension synchronously BEFORE dispatching the
+    // parallel queries — dimensionExpressions throws a 400 for an unsupported
+    // value, and we want that to surface as a request error, not a rejected
+    // background promise.
+    const dim = dimension ? this.dimensionExpressions(dimension) : null;
 
-    const summaryA = await this.summaryForRange(tenantId, kind, filters, filters.startDate, filters.endDate);
-    const summaryB = await this.summaryForRange(
-      tenantId,
-      kind,
-      filters,
-      filters.compareStartDate,
-      filters.compareEndDate,
-    );
-
-    let breakdown: Array<{
-      key: string;
-      label: string;
-      currentAmount: number;
-      compareAmount: number;
-      delta: number;
-      growthPct: number | null;
-      currentBills: number;
-      compareBills: number;
-      currentQty: number;
-      compareQty: number;
-    }> = [];
-
-    if (dimension) {
-      const dim = this.dimensionExpressions(dimension);
-      breakdown = await this.dimensionComparison(tenantId, kind, filters, dim);
-    }
+    // The two period summaries and the dimensional breakdown are mutually
+    // independent. Run them concurrently instead of awaiting in series: on the
+    // common path (no per-line filter) each is a single marg_bill_rollup read,
+    // so the whole comparison now resolves in roughly the time of its slowest
+    // query rather than the sum of three sequential live scans. This — together
+    // with the rollup fast paths in summaryForRange / dimensionComparison — is
+    // what takes the growth/degrowth report back under the 30s gateway timeout.
+    const [summaryA, summaryB, breakdown] = await Promise.all([
+      this.summaryForRange(tenantId, kind, filters, filters.startDate, filters.endDate),
+      this.summaryForRange(tenantId, kind, filters, filters.compareStartDate, filters.compareEndDate),
+      dim
+        ? this.dimensionComparison(tenantId, kind, filters, dim, dimension!)
+        : Promise.resolve<ComparisonBreakdownRow[]>([]),
+    ]);
 
     const computeGrowth = (curr: number, comp: number) => {
       if (Math.abs(comp) < 0.005) return null;
@@ -2028,6 +2061,16 @@ export class SalesPurchaseAnalysisService {
     marginPct: number | null;
   }> {
     const filters = { ...baseFilters, startDate, endDate };
+    // FAST PATH: when no filter needs per-line data, every headline metric
+    // except the distinct-SKU count is already pre-aggregated per bill in
+    // marg_bill_rollup. Reading it (plus one light distinct-pid count) is the
+    // same sub-second read the overview KPI strip uses, instead of a live
+    // aggregation over every transaction line with a per-line marg_stocks
+    // LATERAL for cost. This is the single biggest contributor to the growth
+    // report's old timeout.
+    if (!this.requiresLineLevelDrill(filters)) {
+      return this.summaryForRangeFromRollup(tenantId, kind, filters);
+    }
     const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
     const cmpSign = this.scopeAmountSignSql(kind, this.resolveScope(filters), 'mv');
     const [row] = await this.prisma.$queryRaw<
@@ -2118,6 +2161,93 @@ export class SalesPurchaseAnalysisService {
     };
   }
 
+  /**
+   * Rollup-backed equivalent of summaryForRange. net / quantity / billCount /
+   * cost / profit come straight from marg_bill_rollup (the same pre-aggregated
+   * per-bill columns the overview KPI strip reads, so the growth headline now
+   * reconciles to the overview exactly). The distinct-SKU count is the one
+   * metric the per-bill rollup cannot reproduce (it stores per-bill item
+   * counts, not a global DISTINCT), so it is fetched with a single lightweight
+   * COUNT(DISTINCT pid) that mirrors the live path's line set — no product /
+   * stock / amount work.
+   */
+  private async summaryForRangeFromRollup(
+    tenantId: string,
+    kind: AnalysisKind,
+    filters: SalesPurchaseAnalysisFilterDto,
+  ): Promise<{
+    netAmount: number;
+    quantity: number;
+    billCount: number;
+    itemCount: number;
+    cost: number;
+    profit: number;
+    marginPct: number | null;
+  }> {
+    const scope = this.resolveScope(filters);
+    const where = this.buildRollupWhere(tenantId, kind, filters);
+    const amount = this.scopeRollupAmountColumn(kind, scope);
+    const quantity = this.scopeRollupQuantityColumn(kind, scope);
+    const cost = this.scopeRollupCostExpr(kind, scope);
+    const [[row], itemCount] = await Promise.all([
+      this.prisma.$queryRaw<
+        Array<{ net_amount: number; quantity: number; bill_count: number; cost_amount: number; profit: number }>
+      >(Prisma.sql`
+        SELECT
+          COALESCE(SUM(b.${amount}), 0)::float8 AS net_amount,
+          COALESCE(SUM(b.${quantity}), 0)::float8 AS quantity,
+          COUNT(*)::int AS bill_count,
+          COALESCE(SUM(${cost}), 0)::float8 AS cost_amount,
+          COALESCE(SUM(b.${amount} - (${cost})), 0)::float8 AS profit
+        FROM marg_bill_rollup b
+        WHERE ${where}
+      `),
+      this.distinctItemCountForRange(tenantId, kind, filters),
+    ]);
+    const net = Number(row?.net_amount ?? 0);
+    const profit = Number(row?.profit ?? 0);
+    return {
+      netAmount: net,
+      quantity: Number(row?.quantity ?? 0),
+      billCount: Number(row?.bill_count ?? 0),
+      itemCount,
+      cost: Number(row?.cost_amount ?? 0),
+      profit,
+      marginPct: net > 0 ? (profit / net) * 100 : null,
+    };
+  }
+
+  /**
+   * Lightweight distinct-SKU count for a range. Deliberately mirrors the live
+   * summaryForRange's line set (same voucher↔line type pairing via
+   * compatibleLineTypeSql, same buildHeaderWhere) so the rollup fast path's
+   * itemCount is byte-identical to the live path's. marg_products / marg_parties
+   * are LEFT JOINed only so any alias referenced by buildHeaderWhere resolves;
+   * they are PK joins and do not change the DISTINCT pid count.
+   */
+  private async distinctItemCountForRange(
+    tenantId: string,
+    kind: AnalysisKind,
+    filters: SalesPurchaseAnalysisFilterDto,
+  ): Promise<number> {
+    const where = this.buildHeaderWhere(tenantId, kind, filters, 'mv', 'mt', 'mp', 'mprod');
+    const [row] = await this.prisma.$queryRaw<Array<{ item_count: number }>>(Prisma.sql`
+      SELECT COUNT(DISTINCT mt.pid)::int AS item_count
+      FROM marg_vouchers mv
+      JOIN marg_transactions mt
+        ON mt.tenant_id = mv.tenant_id
+        AND mt.company_id = mv.company_id
+        AND mt.voucher = mv.voucher
+        AND ${this.compatibleLineTypeSql('mv', 'mt')}
+      LEFT JOIN marg_products mprod
+        ON mprod.tenant_id = mv.tenant_id AND mprod.company_id = mv.company_id AND mprod.pid = mt.pid
+      LEFT JOIN marg_parties mp
+        ON mp.tenant_id = mv.tenant_id AND mp.company_id = mv.company_id AND mp.cid = mv.cid
+      WHERE ${where} AND mt.pid IS NOT NULL
+    `);
+    return Number(row?.item_count ?? 0);
+  }
+
   private async dimensionComparison(
     tenantId: string,
     kind: AnalysisKind,
@@ -2126,20 +2256,17 @@ export class SalesPurchaseAnalysisService {
       compareEndDate?: string;
     },
     dim: { keyExpr: Prisma.Sql; labelExpr: Prisma.Sql; needsProduct: boolean; extraJoin?: Prisma.Sql; perVoucher?: boolean },
-  ): Promise<
-    Array<{
-      key: string;
-      label: string;
-      currentAmount: number;
-      compareAmount: number;
-      delta: number;
-      growthPct: number | null;
-      currentBills: number;
-      compareBills: number;
-      currentQty: number;
-      compareQty: number;
-    }>
-  > {
+    dimension: string,
+  ): Promise<ComparisonBreakdownRow[]> {
+    // FAST PATH: per-voucher dimensions (salesman / supplier / customer / state
+    // / city) map one bill → one group, so the whole breakdown can be computed
+    // from the pre-aggregated marg_bill_rollup (one row per bill) instead of a
+    // live line-level scan with per-row label sub-selects and, for state/city,
+    // a per-line LATERAL. Only available when no per-line filter is active.
+    if (dim.perVoucher && !this.requiresLineLevelDrill(filters)) {
+      return this.dimensionComparisonFromRollup(tenantId, kind, filters, dimension);
+    }
+
     // For comparison we widen the date filter to the union of both ranges, then
     // bucket in SQL with a CASE so a single scan emits both period totals.
     const widenedFilters = {
@@ -2255,6 +2382,11 @@ export class SalesPurchaseAnalysisService {
       LIMIT ${cmpLimit}
     `);
 
+    return this.mapComparisonRows(rows);
+  }
+
+  /** Shared current-vs-compare row mapper used by both comparison code paths. */
+  private mapComparisonRows(rows: ComparisonRawRow[]): ComparisonBreakdownRow[] {
     return rows.map((r) => {
       const current = Number(r.current_amount ?? 0);
       const compare = Number(r.compare_amount ?? 0);
@@ -2273,5 +2405,161 @@ export class SalesPurchaseAnalysisService {
         compareQty: Number(r.compare_qty ?? 0),
       };
     });
+  }
+
+  /**
+   * Rollup fast path for the growth/degrowth dimensional breakdown. Only valid
+   * for per-voucher dimensions (one bill → one group): salesman, supplier,
+   * customer, state, city. Reads marg_bill_rollup (one row per bill) and buckets
+   * each bill into the current ('A') / compare ('B') period in a single scan,
+   * producing the IDENTICAL key/amount/qty/bill numbers as the live perVoucher
+   * path — the live path's per-bill amount is final_amt × family-sign, which is
+   * exactly the pre-computed signed_* column the rollup stores.
+   */
+  private async dimensionComparisonFromRollup(
+    tenantId: string,
+    kind: AnalysisKind,
+    filters: SalesPurchaseAnalysisFilterDto & { compareStartDate?: string; compareEndDate?: string },
+    dimension: string,
+  ): Promise<ComparisonBreakdownRow[]> {
+    const scope = this.resolveScope(filters);
+    // Widen away the single-range date filter; the union date guard below
+    // restricts to exactly the two compared windows.
+    const where = this.buildRollupWhere(tenantId, kind, { ...filters, startDate: undefined, endDate: undefined });
+    const amount = this.scopeRollupAmountColumn(kind, scope);
+    const quantity = this.scopeRollupQuantityColumn(kind, scope);
+    const parts = this.rollupDimensionParts(tenantId, dimension);
+    const dateGuard = Prisma.sql`(
+      (b.date >= ${filters.startDate}::date AND b.date <= ${filters.endDate}::date)
+      OR (b.date >= ${filters.compareStartDate}::date AND b.date <= ${filters.compareEndDate}::date)
+    )`;
+    const bucketExpr = Prisma.sql`CASE
+      WHEN b.date >= ${filters.startDate}::date AND b.date <= ${filters.endDate}::date THEN 'A'
+      WHEN b.date >= ${filters.compareStartDate}::date AND b.date <= ${filters.compareEndDate}::date THEN 'B'
+      ELSE NULL
+    END`;
+    const leadingCtes = parts.leadingCtes ? Prisma.sql`${parts.leadingCtes},` : Prisma.empty;
+    const cmpLimit = 30000;
+
+    const rows = await this.prisma.$queryRaw<ComparisonRawRow[]>(Prisma.sql`
+      WITH ${leadingCtes}
+      bills AS (
+        SELECT
+          ${parts.keyExpr} AS dim_key,
+          ${parts.labelExpr} AS dim_label,
+          b.company_id,
+          b.voucher,
+          ${bucketExpr} AS bucket,
+          b.${quantity} AS qty,
+          b.${amount} AS amount
+        FROM marg_bill_rollup b
+        ${parts.joins ?? Prisma.empty}
+        WHERE ${where} AND ${dateGuard}
+      )
+      SELECT
+        dim_key,
+        MAX(dim_label) AS dim_label,
+        COALESCE(SUM(amount) FILTER (WHERE bucket = 'A'), 0)::float8 AS current_amount,
+        COALESCE(SUM(amount) FILTER (WHERE bucket = 'B'), 0)::float8 AS compare_amount,
+        COUNT(DISTINCT company_id || ':' || voucher) FILTER (WHERE bucket = 'A')::int AS current_bills,
+        COUNT(DISTINCT company_id || ':' || voucher) FILTER (WHERE bucket = 'B')::int AS compare_bills,
+        COALESCE(SUM(qty) FILTER (WHERE bucket = 'A'), 0)::float8 AS current_qty,
+        COALESCE(SUM(qty) FILTER (WHERE bucket = 'B'), 0)::float8 AS compare_qty
+      FROM bills
+      WHERE bucket IS NOT NULL
+      GROUP BY dim_key
+      ORDER BY GREATEST(
+        ABS(COALESCE(SUM(amount) FILTER (WHERE bucket = 'A'), 0)),
+        ABS(COALESCE(SUM(amount) FILTER (WHERE bucket = 'B'), 0))
+      ) DESC, dim_label ASC
+      LIMIT ${cmpLimit}
+    `);
+
+    return this.mapComparisonRows(rows);
+  }
+
+  /**
+   * Per-dimension SQL fragments for the marg_bill_rollup-backed comparison.
+   * Mirrors the per-voucher branches of dimensionExpressions (mv → b) and the
+   * overview's topStates/topCities/topSalesmen so the rollup breakdown produces
+   * the same group keys as the live path. `leadingCtes` is spliced ahead of the
+   * `bills` CTE; `joins` is spliced after `FROM marg_bill_rollup b`.
+   */
+  private rollupDimensionParts(
+    tenantId: string,
+    dimension: string,
+  ): { keyExpr: Prisma.Sql; labelExpr: Prisma.Sql; joins?: Prisma.Sql; leadingCtes?: Prisma.Sql } {
+    const salesmanCode = Prisma.sql`COALESCE(NULLIF(TRIM(b.salesman), ''), NULLIF(TRIM(b.mr), ''))`;
+    switch (dimension) {
+      case 'salesman':
+        return {
+          keyExpr: Prisma.sql`COALESCE(${salesmanCode}, '__UNATTRIBUTED__')`,
+          labelExpr: Prisma.sql`CASE
+            WHEN ${salesmanCode} IS NULL THEN 'Unattributed'
+            ELSE COALESCE(
+              (SELECT s.name FROM salesmen s WHERE s.tenant_id = b.tenant_id AND s.code = ${salesmanCode} LIMIT 1),
+              (SELECT NULLIF(TRIM(REGEXP_REPLACE(sp.par_name, '[[:cntrl:]]', '', 'g')), '') FROM marg_parties sp
+                 WHERE sp.tenant_id = b.tenant_id AND sp.company_id = b.company_id AND sp.cid = ${salesmanCode} AND sp.is_deleted = false LIMIT 1),
+              'Unknown salesman (' || ${salesmanCode} || ')'
+            )
+          END`,
+        };
+      case 'supplier':
+      case 'customer': {
+        const unmappedLabel =
+          dimension === 'customer' ? Prisma.sql`'Unmapped customer'` : Prisma.sql`'Unmapped supplier'`;
+        return {
+          keyExpr: Prisma.sql`COALESCE(NULLIF(TRIM(b.cid), ''), '__UNMAPPED__')`,
+          labelExpr: Prisma.sql`COALESCE(NULLIF(TRIM(mp.par_name), ''), b.cid, ${unmappedLabel})`,
+          joins: Prisma.sql`
+            LEFT JOIN marg_parties mp
+              ON mp.tenant_id = b.tenant_id AND mp.company_id = b.company_id AND mp.cid = b.cid`,
+        };
+      }
+      case 'state':
+        return {
+          keyExpr: Prisma.sql`COALESCE(mst.name, spb.state_code, 'Unknown')`,
+          labelExpr: Prisma.sql`COALESCE(mst.name, spb.state_code, 'Unknown')`,
+          leadingCtes: Prisma.sql`
+            state_per_bill AS (
+              SELECT company_id, voucher,
+                MAX(NULLIF(TRIM(SPLIT_PART(COALESCE(add_field, ''), ';', 20)), '')) AS state_code
+              FROM marg_transactions
+              WHERE tenant_id = ${tenantId}::uuid
+              GROUP BY company_id, voucher
+            )`,
+          joins: Prisma.sql`
+            LEFT JOIN state_per_bill spb ON spb.company_id = b.company_id AND spb.voucher = b.voucher
+            LEFT JOIN marg_sale_types mst
+              ON mst.tenant_id = ${tenantId}::uuid
+              AND mst.company_id = b.company_id
+              AND mst.sg_code = 'ROUT'
+              AND mst.s_code = spb.state_code`,
+        };
+      case 'city':
+        return {
+          keyExpr: Prisma.sql`COALESCE(mst.name, apb.area_code, 'Unknown')`,
+          labelExpr: Prisma.sql`COALESCE(mst.name, apb.area_code, 'Unknown')`,
+          leadingCtes: Prisma.sql`
+            area_per_bill AS (
+              SELECT company_id, voucher,
+                MAX(NULLIF(TRIM(SPLIT_PART(COALESCE(add_field, ''), ';', 21)), '')) AS area_code
+              FROM marg_transactions
+              WHERE tenant_id = ${tenantId}::uuid
+              GROUP BY company_id, voucher
+            )`,
+          joins: Prisma.sql`
+            LEFT JOIN area_per_bill apb ON apb.company_id = b.company_id AND apb.voucher = b.voucher
+            LEFT JOIN marg_sale_types mst
+              ON mst.tenant_id = ${tenantId}::uuid
+              AND mst.company_id = b.company_id
+              AND mst.sg_code = 'AREA'
+              AND mst.s_code = apb.area_code`,
+        };
+      default:
+        // dimensionComparison only routes perVoucher dimensions here; any other
+        // value is a programming error, not user input.
+        throw new BadRequestException(`Dimension ${dimension} is not rollup-eligible`);
+    }
   }
 }

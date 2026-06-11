@@ -968,7 +968,8 @@ export type SalesPurchaseDimension =
   | 'hsnCode'
   | 'state'
   | 'city'
-  | 'supplier';
+  | 'supplier'
+  | 'customer';
 
 export interface SalesPurchaseDimensionRow {
   key: string;

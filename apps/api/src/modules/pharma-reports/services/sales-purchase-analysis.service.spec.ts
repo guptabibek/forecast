@@ -195,4 +195,71 @@ describe('SalesPurchaseAnalysisService', () => {
       expect(s.scopeAmountSignSql('sales', 'net', 'mv').sql).toContain('mv.family');
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Customer / Supplier party dimensions (sales = customer, purchase = supplier)
+  // ─────────────────────────────────────────────────────────────────────
+  describe('party dimensions', () => {
+    const svc = () => new SalesPurchaseAnalysisService({} as any) as any;
+
+    it('dimensionExpressions(customer) groups by the voucher party — per-voucher, no product join', () => {
+      const dim = svc().dimensionExpressions('customer');
+      expect(dim.perVoucher).toBe(true);
+      expect(dim.needsProduct).toBe(false);
+      expect(dim.keyExpr.sql).toContain('mv.cid');
+      expect(dim.labelExpr.sql).toContain('Unmapped customer');
+    });
+
+    it('dimensionExpressions(supplier) is the purchase-side mirror of customer', () => {
+      const dim = svc().dimensionExpressions('supplier');
+      expect(dim.perVoucher).toBe(true);
+      expect(dim.needsProduct).toBe(false);
+      expect(dim.keyExpr.sql).toContain('mv.cid');
+      expect(dim.labelExpr.sql).toContain('Unmapped supplier');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Growth/degrowth comparison — marg_bill_rollup fast path for per-voucher
+  // dimensions (the fix for the 30s timeout when viewing By Route / City / etc.)
+  // ─────────────────────────────────────────────────────────────────────
+  describe('comparison rollup fast path', () => {
+    const svc = () => new SalesPurchaseAnalysisService({} as any) as any;
+
+    it('customer/supplier read the party straight off marg_bill_rollup (b.cid) + a marg_parties name join', () => {
+      const cust = svc().rollupDimensionParts(tenantId, 'customer');
+      expect(cust.keyExpr.sql).toContain('b.cid');
+      expect(String(cust.joins?.sql)).toContain('marg_parties');
+      expect(cust.labelExpr.sql).toContain('Unmapped customer');
+
+      const supp = svc().rollupDimensionParts(tenantId, 'supplier');
+      expect(supp.labelExpr.sql).toContain('Unmapped supplier');
+    });
+
+    it('salesman resolves the name without touching the line tables', () => {
+      const parts = svc().rollupDimensionParts(tenantId, 'salesman');
+      expect(parts.keyExpr.sql).toContain('b.salesman');
+      expect(parts.keyExpr.sql).toContain('__UNATTRIBUTED__');
+      expect(parts.leadingCtes).toBeUndefined();
+    });
+
+    it('state resolves the route name via per-bill add_field segment 20 (sg_code ROUT)', () => {
+      const parts = svc().rollupDimensionParts(tenantId, 'state');
+      expect(String(parts.leadingCtes?.sql)).toContain('state_per_bill');
+      expect(String(parts.leadingCtes?.sql)).toContain('20');
+      expect(String(parts.joins?.sql)).toContain('ROUT');
+    });
+
+    it('city resolves the area name via per-bill add_field segment 21 (sg_code AREA)', () => {
+      const parts = svc().rollupDimensionParts(tenantId, 'city');
+      expect(String(parts.leadingCtes?.sql)).toContain('area_per_bill');
+      expect(String(parts.leadingCtes?.sql)).toContain('21');
+      expect(String(parts.joins?.sql)).toContain('AREA');
+    });
+
+    it('rejects a per-line dimension — those must stay on the live aggregation path', () => {
+      expect(() => svc().rollupDimensionParts(tenantId, 'productCompany')).toThrow();
+      expect(() => svc().rollupDimensionParts(tenantId, 'product')).toThrow();
+    });
+  });
 });

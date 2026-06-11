@@ -17,7 +17,23 @@
       "Bash(node -e \"const p=require\\('./apps/web/package.json'\\); console.log\\('WEB deps:', Object.keys\\(p.dependencies||{}\\).join\\(', '\\)\\);\")",
       "Bash(node -e \"const p=require\\('./apps/api/package.json'\\); console.log\\('API deps:', Object.keys\\(p.dependencies||{}\\).join\\(', '\\)\\);\")",
       "Bash(ls package.json tsconfig*.json)",
-      "Bash(node -e \"const s=require\\('./package.json'\\).scripts; console.log\\(JSON.stringify\\(s,null,2\\)\\)\")"
+      "Bash(node -e \"const s=require\\('./package.json'\\).scripts; console.log\\(JSON.stringify\\(s,null,2\\)\\)\")",
+      "Bash(graphify query *)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,1\\)\\)\")",
+      "Bash(echo \"===API TSC EXIT: $?===\")",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\('typecheck/build scripts:', JSON.stringify\\(p.scripts,null,1\\)\\)\")",
+      "Bash(echo \"WEB_LINT_EXIT=$?\")",
+      "Bash(npx nest *)",
+      "Bash(echo \"API_BUILD_EXIT=$?\")",
+      "Bash(node -e \"try{require.resolve\\('pg'\\);console.log\\('pg: available'\\)}catch\\(e\\){console.log\\('pg: NOT available'\\)}; try{require.resolve\\('@prisma/client'\\);console.log\\('prisma client: available'\\)}catch\\(e\\){console.log\\('prisma client: NOT available'\\)}\")",
+      "Bash(node _diag_perf.cjs)",
+      "Bash(node -e \"const fs=require\\('fs'\\);const e=fs.readFileSync\\('.env.docker','utf8'\\);const u=\\(e.match\\(/^DATABASE_URL=\\(.*\\)$/m\\)||[]\\)[1].trim\\(\\);console.log\\('host/port/db:', u.replace\\(/\\(:\\\\/\\\\/[^:]+:\\)[^@]+@/,'\\\\$1****@'\\)\\)\")",
+      "Bash(node _diag_time.cjs)",
+      "Bash(node _diag_time2.cjs)",
+      "Bash(node _diag_e2e.cjs)",
+      "Bash(rm -f _diag_perf.cjs _diag_time.cjs _diag_time2.cjs _diag_e2e.cjs _diag_ctx.json)",
+      "Bash(git -C \"d:\\\\RabbitTech\\\\forecast-saas\" status --short -- apps/api/_diag_perf.cjs apps/api/_diag_time.cjs apps/api/_diag_time2.cjs apps/api/_diag_e2e.cjs)",
+      "Bash(ls _diag*)"
     ]
   }
 }
