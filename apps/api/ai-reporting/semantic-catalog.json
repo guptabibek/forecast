@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "1.3",
+  "catalogVersion": "1.4",
   "generatedFrom": [
     "docs/ai-reporting/reporting-views.schema.json",
     "docs/ai-reporting/report-inventory.json",
@@ -2134,7 +2134,9 @@
         "company",
         "manufacturer",
         "brand",
-        "mfg"
+        "mfg",
+        "brands",
+        "marketer"
       ]
     },
     {
@@ -2184,7 +2186,10 @@
         "supplier",
         "vendor",
         "party",
-        "creditor"
+        "creditor",
+        "distributor",
+        "distributors",
+        "vendors"
       ]
     },
     {
@@ -2521,7 +2526,10 @@
       "synonyms": [
         "supplier",
         "vendor",
-        "party"
+        "party",
+        "distributor",
+        "distributors",
+        "vendors"
       ]
     },
     {
@@ -2550,7 +2558,9 @@
         "company",
         "manufacturer",
         "brand",
-        "mfg"
+        "mfg",
+        "brands",
+        "marketer"
       ]
     },
     {
@@ -2619,7 +2629,9 @@
         "company",
         "manufacturer",
         "brand",
-        "mfg"
+        "mfg",
+        "brands",
+        "marketer"
       ]
     },
     {
@@ -2661,7 +2673,9 @@
         "company",
         "manufacturer",
         "brand",
-        "mfg"
+        "mfg",
+        "brands",
+        "marketer"
       ]
     },
     {
@@ -2807,7 +2821,9 @@
       "synonyms": [
         "company",
         "brand",
-        "manufacturer"
+        "manufacturer",
+        "brands",
+        "marketer"
       ]
     },
     {
@@ -2823,7 +2839,10 @@
       "synonyms": [
         "supplier",
         "vendor",
-        "party"
+        "party",
+        "distributor",
+        "distributors",
+        "vendors"
       ]
     },
     {
@@ -2901,7 +2920,10 @@
       "labelColumn": "supplier_name",
       "synonyms": [
         "supplier",
-        "vendor"
+        "vendor",
+        "distributor",
+        "distributors",
+        "vendors"
       ]
     },
     {
@@ -2947,7 +2969,103 @@
       "labelColumn": "supplier_name",
       "synonyms": [
         "supplier",
-        "vendor"
+        "vendor",
+        "distributor",
+        "distributors",
+        "vendors"
+      ]
+    },
+    {
+      "dimensionId": "sales_net_route",
+      "displayName": "Route / State",
+      "datasetId": "sales_net",
+      "columns": [
+        "region_route_code",
+        "region_route_name"
+      ],
+      "labelColumn": "region_route_name",
+      "synonyms": [
+        "route",
+        "routes",
+        "state",
+        "states",
+        "region",
+        "regions",
+        "territory",
+        "territories"
+      ]
+    },
+    {
+      "dimensionId": "sales_net_area",
+      "displayName": "Area / City",
+      "datasetId": "sales_net",
+      "columns": [
+        "region_area_code",
+        "region_area_name"
+      ],
+      "labelColumn": "region_area_name",
+      "synonyms": [
+        "area",
+        "areas",
+        "city",
+        "cities",
+        "locality",
+        "localities"
+      ]
+    },
+    {
+      "dimensionId": "purchase_net_route",
+      "displayName": "Route / State",
+      "datasetId": "purchase_net",
+      "columns": [
+        "region_route_code",
+        "region_route_name"
+      ],
+      "labelColumn": "region_route_name",
+      "synonyms": [
+        "route",
+        "routes",
+        "state",
+        "states",
+        "region",
+        "regions",
+        "territory",
+        "territories"
+      ]
+    },
+    {
+      "dimensionId": "purchase_net_area",
+      "displayName": "Area / City",
+      "datasetId": "purchase_net",
+      "columns": [
+        "region_area_code",
+        "region_area_name"
+      ],
+      "labelColumn": "region_area_name",
+      "synonyms": [
+        "area",
+        "areas",
+        "city",
+        "cities",
+        "locality",
+        "localities"
+      ]
+    },
+    {
+      "dimensionId": "sales_net_company",
+      "displayName": "Product Company",
+      "datasetId": "sales_net",
+      "columns": [
+        "product_company",
+        "product_company_name"
+      ],
+      "labelColumn": "product_company_name",
+      "synonyms": [
+        "company",
+        "brand",
+        "brands",
+        "manufacturer",
+        "marketer"
       ]
     }
   ],
