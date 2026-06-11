@@ -242,12 +242,16 @@ describe('AiReporting page', () => {
     expect(screen.getByText('Permission denied')).toBeInTheDocument();
   });
 
-  it('redirects users without AI reporting permission', () => {
+  it('allows any authenticated user when the AI feature is enabled, regardless of role or permissions', () => {
+    // AI access is governed only by the two conditions folded into
+    // aiReporting.enabled (module enabled by SA + credentials configured);
+    // role/permission is enforced by the API, not this page guard.
     mocks.currentUser = { role: 'VIEWER', permissions: [], moduleAccess: { reports: true } };
 
     renderPage();
 
-    expect(screen.getByText('Dashboard fallback')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'AI Reporting' })).toBeInTheDocument();
+    expect(screen.queryByText('Dashboard fallback')).not.toBeInTheDocument();
   });
 
   it('redirects when the AI reporting feature flag is disabled in tenant settings', () => {

@@ -9,6 +9,7 @@ import {
   InsightSeverity,
 } from '../insight-provider.interface';
 import { applyRollingWindow } from '../rolling-window.util';
+import { buildPreviousPeriodQuery } from '../result-analytics.util';
 import { formatAmount, labelValue, metricValue, percent } from './provider-utils';
 
 /** Bound per cycle so one tenant with many pins cannot monopolize generation. */
@@ -118,33 +119,18 @@ export class PinnedReportInsightProvider implements IInsightProvider {
 
   /**
    * Compares the query's window against the immediately preceding window of
-   * the same length. Only applies to past-facing custom ranges — preset
-   * ranges have no stable "previous" without period semantics, and
-   * future-facing windows (e.g. "expiring in next 90 days") have no
-   * meaningful prior period.
+   * the same length (window construction shared with the widget-analytics
+   * layer via buildPreviousPeriodQuery — past-facing custom ranges only).
    */
   private async compareToPreviousPeriod(
     ctx: InsightProviderContext,
     query: SemanticReportQuery,
     currentTotal: number | null,
   ): Promise<{ previousTotal: number; changePct: number } | null> {
-    const range = query.timeRange;
     const primaryMetric = query.metrics?.[0];
     if (currentTotal === null || !primaryMetric) return null;
-    if (range?.preset !== 'custom' || !range.startDate || !range.endDate) return null;
-
-    const DAY_MS = 86_400_000;
-    const start = Date.parse(`${range.startDate}T00:00:00Z`);
-    const end = Date.parse(`${range.endDate}T00:00:00Z`);
-    const today = Date.parse(`${ctx.now.toISOString().slice(0, 10)}T00:00:00Z`);
-    if ([start, end].some(Number.isNaN) || end > today + DAY_MS) return null;
-
-    const spanMs = end - start;
-    const toIso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-    const previousQuery: SemanticReportQuery = {
-      ...query,
-      timeRange: { ...range, startDate: toIso(start - spanMs - DAY_MS), endDate: toIso(start - DAY_MS) },
-    };
+    const previousQuery = buildPreviousPeriodQuery(query, ctx.now);
+    if (!previousQuery) return null;
 
     try {
       const previous = await ctx.runReport(previousQuery);

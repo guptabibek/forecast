@@ -50,7 +50,12 @@
       "Bash(git -C \"d:\\\\RabbitTech\\\\forecast-saas\" log --oneline -3 -- apps/web/src/components/layout/Sidebar.tsx apps/web/src/pages/Dashboard.tsx apps/web/src/components/insights-dashboard/AiInsightsPreview.tsx)",
       "Bash(PGPASSWORD=6LfFfzgsAAAAAIs71PbQvHvZa5xpNq_ngIAxIao8 psql -h 94.136.186.45 -U databaseuser -d forecast-uat -t -c \"SELECT id, name FROM \\\\\"Tenant\\\\\";\")",
       "Bash(cd \"d:\\\\RabbitTech\\\\forecast-saas\\\\apps\\\\web\" && ls dist 2>/dev/null | head -5; echo \"---\"; ls -la dist/assets 2>/dev/null | head -10; echo \"--- last modified of dist index ---\"; stat -c '%y %n' dist/index.html 2>/dev/null; echo \"--- vite config ---\"; cat vite.config.ts 2>/dev/null | head -30)",
-      "Read(//d/RabbitTech/forecast-saas/apps/api/**)"
+      "Read(//d/RabbitTech/forecast-saas/apps/api/**)",
+      "Bash(netstat -ano)",
+      "Bash(awk '{print $2}')",
+      "Bash(curl -s -o /dev/null -w \"3080 status: %{http_code}, type: %{content_type}\\\\n\" http://localhost:3080/)",
+      "Bash(curl -s http://localhost:4001/api/v1/health)",
+      "Bash(curl -s -o /dev/null -w \"4001 /api/v1: %{http_code}\\\\n\" http://localhost:4001/api/v1)"
     ]
   }
 }

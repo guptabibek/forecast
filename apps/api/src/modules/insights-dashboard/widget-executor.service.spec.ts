@@ -96,6 +96,41 @@ describe('WidgetExecutorService', () => {
     expect(executed.timeRange).toEqual({ preset: 'this_month' });
   });
 
+  it('computes analytics with a previous-period comparison for past-facing windows', async () => {
+    const widget = widgetWith(
+      { preset: 'custom', startDate: isoDaysFromNow(-30), endDate: isoDaysFromNow(0) },
+      0,
+    );
+    const { service, aiReporting } = buildService(widget);
+    const rowResult = (amount: number) => ({
+      ...successResult,
+      columns: [{ key: 'sales_net_amount', label: 'Net Sales' }],
+      rows: [{ sales_net_amount: amount }],
+      rowCount: 1,
+    });
+    aiReporting.executeStoredReport
+      .mockResolvedValueOnce(rowResult(6000))
+      .mockResolvedValueOnce(rowResult(4000));
+
+    const payload = await service.execute(user, 'widget-1');
+
+    expect(aiReporting.executeStoredReport).toHaveBeenCalledTimes(2);
+    const previousQuery = aiReporting.executeStoredReport.mock.calls[1][1].semanticQuery;
+    expect(previousQuery.timeRange.endDate).toBe(isoDaysFromNow(-31));
+    expect(payload.analytics?.kpis).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'vs previous period', value: '+50.0%', tone: 'positive' }),
+      ]),
+    );
+  });
+
+  it('attaches null analytics for empty results without breaking the payload', async () => {
+    const { service, aiReporting } = buildService(widgetWith({ preset: 'this_month' }, 0));
+    const payload = await service.execute(user, 'widget-1');
+    expect(aiReporting.executeStoredReport).toHaveBeenCalledTimes(1);
+    expect(payload.analytics).toBeNull();
+  });
+
   it('returns the cached payload without executing when present', async () => {
     const widget = widgetWith({ preset: 'this_month' }, 0);
     const { service, aiReporting, cache } = buildService(widget);

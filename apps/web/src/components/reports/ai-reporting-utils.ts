@@ -67,17 +67,46 @@ export function isCurrencyKey(key: string): boolean {
   return /(amount|value|sales|purchase|outstanding|balance|gross|net|tax|discount|cost|profit|payable|receivable)/i.test(key);
 }
 
+/**
+ * Checked BEFORE the currency heuristic: percentage metric keys routinely
+ * contain currency words ("sales_contribution_pct" matches "sales"), which is
+ * exactly how share/margin columns ended up rendered as ₹.
+ */
+export function isPercentKey(key: string): boolean {
+  return /(_pct|_percent(age)?|percent(age)?|share|ratio|contribution)(_|$)/i.test(key)
+    || /^(growth|margin|achievement)(_|$)/i.test(key);
+}
+
 export function isDateKey(key: string, type?: string): boolean {
   return type === 'date' || /date|month|created_at|updated_at/i.test(key);
+}
+
+export function formatPercent(value: number): string {
+  const decimals = Number.isInteger(value) ? 0 : 1;
+  return `${formatIndianNumber(value, decimals)}%`;
 }
 
 export function formatAiValue(value: unknown, column?: AiReportColumn): string {
   if (value === null || value === undefined || value === '') return '-';
   const key = column ? columnField(column) : '';
   if (typeof value === 'number') {
-    return column?.dataType === 'currency' || isCurrencyKey(key)
-      ? formatInr(value)
-      : formatIndianNumber(value, Number.isInteger(value) ? 0 : 2);
+    // The semantic catalog's dataType is authoritative — key-name heuristics
+    // are only a fallback for columns the backend could not classify.
+    switch (column?.dataType) {
+      case 'percentage':
+        return formatPercent(value);
+      case 'currency':
+        return formatInr(value);
+      case 'number':
+      case 'quantity':
+      case 'count':
+        return formatIndianNumber(value, Number.isInteger(value) ? 0 : 2);
+      default:
+        break;
+    }
+    if (isPercentKey(key)) return formatPercent(value);
+    if (isCurrencyKey(key)) return formatInr(value);
+    return formatIndianNumber(value, Number.isInteger(value) ? 0 : 2);
   }
   if (typeof value === 'string' && isDateKey(key, column?.dataType) && DATE_RE.test(value)) {
     return formatDate(value);
