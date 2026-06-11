@@ -7,6 +7,7 @@ const FORECAST_ONLY_MENU_PATHS = new Set([
   '/scenarios',
   '/reports',
   '/reports/ai',
+  '/insights',
 ]);
 
 // Manufacturing sub-paths surfaced under "Planning & Forecasting" — visible to planners
@@ -87,7 +88,7 @@ export function canShowSidebarHref(role: UserRole | null | undefined, href: stri
   const path = href.split('?')[0];
 
   if (isSuperAdmin(role)) {
-    return path === '/platform' || path.startsWith('/platform/') || path === '/reports/ai';
+    return path === '/platform' || path.startsWith('/platform/') || path === '/reports/ai' || path === '/insights';
   }
 
   if (isForecastViewerRole(role)) {

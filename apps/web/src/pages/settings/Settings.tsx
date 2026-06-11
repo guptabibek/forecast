@@ -1,10 +1,10 @@
 ﻿import { Dialog, Switch, Transition } from '@headlessui/react';
 import {
-    BuildingOfficeIcon,
-    KeyIcon,
-    PaintBrushIcon,
-    ShieldCheckIcon,
-    SparklesIcon,
+  BuildingOfficeIcon,
+  KeyIcon,
+  PaintBrushIcon,
+  ShieldCheckIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { settingsKeys } from '@hooks/useSettings';
@@ -505,21 +505,6 @@ export default function Settings() {
                       </div>
                     )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                      <label className="flex items-center justify-between rounded-lg border border-secondary-200 p-4">
-                        <span>
-                          <span className="block text-sm font-medium text-secondary-900">Enable AI Reporting</span>
-                          <span className="block text-xs text-secondary-500">Show AI reports to permitted users for this tenant.</span>
-                        </span>
-                        <input type="checkbox" {...register('aiReporting.enabled')} className="h-4 w-4 rounded border-secondary-300 text-primary-600" />
-                      </label>
-
-                      <label className="flex items-center justify-between rounded-lg border border-secondary-200 p-4">
-                        <span>
-                          <span className="block text-sm font-medium text-secondary-900">Enable AI Summaries</span>
-                          <span className="block text-xs text-secondary-500">Allow concise summaries after report execution.</span>
-                        </span>
-                        <input type="checkbox" {...register('aiReporting.summariesEnabled')} className="h-4 w-4 rounded border-secondary-300 text-primary-600" />
-                      </label>
 
                       <div>
                         <label className="label">Max rows per AI query</label>

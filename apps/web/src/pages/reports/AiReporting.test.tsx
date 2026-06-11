@@ -89,6 +89,11 @@ vi.mock('../../components/ThemeProvider', () => ({
 
 vi.mock('react-hot-toast', () => ({ default: vi.fn() }));
 
+// The pin button needs a QueryClientProvider; it has its own coverage.
+vi.mock('../../components/insights-dashboard/PinToDashboardButton', () => ({
+  PinToDashboardButton: () => null,
+}));
+
 vi.mock('../../components/charts', () => ({
   BarChart: ({ data }: { data: unknown[] }) => <div data-testid="bar-chart">bar {data.length}</div>,
   LineChart: ({ data }: { data: unknown[] }) => <div data-testid="line-chart">line {data.length}</div>,

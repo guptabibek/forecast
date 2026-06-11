@@ -67,6 +67,28 @@ export interface CanonicalKpi {
   hint?: string;
 }
 
+export interface StoredReportExecutionRequest {
+  semanticQuery: SemanticReportQuery;
+  companyId?: number;
+  branchIds?: string[];
+}
+
+export interface StoredReportExecutionResult {
+  status: 'success' | 'unsupported';
+  title: string;
+  mode: string;
+  metadata: CanonicalReportPayload['metadata'];
+  kpis: CanonicalKpi[];
+  grid: CanonicalGrid;
+  chart: CanonicalChart;
+  visualization: CanonicalReportPayload['visualization'];
+  columns: CanonicalReportPayload['columns'];
+  rows: Record<string, unknown>[];
+  rowCount: number;
+  executionTimeMs: number;
+  unsupportedReason: string | null;
+}
+
 export interface CanonicalReportPayload {
   metadata: {
     metricLabel: string;
@@ -509,6 +531,72 @@ export class AiReportingService {
     } finally {
       lease?.release();
     }
+  }
+
+  /**
+   * Executes a previously validated semantic report query (e.g. a widget
+   * pinned to the AI Insights Dashboard) without any LLM call. The stored
+   * query is re-validated against the current catalog and recompiled under
+   * the caller's CURRENT security context, so tenant/company/branch scoping
+   * and sensitive-column masking are always enforced at execution time.
+   *
+   * Intentionally does not write to ai_report_query_audits: widget refreshes
+   * are high-frequency and would pollute the user-facing query history.
+   */
+  async executeStoredReport(user: any, request: StoredReportExecutionRequest): Promise<StoredReportExecutionResult> {
+    const runtime = await this.resolveRuntimeSettings(user?.tenantId);
+    this.assertFeatureEnabled(runtime);
+    const security = await this.resolveSecurityContext(user, {
+      question: '',
+      companyId: request.companyId,
+      branchIds: request.branchIds,
+    });
+    this.assertRoleAllowed(security, runtime);
+    this.assertAiPermission(security, 'reports.ai.view');
+
+    const validated = this.semanticValidator.validate(request.semanticQuery, security);
+    if (validated.queryKind !== 'single_report') {
+      // The catalog evolved and no longer supports this stored query.
+      return {
+        status: 'unsupported',
+        title: request.semanticQuery?.title ?? 'Pinned Report',
+        mode: 'aggregate',
+        metadata: { metricLabel: '', groupedBy: '', periodLabel: '' },
+        kpis: [],
+        grid: { columns: [], rows: [], totals: {} },
+        chart: { enabled: false, type: 'none', xField: null, yField: null, data: [] },
+        visualization: { type: 'table' },
+        columns: [],
+        rows: [],
+        rowCount: 0,
+        executionTimeMs: 0,
+        unsupportedReason:
+          (validated as any).reason ?? 'This pinned report is no longer supported by the reporting catalog.',
+      };
+    }
+
+    const limited = this.applyRuntimeLimits(validated, runtime);
+    const compiled = this.compiler.compile(limited, security);
+    this.safetyValidator.validate(compiled);
+    const result = await this.executor.execute(compiled, { timeoutMs: runtime.timeoutMs });
+    const safeResult = this.sanitizeResult(limited, result, security, runtime);
+    const reportPayload = this.buildReportPayload(limited, safeResult);
+
+    return {
+      status: 'success',
+      title: validated.title,
+      mode: limited.mode ?? this.modeFromAnalysisType(limited.analysisType),
+      metadata: reportPayload.metadata,
+      kpis: reportPayload.kpis,
+      grid: reportPayload.grid,
+      chart: reportPayload.chart,
+      visualization: reportPayload.visualization,
+      columns: reportPayload.columns,
+      rows: reportPayload.rows,
+      rowCount: safeResult.rowCount,
+      executionTimeMs: result.executionTimeMs,
+      unsupportedReason: null,
+    };
   }
 
   private assertAiPermission(security: ReportingSecurityContext, permission: string) {

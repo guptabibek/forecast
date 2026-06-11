@@ -12,6 +12,7 @@ import { Button, Card, LoadingSpinner } from '../../components/ui';
 import { AiErrorState } from '../../components/reports/AiErrorState';
 import { AiLoadingState } from '../../components/reports/AiLoadingState';
 import { AiReportResult } from '../../components/reports/AiReportResult';
+import { PinToDashboardButton } from '../../components/insights-dashboard/PinToDashboardButton';
 import { useAiDashboardQuery, useAiReportQuery, useAiReportingCatalog, useAiReportingHistory } from '../../hooks/useAiReporting';
 import { canUseAiReporting, getFallbackPathForRole } from '../../permissions';
 import { useAuthStore } from '../../stores/auth.store';
@@ -214,7 +215,14 @@ export default function AiReporting() {
           ) : error ? (
             <AiErrorState error={error} onRetry={lastQuestion ? () => void runQuestion(lastQuestion) : undefined} />
           ) : (
-            <AiReportResult result={result} onAskFollowUp={runQuestion} />
+            <>
+              {result && (
+                <div className="flex justify-end">
+                  <PinToDashboardButton result={result} />
+                </div>
+              )}
+              <AiReportResult result={result} onAskFollowUp={runQuestion} />
+            </>
           )}
         </main>
 

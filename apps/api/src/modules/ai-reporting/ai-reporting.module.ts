@@ -32,5 +32,6 @@ import { SqlSafetyValidator } from './sql-safety.validator';
     SqlCompilerService,
     SqlSafetyValidator,
   ],
+  exports: [AiReportingService],
 })
 export class AiReportingModule {}

@@ -447,6 +447,8 @@ export class SemanticQueryValidator {
       return input.fieldId ? { fieldId: input.fieldId, preset: 'unspecified' } : { preset: 'current_financial_year' };
     }
     if (input.preset === 'custom') {
+      input = this.repairCustomRange(input);
+      if (input.preset !== 'custom') return input;
       if (!this.isIsoDate(input.startDate) || !this.isIsoDate(input.endDate)) {
         throw new AiReportingBadRequest('INVALID_SEMANTIC_QUERY', 'Custom date range requires valid startDate and endDate');
       }
@@ -465,6 +467,30 @@ export class SemanticQueryValidator {
       }
     }
     return input;
+  }
+
+  /**
+   * The LLM occasionally emits rangeType "custom" with one or both dates
+   * missing (e.g. "next 90 days" with a null startDate). Missing dates are
+   * repaired deterministically — both missing falls back to the default
+   * range, a single missing side is anchored to today — instead of failing
+   * the whole report. Dates that are present but malformed still fail
+   * validation below.
+   */
+  private repairCustomRange(input: SemanticTimeRange): SemanticTimeRange {
+    const startMissing = input.startDate == null || String(input.startDate).trim() === '';
+    const endMissing = input.endDate == null || String(input.endDate).trim() === '';
+    if (!startMissing && !endMissing) return input;
+    if (startMissing && endMissing) {
+      return input.fieldId ? { fieldId: input.fieldId, preset: 'unspecified' } : { preset: 'current_financial_year' };
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    let startDate = startMissing ? today : input.startDate;
+    let endDate = endMissing ? today : input.endDate;
+    if (this.isIsoDate(startDate) && this.isIsoDate(endDate) && startDate > endDate) {
+      [startDate, endDate] = [endDate, startDate];
+    }
+    return { ...input, preset: 'custom', startDate, endDate };
   }
 
   private defaultSort(metrics: string[]): SemanticSort[] {

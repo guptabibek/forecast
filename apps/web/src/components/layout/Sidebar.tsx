@@ -44,6 +44,9 @@ type NavigationItem = NavItemType | NavGroupType;
 
 const navigation: NavigationItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
+  // Top-level on purpose — it is the executive entry point, not one more
+  // report, and buried in the 19-item Reports group nobody finds it.
+  { name: 'AI Insights', href: '/insights', icon: SparklesIcon, module: 'ai-reporting' },
   {
     name: 'Planning & Forecasting',
     module: 'planning',
@@ -161,26 +164,30 @@ export default function Sidebar({
     return true;
   }, [enabledModules, role, userModuleAccess]);
 
+  const canShowNavItem = useCallback(
+    (navItem: NavItemType) =>
+      canShowSidebarHref(role, navItem.href) &&
+      isModuleEnabled(navItem.module) &&
+      // AI surfaces additionally require the tenant AI feature + AI permissions.
+      ((navItem.href !== '/reports/ai' && navItem.href !== '/insights') || canUseAiReporting(user, aiReportingEnabled)),
+    [role, user, isModuleEnabled, aiReportingEnabled],
+  );
+
   const visibleNavigation = useMemo(
     () =>
       navigation
         .map((item) => {
           if (!('items' in item)) {
-            if (!isModuleEnabled(item.module)) return null;
-            return canShowSidebarHref(role, item.href) ? item : null;
+            return canShowNavItem(item) ? item : null;
           }
 
           if (!isModuleEnabled(item.module)) return null;
 
-          const visibleItems = item.items.filter(
-            (navItem) => canShowSidebarHref(role, navItem.href) &&
-              isModuleEnabled(navItem.module) &&
-              (navItem.href !== '/reports/ai' || canUseAiReporting(user, aiReportingEnabled)),
-          );
+          const visibleItems = item.items.filter(canShowNavItem);
           return visibleItems.length ? { ...item, items: visibleItems } : null;
         })
         .filter((item): item is NavigationItem => item !== null),
-    [role, user, isModuleEnabled, aiReportingEnabled],
+    [isModuleEnabled, canShowNavItem],
   );
 
   const NavItem = ({

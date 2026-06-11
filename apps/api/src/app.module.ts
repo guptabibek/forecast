@@ -25,6 +25,7 @@ import { AiReportingModule } from './modules/ai-reporting/ai-reporting.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DataModule } from './modules/data/data.module';
 import { ForecastsModule } from './modules/forecasts/forecasts.module';
+import { InsightsDashboardModule } from './modules/insights-dashboard/insights-dashboard.module';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
 import { MargEdeModule } from './modules/marg-ede/marg-ede.module';
 import { NotificationFeatureModule } from './modules/notifications/notification.module';
@@ -118,6 +119,7 @@ function positiveInt(value: string | number | undefined, fallback: number): numb
     SettingsModule,
     ReportsModule,
     AiReportingModule,
+    InsightsDashboardModule,
     ManufacturingModule,
     AuditFeatureModule,
     NotificationFeatureModule,
