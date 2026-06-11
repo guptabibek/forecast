@@ -66,6 +66,10 @@ apps/api/src/modules/insights-dashboard/
     fast-movers-insight.provider.ts              products growing 40%+ MoM (opportunity)
     discount-anomaly-insight.provider.ts         discount/gross ratio jump vs 90d baseline
     executive-summary-insight.provider.ts        composite business health score (0–100)
+    pinned-report-insight.provider.ts            generic engine: analyses every PINNED report
+                                                 (headline total, previous-period delta, top rows)
+                                                 so custom pins behave like built-in insights
+  rolling-window.util.ts              shared pin-anchored window shifting (executor + provider)
 
 apps/web/src/
   pages/insights/InsightsDashboard.tsx
@@ -245,6 +249,51 @@ automatic via `ai_insight_provider_configs`.
   unaffected; the new tables sit idle.
 - **Schema level (last resort):** `DROP TABLE ai_insight_events, ai_insight_provider_configs,
   ai_insights, ai_dashboard_widgets, ai_dashboards;` — nothing else references them.
+
+## 10b. Production-readiness audit (June 2026)
+
+Senior-engineer review of the whole AI Reporting + AI Insights surface. Items marked FIXED
+shipped with this audit; the rest are prioritized for follow-up.
+
+### Fixed in this pass
+
+| # | Severity | Issue | Fix |
+| --- | --- | --- | --- |
+| 1 | High | LLM sometimes emits `rangeType: "custom"` with a missing start/end date (e.g. "Expiring stock in next 90 days") → hard 400 "Custom date range requires valid startDate and endDate" surfaced to the user | `SemanticQueryValidator.repairCustomRange`: missing dates are repaired deterministically (both missing → default range; one missing → anchored to today; inverted → swapped). Malformed-but-present dates still fail. Regression tests added. |
+| 2 | High | Pinned widgets from relative questions ("last 30 days", "next 90 days") froze in time: the NLQ pipeline compiles them to concrete dates, so the stored window never moved | `WidgetExecutorService.applyRollingWindow`: custom windows anchored to the pin date (end side for past windows, start side for future ones) are shifted forward to today on every execution; genuinely historical ranges stay fixed. Tested. |
+| 3 | Medium | Editing a widget (viz type, title) did not invalidate its cached execution → stale rendering for up to 1h | Cache invalidated on widget update and unpin. |
+| 4 | Medium | Free-form NLQ pins were titled "AI Report" (the dynamic parser's generic title beat the user's question) | Server now prefers: explicit title → meaningful semantic title → original question. Client no longer forwards the generic title. |
+| 5 | Low | Scheduler only accepted `AI_INSIGHTS_ENABLED=true`; `1/yes/on` silently kept it off | Accepts the same truthy set as platform env validation. |
+| 6 | High | Pinned custom queries rendered as raw tables with no analysis — they did not "behave like the defaults" | `PinnedReportInsightProvider` (providerId `pinned-reports`): runs every pinned widget's stored semantic query plus an equal-length previous window, emits an insight card (headline, % change, top-row evidence, magnitude-based neutral severity). Refreshed immediately on pin/unpin via a targeted `generateForTenant(tenantId, { providerIds })` run, and on every 6-hourly cycle. Insights are tenant-wide; future-facing windows (expiry) get row-count headlines without comparison. |
+| 7 | Medium | "AI Insights" nav entry was buried mid-way in the 19-item Reports group (and the commit adding it was never pushed, so deployed builds lacked it entirely) | Promoted to a top-level sidebar item directly under Dashboard, same gating (module + tenant AI feature + AI permissions), added to forecast-viewer menu allowlist for parity with AI Reporting. |
+
+### Known gaps to address before / shortly after GA (prioritized)
+
+1. **No LLM repair loop** — `NlqParserService` is single-shot; a malformed semantic query fails
+   the request instead of one retry with the validation error as feedback. Mitigated by the
+   validator repairs above; a bounded retry would cut residual failures further.
+2. **Dashboard-answer widgets can't be pinned individually** — the audit row stores the whole
+   dashboard query; pinning needs per-widget extraction. Currently rejected with a clear message.
+3. **Insight generation lock is per-process** — two app instances can run the same tenant cycle
+   concurrently. Harmless (idempotent upserts) but wasteful; a Redis `SET NX` lock is the fix.
+4. **Widget execution has no per-user concurrency cap** — a 30-widget dashboard fires 30 parallel
+   SQL queries on first load (each bounded by the runtime timeout and row caps, and cached
+   afterwards). Add a small server-side semaphore if DB pressure shows in monitoring.
+5. **Timezone**: date boundaries use server time (UTC in containers), not tenant time (IST) —
+   consistent with the rest of AI reporting, but "today" can differ by 5.5h around midnight.
+   Platform-wide fix, not insights-specific.
+6. **Insights are tenant-wide** — visible to any user with `reports.ai.view`, computed under a
+   system context. Branch-restricted users see tenant-level aggregates (headline numbers only,
+   no row data). Per-scope insight generation is the phase-2 path if this becomes a requirement.
+7. **Tenant iteration is sequential and unbatched** in the scheduler — fine for tens of tenants;
+   needs batching + per-tenant time budget beyond ~hundreds.
+8. **`runtime.enabled` gates widgets and insights** — if a tenant disables the AI provider,
+   pinned widgets stop executing (they need no LLM). Consider splitting "AI provider enabled"
+   from "AI reporting feature enabled" so SQL-only paths keep working.
+9. **No metrics/alerting** on provider failures beyond `last_status` in the admin endpoint —
+   wire into the platform's notification module for repeated failures.
+10. **E2E coverage** — unit coverage is good (validator repair, rolling window, lifecycle,
+    pinning); an API-level e2e of pin → execute → unpin against a seeded DB is the missing layer.
 
 ## 11. Known risks / limitations
 

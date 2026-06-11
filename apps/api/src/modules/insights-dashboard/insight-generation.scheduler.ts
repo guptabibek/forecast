@@ -25,7 +25,9 @@ export class InsightGenerationScheduler {
 
   @Cron(CronExpression.EVERY_6_HOURS)
   async handleScheduledGeneration() {
-    if (this.config.get('AI_INSIGHTS_ENABLED') !== 'true') return;
+    // Same truthy values the platform's env validation accepts (true/1/yes/on).
+    const raw = String(this.config.get('AI_INSIGHTS_ENABLED') ?? '').trim().toLowerCase();
+    if (!['true', '1', 'yes', 'on'].includes(raw)) return;
     this.logger.log('Starting scheduled AI insight generation cycle');
     const started = Date.now();
     const results = await this.generation.generateForAllTenants();

@@ -46,7 +46,11 @@
       "Bash(sed -n '1,60p' d:/RabbitTech/forecast-saas/apps/web/src/components/reports/AiChartRenderer.tsx)",
       "Bash(sed -n '1,50p' d:/RabbitTech/forecast-saas/apps/web/src/components/reports/AiReportTable.tsx)",
       "Bash(sed -n '1,40p' d:/RabbitTech/forecast-saas/apps/web/src/components/reports/AiKpiCard.tsx)",
-      "Bash(git -C d:/RabbitTech/forecast-saas status --short)"
+      "Bash(git -C d:/RabbitTech/forecast-saas status --short)",
+      "Bash(git -C \"d:\\\\RabbitTech\\\\forecast-saas\" log --oneline -3 -- apps/web/src/components/layout/Sidebar.tsx apps/web/src/pages/Dashboard.tsx apps/web/src/components/insights-dashboard/AiInsightsPreview.tsx)",
+      "Bash(PGPASSWORD=6LfFfzgsAAAAAIs71PbQvHvZa5xpNq_ngIAxIao8 psql -h 94.136.186.45 -U databaseuser -d forecast-uat -t -c \"SELECT id, name FROM \\\\\"Tenant\\\\\";\")",
+      "Bash(cd \"d:\\\\RabbitTech\\\\forecast-saas\\\\apps\\\\web\" && ls dist 2>/dev/null | head -5; echo \"---\"; ls -la dist/assets 2>/dev/null | head -10; echo \"--- last modified of dist index ---\"; stat -c '%y %n' dist/index.html 2>/dev/null; echo \"--- vite config ---\"; cat vite.config.ts 2>/dev/null | head -30)",
+      "Read(//d/RabbitTech/forecast-saas/apps/api/**)"
     ]
   }
 }

@@ -24,8 +24,10 @@ export function PinToDashboardButton({ result }: PinToDashboardButtonProps) {
   }
 
   const pinTo = (dashboardId?: string) => {
+    // No title sent — the server picks the best one (semantic title when
+    // meaningful, otherwise the original question).
     pin.mutate(
-      { requestId: result.requestId, dashboardId, title: result.title },
+      { requestId: result.requestId, dashboardId },
       {
         onSuccess: () => {
           setPinned(result.requestId);

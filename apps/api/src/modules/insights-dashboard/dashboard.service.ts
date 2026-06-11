@@ -185,12 +185,18 @@ export class DashboardService {
       throw new BadRequestException(`A dashboard can hold at most ${MAX_WIDGETS_PER_DASHBOARD} widgets`);
     }
 
+    // The dynamic NLQ path titles every report "AI Report" — prefer the
+    // user's own question over that generic title.
+    const semanticTitle =
+      typeof audit.semanticQuery?.title === 'string' && audit.semanticQuery.title.trim() && audit.semanticQuery.title.trim() !== 'AI Report'
+        ? audit.semanticQuery.title.trim()
+        : null;
     const widget = await this.prisma.aiDashboardWidget.create({
       data: {
         tenantId: user.tenantId,
         userId: user.id,
         dashboardId: dashboard.id,
-        title: (input.title?.trim() || audit.semanticQuery?.title || audit.question || 'Pinned Report').slice(0, 200),
+        title: (input.title?.trim() || semanticTitle || audit.question || 'Pinned Report').slice(0, 200),
         question: audit.question?.slice(0, 1000) ?? null,
         sourceRequestId: input.requestId,
         semanticQuery: audit.semanticQuery as object,

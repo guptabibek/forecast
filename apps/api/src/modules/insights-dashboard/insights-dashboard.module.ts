@@ -16,6 +16,7 @@ import { ExecutiveSummaryInsightProvider } from './providers/executive-summary-i
 import { FastMoversInsightProvider } from './providers/fast-movers-insight.provider';
 import { InventoryInsightProvider } from './providers/inventory-insight.provider';
 import { OutstandingInsightProvider } from './providers/outstanding-insight.provider';
+import { PinnedReportInsightProvider } from './providers/pinned-report-insight.provider';
 import { PurchaseTrendInsightProvider } from './providers/purchase-trend-insight.provider';
 import { RevenueInsightProvider } from './providers/revenue-insight.provider';
 import { SalesmanPerformanceInsightProvider } from './providers/salesman-performance-insight.provider';
@@ -53,6 +54,7 @@ import { WidgetExecutorService } from './widget-executor.service';
     FastMoversInsightProvider,
     DiscountAnomalyInsightProvider,
     ExecutiveSummaryInsightProvider,
+    PinnedReportInsightProvider,
     {
       provide: INSIGHT_PROVIDERS,
       useFactory: (...providers) => providers,
@@ -70,6 +72,7 @@ import { WidgetExecutorService } from './widget-executor.service';
         FastMoversInsightProvider,
         DiscountAnomalyInsightProvider,
         ExecutiveSummaryInsightProvider,
+        PinnedReportInsightProvider,
       ],
     },
   ],

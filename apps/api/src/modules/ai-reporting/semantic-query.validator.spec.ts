@@ -441,3 +441,105 @@ describe('SemanticQueryValidator', () => {
     expect((result as any).recommendedSchemaFix).toBe('Add payroll dataset metadata');
   });
 });
+
+describe('SemanticQueryValidator custom range repair and re-validation', () => {
+  let loader: SemanticCatalogLoader;
+  let validator: SemanticQueryValidator;
+
+  const security: ReportingSecurityContext = {
+    tenantId: '11111111-1111-4111-8111-111111111111',
+    userId: '22222222-2222-4222-8222-222222222222',
+    userRole: 'ADMIN',
+    permissions: [
+      'reports.ai.view',
+      'reports.ai.execute',
+      'reports.sales.view',
+      'reports.inventory.view',
+    ],
+    allowedCompanyIds: [11093],
+    allowedBranchIds: ['33333333-3333-4333-8333-333333333333'],
+    hasExplicitCompanyScope: true,
+    hasExplicitBranchScope: true,
+  };
+
+  beforeEach(() => {
+    loader = new SemanticCatalogLoader();
+    loader.onModuleInit();
+    validator = new SemanticQueryValidator(loader);
+  });
+
+  const expiryReport = (timeRange: SemanticReportQuery['timeRange']): SemanticReportQuery => ({
+    queryKind: 'single_report',
+    title: 'Expiring stock in next 90 days',
+    datasetId: 'stock_batches',
+    metrics: ['expiring_stock_value', 'expiring_batch_count'],
+    dimensions: [],
+    filters: [],
+    timeRange,
+    limit: 100,
+  });
+
+  it('repairs a custom range missing endDate by anchoring it to today (no hard failure)', () => {
+    const result = validator.validate(
+      expiryReport({ preset: 'custom', startDate: '2026-06-01', endDate: undefined, fieldId: 'expiry_date' }),
+      security,
+    ) as SemanticReportQuery;
+    expect(result.queryKind).toBe('single_report');
+    expect(result.timeRange?.preset).toBe('custom');
+    expect(result.timeRange?.startDate).toBe('2026-06-01');
+    expect(result.timeRange?.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('repairs a custom range missing startDate (future expiry window) by anchoring to today', () => {
+    const future = new Date();
+    future.setDate(future.getDate() + 90);
+    const futureIso = future.toISOString().slice(0, 10);
+    const result = validator.validate(
+      expiryReport({ preset: 'custom', startDate: undefined, endDate: futureIso, fieldId: 'expiry_date' }),
+      security,
+    ) as SemanticReportQuery;
+    expect(result.timeRange?.preset).toBe('custom');
+    expect(result.timeRange?.endDate).toBe(futureIso);
+    expect(String(result.timeRange?.startDate) <= futureIso).toBe(true);
+  });
+
+  it('falls back to a default range when both custom dates are missing', () => {
+    const result = validator.validate(
+      expiryReport({ preset: 'custom', startDate: undefined, endDate: undefined, fieldId: 'expiry_date' }),
+      security,
+    ) as SemanticReportQuery;
+    expect(result.queryKind).toBe('single_report');
+    expect(result.timeRange?.preset).not.toBe('custom');
+  });
+
+  it('still rejects malformed (present but invalid) custom dates', () => {
+    expect(() =>
+      validator.validate(expiryReport({ preset: 'custom', startDate: 'not-a-date', endDate: '2026-09-01' }), security),
+    ).toThrow(AiReportingBadRequest);
+  });
+
+  it('is idempotent: re-validating a validated query (the pinned-widget path) succeeds and is stable', () => {
+    const first = validator.validate(
+      {
+        queryKind: 'single_report',
+        title: 'Top Selling Products',
+        datasetId: 'sales_items',
+        analysisType: 'ranking',
+        metrics: ['sold_quantity', 'net_sales'],
+        dimensions: ['sales_product'],
+        filters: [],
+        timeRange: { preset: 'custom', startDate: '2026-05-01', endDate: '2026-05-31' },
+        sort: [{ metricId: 'sold_quantity', direction: 'desc' }],
+        limit: 25,
+      },
+      security,
+    ) as SemanticReportQuery;
+    const second = validator.validate(first, security) as SemanticReportQuery;
+    expect(second.queryKind).toBe('single_report');
+    expect(second.datasetId).toBe(first.datasetId);
+    expect(second.metrics).toEqual(first.metrics);
+    expect(second.dimensions).toEqual(first.dimensions);
+    expect(second.timeRange).toEqual(first.timeRange);
+    expect(second.filters).toEqual(first.filters);
+  });
+});

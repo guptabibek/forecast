@@ -3,6 +3,7 @@ import { TenantCacheService } from '../../core/cache/tenant-cache.service';
 import { AiReportingService, StoredReportExecutionResult } from '../ai-reporting/ai-reporting.service';
 import { SemanticReportQuery } from '../ai-reporting/semantic-query.types';
 import { DashboardService } from './dashboard.service';
+import { applyRollingWindow } from './rolling-window.util';
 
 const CACHE_NAMESPACE = 'ai-dashboard:widget';
 const DEFAULT_CACHE_TTL_SECONDS = 300;
@@ -37,7 +38,11 @@ export class WidgetExecutorService {
       if (cached) return { ...cached, cached: true };
     }
 
-    const semanticQuery = this.applyVizOverride(widget.semanticQuery as unknown as SemanticReportQuery, widget.vizType);
+    const storedQuery = applyRollingWindow(
+      widget.semanticQuery as unknown as SemanticReportQuery,
+      widget.createdAt,
+    );
+    const semanticQuery = this.applyVizOverride(storedQuery, widget.vizType);
     const filters = (widget.filters ?? {}) as { companyId?: number; branchIds?: string[] };
 
     const result = await this.aiReporting.executeStoredReport(user, {

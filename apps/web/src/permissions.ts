@@ -7,6 +7,7 @@ const FORECAST_ONLY_MENU_PATHS = new Set([
   '/scenarios',
   '/reports',
   '/reports/ai',
+  '/insights',
 ]);
 
 // Manufacturing sub-paths surfaced under "Planning & Forecasting" — visible to planners

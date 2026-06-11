@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { RequireModule } from '../platform/require-module.decorator';
 import { DashboardService, WIDGET_SIZES, WidgetSize } from './dashboard.service';
+import { InsightGenerationService } from './insight-generation.service';
 import { WidgetExecutorService } from './widget-executor.service';
 
 class CreateDashboardDto {
@@ -134,7 +135,20 @@ export class DashboardController {
   constructor(
     private readonly dashboards: DashboardService,
     private readonly widgetExecutor: WidgetExecutorService,
+    private readonly insightGeneration: InsightGenerationService,
   ) {}
+
+  /**
+   * Refreshes ONLY the pinned-report analysis insight for this tenant so a
+   * just-pinned report shows up in the insights feed immediately instead of
+   * waiting for the 6-hourly cycle. Fire-and-forget: analysis failures must
+   * never fail the pin/unpin request itself.
+   */
+  private refreshPinnedReportInsights(tenantId: string) {
+    void this.insightGeneration
+      .generateForTenant(tenantId, { providerIds: ['pinned-reports'] })
+      .catch(() => undefined);
+  }
 
   @Get()
   @ApiOperation({ summary: 'List the current user dashboards (creates a default on first use)' })
@@ -200,19 +214,24 @@ export class DashboardController {
   @Post('widgets/pin')
   @ApiOperation({ summary: 'Pin a previously executed AI report to a dashboard' })
   @ApiResponse({ status: 201, description: 'Created widget' })
-  pin(@CurrentUser() user: any, @Body() body: PinReportDto) {
-    return this.dashboards.pinReport(user, body);
+  async pin(@CurrentUser() user: any, @Body() body: PinReportDto) {
+    const widget = await this.dashboards.pinReport(user, body);
+    this.refreshPinnedReportInsights(user.tenantId);
+    return widget;
   }
 
   @Patch('widgets/:widgetId')
   @ApiOperation({ summary: 'Update widget title, size, visualization, or refresh frequency' })
   @ApiResponse({ status: 200, description: 'Updated widget' })
-  updateWidget(
+  async updateWidget(
     @CurrentUser() user: any,
     @Param('widgetId', ParseUUIDPipe) widgetId: string,
     @Body() body: UpdateWidgetDto,
   ) {
-    return this.dashboards.updateWidget(user, widgetId, body);
+    const widget = await this.dashboards.updateWidget(user, widgetId, body);
+    // Settings like vizType change the rendered payload — drop the cached execution.
+    await this.widgetExecutor.invalidate(user.tenantId, widgetId);
+    return widget;
   }
 
   @Post('widgets/:widgetId/duplicate')
@@ -225,8 +244,12 @@ export class DashboardController {
   @Delete('widgets/:widgetId')
   @ApiOperation({ summary: 'Unpin (delete) a widget' })
   @ApiResponse({ status: 200, description: 'Deletion result' })
-  unpin(@CurrentUser() user: any, @Param('widgetId', ParseUUIDPipe) widgetId: string) {
-    return this.dashboards.unpinWidget(user, widgetId);
+  async unpin(@CurrentUser() user: any, @Param('widgetId', ParseUUIDPipe) widgetId: string) {
+    const result = await this.dashboards.unpinWidget(user, widgetId);
+    await this.widgetExecutor.invalidate(user.tenantId, widgetId);
+    // Re-running the analysis with the widget gone archives its insight.
+    this.refreshPinnedReportInsights(user.tenantId);
+    return result;
   }
 
   @Post('widgets/:widgetId/execute')

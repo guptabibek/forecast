@@ -107,10 +107,18 @@ export class InsightGenerationService {
     }
   }
 
-  async generateForTenant(tenantId: string): Promise<TenantGenerationResult> {
+  /**
+   * Runs enabled providers for one tenant. `options.providerIds` restricts the
+   * run to specific providers — used to refresh just the pinned-report
+   * analysis right after a pin/unpin instead of waiting for the next cycle
+   * (archival of non-redetected insights is per-provider, so a partial run
+   * never archives other providers' insights).
+   */
+  async generateForTenant(tenantId: string, options?: { providerIds?: string[] }): Promise<TenantGenerationResult> {
     const runStarted = new Date();
     const configs = await this.prisma.aiInsightProviderConfig.findMany({ where: { tenantId } });
     const configById = new Map(configs.map((config) => [config.providerId, config]));
+    const providerFilter = options?.providerIds?.length ? new Set(options.providerIds) : null;
 
     const systemUser = {
       id: INSIGHT_SYSTEM_USER_ID,
@@ -132,6 +140,7 @@ export class InsightGenerationService {
     let insightsArchived = 0;
 
     for (const provider of this.providers) {
+      if (providerFilter && !providerFilter.has(provider.providerId)) continue;
       const config = configById.get(provider.providerId);
       const enabled = config ? config.enabled : provider.defaultEnabled;
       if (!enabled) continue;

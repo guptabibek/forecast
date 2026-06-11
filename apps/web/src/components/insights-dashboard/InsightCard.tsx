@@ -4,6 +4,7 @@ import {
   ArrowTopRightOnSquareIcon,
   ArrowTrendingUpIcon,
   BanknotesIcon,
+  BookmarkIcon,
   ChartBarIcon,
   CheckCircleIcon,
   CheckIcon,
@@ -42,6 +43,7 @@ const PROVIDER_ICONS: Record<string, React.ElementType> = {
   'fast-movers': ArrowTrendingUpIcon,
   'discount-anomaly': ReceiptPercentIcon,
   'executive-summary': SparklesIcon,
+  'pinned-reports': BookmarkIcon,
 };
 
 interface InsightMetricsView {
