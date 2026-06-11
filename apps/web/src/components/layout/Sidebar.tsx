@@ -70,6 +70,7 @@ const navigation: NavigationItem[] = [
       { name: 'Batches', href: '/pharma-reports/batches', icon: CubeIcon, module: 'reports' },
       { name: 'Party Outstanding', href: '/pharma-reports/financial', icon: CurrencyDollarIcon, module: 'reports' },
       { name: 'AI Reporting', href: '/reports/ai', icon: SparklesIcon, module: 'ai-reporting' },
+      { name: 'AI Insights', href: '/insights', icon: SparklesIcon, module: 'ai-reporting' },
       { name: '360 Reports', href: '/pharma-reports/360', icon: DocumentChartBarIcon, module: 'reports' },
       { name: 'Alerts', href: '/pharma-reports/alerts', icon: ExclamationTriangleIcon, module: 'reports' },
       { name: 'GL Accounts', href: '/pharma-reports/gl-accounts', icon: CurrencyDollarIcon, module: 'reports' },
@@ -175,7 +176,7 @@ export default function Sidebar({
           const visibleItems = item.items.filter(
             (navItem) => canShowSidebarHref(role, navItem.href) &&
               isModuleEnabled(navItem.module) &&
-              (navItem.href !== '/reports/ai' || canUseAiReporting(user, aiReportingEnabled)),
+              ((navItem.href !== '/reports/ai' && navItem.href !== '/insights') || canUseAiReporting(user, aiReportingEnabled)),
           );
           return visibleItems.length ? { ...item, items: visibleItems } : null;
         })

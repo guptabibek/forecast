@@ -40,7 +40,13 @@
       "Bash(node _diag_baseline.cjs before)",
       "Bash(echo \"BUILD_EXIT=$?\")",
       "Bash(node _diag_verify.cjs)",
-      "Bash(node _diag_dash.cjs)"
+      "Bash(node _diag_dash.cjs)",
+      "Bash(node -e \"const c=require\\('d:/RabbitTech/forecast-saas/apps/api/ai-reporting/semantic-catalog.json'\\); console.log\\(c.catalogVersion\\); for \\(const d of c.datasets\\) console.log\\(d.datasetId, '->', d.viewName, '| nlq:', d.allowedForNlq, '| sec:', \\(d.requiredSecurityFilters||[]\\).join\\(','\\)\\);\")",
+      "PowerShell(graphify query \"How do the Forecasts screen and Planning Scenarios screen work end-to-end \\(frontend pages, API services, forecast engine, scenario engine\\)?\")",
+      "Bash(sed -n '1,60p' d:/RabbitTech/forecast-saas/apps/web/src/components/reports/AiChartRenderer.tsx)",
+      "Bash(sed -n '1,50p' d:/RabbitTech/forecast-saas/apps/web/src/components/reports/AiReportTable.tsx)",
+      "Bash(sed -n '1,40p' d:/RabbitTech/forecast-saas/apps/web/src/components/reports/AiKpiCard.tsx)",
+      "Bash(git -C d:/RabbitTech/forecast-saas status --short)"
     ]
   }
 }

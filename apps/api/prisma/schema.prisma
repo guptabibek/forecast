@@ -4932,3 +4932,118 @@ model ScrapReason {
   @@index([tenantId])
   @@map("scrap_reasons")
 }
+
+/// ─── AI Insights Dashboard (additive module — no existing tables modified) ───
+
+/// Per-user dashboard container for pinned AI report widgets
+model AiDashboard {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  name        String   @db.VarChar(120)
+  description String?  @db.VarChar(500)
+  isDefault   Boolean  @default(false) @map("is_default")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  widgets AiDashboardWidget[]
+
+  @@unique([tenantId, userId, name])
+  @@index([tenantId, userId])
+  @@map("ai_dashboards")
+}
+
+/// A widget pinned to a dashboard. Stores the validated semantic query
+/// (never raw SQL) so every execution recompiles under the viewer's
+/// current security context.
+model AiDashboardWidget {
+  id                 String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  userId             String   @map("user_id") @db.Uuid
+  dashboardId        String   @map("dashboard_id") @db.Uuid
+  widgetType         String   @default("pinned_report") @map("widget_type") @db.VarChar(40)
+  title              String   @db.VarChar(200)
+  question           String?  @db.VarChar(1000)
+  sourceRequestId    String?  @map("source_request_id") @db.Uuid
+  semanticQuery      Json     @map("semantic_query")
+  vizType            String?  @map("viz_type") @db.VarChar(20)
+  filters            Json?
+  size               String   @default("medium") @db.VarChar(20)
+  position           Int      @default(0)
+  refreshIntervalSec Int?     @map("refresh_interval_sec")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  dashboard AiDashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, dashboardId, position])
+  @@index([tenantId, userId])
+  @@map("ai_dashboard_widgets")
+}
+
+/// System-generated insight surfaced on the AI Insights Dashboard
+model AiInsight {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  providerId      String    @map("provider_id") @db.VarChar(80)
+  category        String    @db.VarChar(60)
+  severity        String    @db.VarChar(20)
+  status          String    @default("NEW") @db.VarChar(20)
+  title           String    @db.VarChar(300)
+  summary         String
+  confidence      Decimal?  @db.Decimal(5, 4)
+  metrics         Json?
+  evidence        Json?
+  actions         Json?
+  drillDownQuestion String? @map("drill_down_question") @db.VarChar(1000)
+  dedupeKey       String    @map("dedupe_key") @db.VarChar(200)
+  firstDetectedAt DateTime  @default(now()) @map("first_detected_at")
+  lastEvaluatedAt DateTime  @default(now()) @map("last_evaluated_at")
+  acknowledgedBy  String?   @map("acknowledged_by") @db.Uuid
+  acknowledgedAt  DateTime? @map("acknowledged_at")
+  resolvedBy      String?   @map("resolved_by") @db.Uuid
+  resolvedAt      DateTime? @map("resolved_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  events AiInsightEvent[]
+
+  @@unique([tenantId, providerId, dedupeKey])
+  @@index([tenantId, status, severity, lastEvaluatedAt])
+  @@index([tenantId, category, createdAt])
+  @@map("ai_insights")
+}
+
+/// Lifecycle audit trail for insights (generated, acknowledged, resolved, …)
+model AiInsightEvent {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  insightId String   @map("insight_id") @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String   @db.VarChar(40)
+  note      String?  @db.VarChar(1000)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  insight AiInsight @relation(fields: [insightId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, insightId, createdAt])
+  @@map("ai_insight_events")
+}
+
+/// Per-tenant enable/disable + run bookkeeping for each insight provider
+model AiInsightProviderConfig {
+  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  providerId String    @map("provider_id") @db.VarChar(80)
+  enabled    Boolean   @default(true)
+  config     Json      @default("{}")
+  lastRunAt  DateTime? @map("last_run_at")
+  lastStatus String?   @map("last_status") @db.VarChar(20)
+  lastError  String?   @map("last_error") @db.VarChar(1000)
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tenantId, providerId])
+  @@map("ai_insight_provider_configs")
+}

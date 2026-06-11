@@ -31,6 +31,7 @@ const PlanDetail = lazy(() => import('@pages/plans/PlanDetail'));
 const Plans = lazy(() => import('@pages/plans/Plans'));
 const Reports = lazy(() => import('@pages/reports/Reports'));
 const AiReporting = lazy(() => import('@pages/reports/AiReporting'));
+const InsightsDashboard = lazy(() => import('@pages/insights/InsightsDashboard'));
 const PharmaReportsRoutes = lazy(() => import('@pages/pharma-reports/PharmaReportsRoutes'));
 const Scenarios = lazy(() => import('@pages/scenarios/Scenarios'));
 const AuditLog = lazy(() => import('@pages/settings/AuditLog'));
@@ -230,6 +231,7 @@ export default function App() {
         {/* Reports */}
         <Route path="/reports" element={<Reports />} />
         <Route path="/reports/ai" element={<RoleAwareRoute requiredModule="ai-reporting"><AiReporting /></RoleAwareRoute>} />
+        <Route path="/insights" element={<RoleAwareRoute requiredModule="ai-reporting"><InsightsDashboard /></RoleAwareRoute>} />
         <Route path="/pharma-reports/*" element={<RoleAwareRoute requiredModule="reports"><PharmaReportsRoutes /></RoleAwareRoute>} />
 
         {/* Settings */}

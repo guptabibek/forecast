@@ -43,6 +43,7 @@ import type { ABCAnalysisParams } from '../services/api/report.service';
 import type { Dimension } from '../types';
 import { formatIndianCompactNumber, formatInr } from '../utils/number-format';
 import PharmaExecutiveOverview from './pharma-reports/PharmaExecutiveOverview';
+import { AiInsightsPreview } from '../components/insights-dashboard/AiInsightsPreview';
 
 // =====================
 // Types
@@ -1180,6 +1181,8 @@ export default function Dashboard() {
       </div>
 
       <PharmaExecutiveOverview />
+
+      <AiInsightsPreview />
 
       {/* Main Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
