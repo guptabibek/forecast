@@ -33,7 +33,14 @@
       "Bash(node _diag_e2e.cjs)",
       "Bash(rm -f _diag_perf.cjs _diag_time.cjs _diag_time2.cjs _diag_e2e.cjs _diag_ctx.json)",
       "Bash(git -C \"d:\\\\RabbitTech\\\\forecast-saas\" status --short -- apps/api/_diag_perf.cjs apps/api/_diag_time.cjs apps/api/_diag_time2.cjs apps/api/_diag_e2e.cjs)",
-      "Bash(ls _diag*)"
+      "Bash(ls _diag*)",
+      "Bash(node _diag_reports.cjs)",
+      "Bash(node _diag_cost.cjs)",
+      "Bash(node _diag_lineset.cjs)",
+      "Bash(node _diag_baseline.cjs before)",
+      "Bash(echo \"BUILD_EXIT=$?\")",
+      "Bash(node _diag_verify.cjs)",
+      "Bash(node _diag_dash.cjs)"
     ]
   }
 }

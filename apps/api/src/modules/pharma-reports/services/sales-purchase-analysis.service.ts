@@ -1564,6 +1564,15 @@ export class SalesPurchaseAnalysisService {
     // marg_transactions mt ...`). Each branch is the dominant pair plus
     // the rare cross-pair (≤25 rows) kept defensively so edge-case
     // vouchers don't get their lines dropped.
+    //
+    // `mt.is_cancelled = FALSE` is part of the join predicate so every live
+    // line aggregation built on this helper excludes individually-cancelled
+    // lines — Marg can cancel a single line inside an otherwise-live invoice
+    // (see the dual-flag contract on MargTransaction). This makes the live
+    // paths reconcile EXACTLY with marg_bill_rollup (whose refresh applies the
+    // same filter), which the overview KPIs and the dimension rollup fast path
+    // both read. Callers that filter only mv.is_cancelled would otherwise
+    // over-count those cancelled lines.
     return Prisma.sql`(
       (UPPER(${mv}.type) = 'S' AND ${mt}.type IN ('G', 'S', 'O'))
       OR (UPPER(${mv}.type) = 'R' AND ${mt}.type IN ('R', 'W'))
@@ -1573,7 +1582,7 @@ export class SalesPurchaseAnalysisService {
       OR (UPPER(${mv}.type) = 'Q' AND ${mt}.type IN ('Q', 'B'))
       OR (UPPER(${mv}.type) = 'W' AND ${mt}.type IN ('W', 'R'))
       OR (UPPER(${mv}.type) = 'U' AND ${mt}.type IN ('X', 'U'))
-    )`;
+    ) AND ${mt}.is_cancelled = FALSE`;
   }
 
   private parseBillKey(billKey: string): { companyId: number; voucher: string } {
@@ -1824,7 +1833,15 @@ export class SalesPurchaseAnalysisService {
     const billNet = dim.perVoucher
       ? Prisma.sql`CASE WHEN has_final THEN bill_final_signed ELSE amount + gst_amount END`
       : Prisma.sql`amount + gst_amount`;
-    const cte = Prisma.sql`
+    // FAST PATH: per-voucher dimensions (state / city / salesman / customer /
+    // supplier) map one bill → one group, so the per-dimension rollup can be
+    // computed straight from marg_bill_rollup instead of a live line scan with
+    // the per-line state/city LATERAL. Now that compatibleLineTypeSql also
+    // filters cancelled lines, the live `rolled` and this rollup `rolled` share
+    // the IDENTICAL basis the overview reads, so the two branches are
+    // numerically interchangeable (locked by the dimension-parity check).
+    const useRollup = dim.perVoucher === true && !this.requiresLineLevelDrill(filters);
+    const liveCte = Prisma.sql`
       WITH lines AS (
         SELECT
           mv.company_id,
@@ -1903,6 +1920,9 @@ export class SalesPurchaseAnalysisService {
         GROUP BY dim_key
       )
     `;
+    const cte = useRollup
+      ? this.dimensionRolledFromRollup(tenantId, kind, dimension, filters)
+      : liveCte;
 
     const detailFilterConds = buildPharmaFilterSql(parsePharmaFilters(filters.filters), DIMENSION_COLUMNS);
     const detailWhere = detailFilterConds.length
@@ -2476,6 +2496,63 @@ export class SalesPurchaseAnalysisService {
     `);
 
     return this.mapComparisonRows(rows);
+  }
+
+  /**
+   * Rollup-backed `rolled` CTE for getDimensionAnalysis, shape-identical to the
+   * live `lines → bill_grain → rolled` pipeline but sourced from one row per
+   * bill in marg_bill_rollup (so there is no line scan and no per-line
+   * state/city LATERAL). Only valid for per-voucher dimensions (one bill → one
+   * group). net_amount is the stored final_amt-based signed total — the same
+   * value the live perVoucher billNet computes — and quantity / cost /
+   * item_count share the cancelled-excluded basis the overview reads, so the
+   * emitted `rolled` rows equal the live path's row-for-row.
+   */
+  private dimensionRolledFromRollup(
+    tenantId: string,
+    kind: AnalysisKind,
+    dimension: string,
+    filters: SalesPurchaseAnalysisFilterDto,
+  ): Prisma.Sql {
+    const scope = this.resolveScope(filters);
+    const where = this.buildRollupWhere(tenantId, kind, filters);
+    const amount = this.scopeRollupAmountColumn(kind, scope);
+    const quantity = this.scopeRollupQuantityColumn(kind, scope);
+    const cost = this.scopeRollupCostExpr(kind, scope);
+    const parts = this.rollupDimensionParts(tenantId, dimension);
+    const leadingCtes = parts.leadingCtes ? Prisma.sql`${parts.leadingCtes},` : Prisma.empty;
+    return Prisma.sql`
+      WITH ${leadingCtes}
+      bills AS (
+        SELECT
+          ${parts.keyExpr} AS dim_key,
+          ${parts.labelExpr} AS dim_label,
+          b.company_id,
+          b.voucher,
+          b.cid,
+          b.${quantity} AS quantity,
+          b.${amount} AS net_amount,
+          (${cost}) AS cost_amount,
+          b.item_count AS items
+        FROM marg_bill_rollup b
+        ${parts.joins ?? Prisma.empty}
+        WHERE ${where}
+      ),
+      rolled AS (
+        SELECT
+          dim_key,
+          MAX(dim_label) AS dim_label,
+          COUNT(DISTINCT company_id || ':' || voucher)::int AS bill_count,
+          COUNT(DISTINCT cid) FILTER (WHERE cid IS NOT NULL)::int AS party_count,
+          COALESCE(SUM(quantity), 0)::float8 AS quantity,
+          COALESCE(SUM(net_amount), 0)::float8 AS net_amount,
+          COALESCE(SUM(cost_amount), 0)::float8 AS cost_amount,
+          COALESCE(SUM(net_amount - cost_amount), 0)::float8 AS profit,
+          COALESCE(SUM(items), 0)::int AS item_count
+        FROM bills
+        GROUP BY dim_key
+      )
+    `;
   }
 
   /**

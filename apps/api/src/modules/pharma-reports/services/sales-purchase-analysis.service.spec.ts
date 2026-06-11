@@ -262,4 +262,23 @@ describe('SalesPurchaseAnalysisService', () => {
       expect(() => svc().rollupDimensionParts(tenantId, 'product')).toThrow();
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Cancelled-line contract: every live line aggregation built on
+  // compatibleLineTypeSql must also drop individually-cancelled lines, so it
+  // reconciles EXACTLY with marg_bill_rollup (whose refresh applies the same
+  // filter) and the overview / dimension rollup fast path. This is the
+  // invariant that makes the rollup fast path numerically interchangeable with
+  // the live path.
+  // ─────────────────────────────────────────────────────────────────────
+  describe('cancelled-line exclusion', () => {
+    const svc = () => new SalesPurchaseAnalysisService({} as any) as any;
+
+    it('compatibleLineTypeSql ANDs mt.is_cancelled = FALSE into the join predicate', () => {
+      const sql = svc().compatibleLineTypeSql('mv', 'mt').sql;
+      expect(sql).toMatch(/mt\.is_cancelled\s*=\s*FALSE/i);
+      // and still carries the header→line type compatibility pairs
+      expect(sql).toMatch(/UPPER\(mv\.type\)\s*=\s*'S'/);
+    });
+  });
 });

@@ -102,18 +102,16 @@ export class ThreeSixtyReportsService {
     const poLocationFilter = locationId ? Prisma.sql`AND po.location_id = ${locationId}::uuid` : Prisma.empty;
     const ledgerLocationFilter = locationId ? Prisma.sql`AND il.location_id = ${locationId}::uuid` : Prisma.empty;
     const inventoryFilter = this.inventoryReportFilter(item.product_id, locationId);
-    const [currentStockReport, batchInventoryReport, stockAgeingReport] = await Promise.all([
-        this.inventoryReports.getCurrentStock(tenantId, inventoryFilter),
-        this.inventoryReports.getBatchInventory(tenantId, inventoryFilter),
-        this.inventoryReports.getStockAgeing(tenantId, { ...inventoryFilter, bucketDays: [30, 60, 90] } as any),
-      ]);
+    const currentStockReportP = this.inventoryReports.getCurrentStock(tenantId, inventoryFilter);
+    const batchInventoryReportP = this.inventoryReports.getBatchInventory(tenantId, inventoryFilter);
+    const stockAgeingReportP = this.inventoryReports.getStockAgeing(tenantId, { ...inventoryFilter, bucketDays: [30, 60, 90] } as any);
 
     // Movements CTE is family-aware: sales-side lines are signed via
     // margSalesAmountSignSql ({SALES_INVOICE: +1, SALES_RETURN: -1, others: 0})
     // and purchase-side via margPurchaseAmountSignSql, so a CN return nets
     // against an invoice, and challan / SC contribute 0. Aggregations below
     // SUM the signed values directly — no further ABS or filter is needed.
-    const [kpi] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const kpiP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH movements AS (
         SELECT
           mv.date,
@@ -162,7 +160,7 @@ export class ThreeSixtyReportsService {
       FROM movements
     `);
 
-    const [stock] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const stockP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(on_hand_qty), 0)::float8 AS current_stock,
         COALESCE(SUM(stock_value), 0)::float8 AS stock_value,
@@ -187,7 +185,7 @@ export class ThreeSixtyReportsService {
       ) s
     `);
 
-    const [openPo] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const openPoP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(GREATEST(pol.quantity - pol.received_qty, 0)), 0)::float8 AS open_po_qty,
         COALESCE(SUM(GREATEST(pol.quantity - pol.received_qty, 0) * pol.unit_price), 0)::float8 AS open_po_value,
@@ -208,7 +206,7 @@ export class ThreeSixtyReportsService {
     // adjustments (SALES_RETURN_ADJUSTMENT) and challans are NOT returns and
     // are excluded by the family lists. The earlier version filtered on raw
     // line type ('R'/'B'), missed breakage/expiry, and counted cancelled rows.
-    const [margReturns] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const margReturnsP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(ABS(COALESCE(mt.amount, 0))) FILTER (
           WHERE mv.family IN ('SALES_RETURN', 'SALES_BRK_EXP_RECEIVE')), 0)::float8 AS sales_return_value,
@@ -231,7 +229,7 @@ export class ThreeSixtyReportsService {
     // zero, sales returns net out). The prior `mt.type = 'S'` filter was a
     // narrow Dis-line-type match that excluded the dominant 'G' lines under
     // S headers; joining to mv and filtering by family is the correct lens.
-    const [itemMargin] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const itemMarginP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(COALESCE(mt.amount, 0) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS sales_value,
         COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, 0) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS cost_value
@@ -255,7 +253,7 @@ export class ThreeSixtyReportsService {
         AND ${margProductFilter}
     `);
 
-    const monthlyTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const monthlyTrendP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH monthly AS (
         SELECT
           date_trunc('month', mv.date) AS month_bucket,
@@ -286,7 +284,7 @@ export class ThreeSixtyReportsService {
       ORDER BY buckets.month_bucket
     `);
 
-    const topBuyers = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const topBuyersP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}) DESC)::int AS rank,
         COALESCE(c.name, mp.par_name, 'Unmapped Customer') AS name,
@@ -307,7 +305,7 @@ export class ThreeSixtyReportsService {
       LIMIT 5
     `);
 
-    const locationSales = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const locationSalesP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(l.code, l.name, mb.name, mb.branch, 'Unmapped') AS location,
         COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS sales_value
@@ -326,7 +324,7 @@ export class ThreeSixtyReportsService {
       LIMIT 6
     `);
 
-    const batches = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const batchesP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT * FROM (
         SELECT
           b.batch_number,
@@ -353,7 +351,7 @@ export class ThreeSixtyReportsService {
       LIMIT 8
     `);
 
-    const stockAgeing = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const stockAgeingP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH stock_rows AS (
         SELECT
           GREATEST((CURRENT_DATE - COALESCE(b.created_at::date, b.manufacturing_date, CURRENT_DATE)), 0)::int AS age_days,
@@ -403,7 +401,7 @@ export class ThreeSixtyReportsService {
       ORDER BY sort_order
     `);
 
-    const stockMovement = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const stockMovementP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         to_char(month_bucket, 'Mon YYYY') AS month,
         COALESCE(SUM(il.quantity) FILTER (WHERE il.entry_type::text IN ('LEDGER_RECEIPT', 'LEDGER_TRANSFER_IN', 'LEDGER_PRODUCTION_RECEIPT', 'LEDGER_RETURN')), 0)::float8 AS receipt_qty,
@@ -418,7 +416,7 @@ export class ThreeSixtyReportsService {
       ORDER BY month_bucket
     `);
 
-    const openPoRows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const openPoRowsP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         po.order_number,
         po.order_date,
@@ -441,6 +439,49 @@ export class ThreeSixtyReportsService {
       ORDER BY po.expected_date ASC
       LIMIT 8
     `);
+
+    // Every block above is an independent read (3 inventory sub-reports + the
+    // Marg KPI / stock / PO / returns / margin / trend / ranking queries).
+    // Resolve them concurrently so the endpoint costs the slowest single query
+    // rather than their sum. SQL is unchanged — only execution is parallelised.
+    const [
+      currentStockReport,
+      batchInventoryReport,
+      stockAgeingReport,
+      kpiRows,
+      stockRows,
+      openPoAggRows,
+      margReturnsRows,
+      itemMarginRows,
+      monthlyTrend,
+      topBuyers,
+      locationSales,
+      batches,
+      stockAgeing,
+      stockMovement,
+      openPoRows,
+    ] = await Promise.all([
+      currentStockReportP,
+      batchInventoryReportP,
+      stockAgeingReportP,
+      kpiP,
+      stockP,
+      openPoP,
+      margReturnsP,
+      itemMarginP,
+      monthlyTrendP,
+      topBuyersP,
+      locationSalesP,
+      batchesP,
+      stockAgeingP,
+      stockMovementP,
+      openPoRowsP,
+    ]);
+    const [kpi] = kpiRows;
+    const [stock] = stockRows;
+    const [openPo] = openPoAggRows;
+    const [margReturns] = margReturnsRows;
+    const [itemMargin] = itemMarginRows;
 
     const totalSales = Number(kpi.current_month_sales_value ?? 0);
     const lastSales = Number(kpi.last_month_sales_value ?? 0);
@@ -707,7 +748,7 @@ export class ThreeSixtyReportsService {
     // return -1, challan/SC/other 0. The header filter loads both S and R so
     // returns can contribute their negative contra; CHAL vouchers stay loaded
     // (sign = 0) so invoice_count remains stable for callers that consume it.
-    const [voucherSales] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const voucherSalesP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_sales,
         COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_sales,
@@ -719,10 +760,9 @@ export class ThreeSixtyReportsService {
       WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R') AND ${margCustomerFilter}
     `);
 
-    const salesBase = voucherSales;
-    const outstanding = await this.getOutstandingSnapshot(tenantId, customer.cid, customer.company_id, 'CUSTOMER');
+    const outstandingP = this.getOutstandingSnapshot(tenantId, customer.cid, customer.company_id, 'CUSTOMER');
 
-    const monthlyTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const monthlyTrendP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         to_char(month_bucket, 'Mon YYYY') AS month,
         COALESCE(SUM(mv.final_amt * ${margSalesAmountSignSql('mv')}), 0)::float8 AS sales_value
@@ -736,7 +776,7 @@ export class ThreeSixtyReportsService {
       ORDER BY month_bucket
     `);
 
-    const topItems = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const topItemsP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}) DESC)::int AS rank,
         COALESCE(p.name, mprod.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference') AS name,
@@ -769,7 +809,7 @@ export class ThreeSixtyReportsService {
       LIMIT 5
     `);
 
-    const paymentDelayTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const paymentDelayTrendP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         to_char(month_bucket, 'Mon YYYY') AS month,
         COALESCE(AVG(GREATEST(GREATEST(COALESCE(NULLIF(mo.days, 0), CURRENT_DATE - mo.date::date), 0) - COALESCE(${customer.credit_days ?? 0}, 0), 0)), 0)::float8 AS delay_days
@@ -788,7 +828,7 @@ export class ThreeSixtyReportsService {
     // returnInsight reports only true SALES_RETURN (R/CN). SC (T) is a
     // price-difference accounting credit, not a goods return, so it must
     // not contribute to return_value / return_qty / return_count.
-    const [returnInsight] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const returnInsightP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(ABS(COALESCE(mt.amount, 0))), 0)::float8 AS return_value,
         COALESCE(SUM(ABS(COALESCE(mt.qty, 0))), 0)::float8 AS return_qty,
@@ -806,7 +846,7 @@ export class ThreeSixtyReportsService {
     // returns subtract, challan / SC contribute zero. Filtering by
     // family='SALES_INVOICE' alone would ignore returns; this signed sum is
     // consistent with the headline sales_value the customer sees.
-    const [profitability] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const profitabilityP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS sales_value,
         COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS estimated_cost
@@ -826,7 +866,7 @@ export class ThreeSixtyReportsService {
         AND mv.date <= ${ctx.periodEnd}::date
     `);
 
-    const [lastPayment] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const lastPaymentP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         map.date AS last_payment_date,
         ABS(map.amount)::float8 AS last_payment_amount
@@ -837,6 +877,34 @@ export class ThreeSixtyReportsService {
       ORDER BY map.date DESC, ABS(map.amount) DESC
       LIMIT 1
     `);
+
+    // All of the above are independent reads — resolve them concurrently so the
+    // endpoint latency is the slowest single query, not the sum of all of them.
+    // The SQL is byte-for-byte unchanged; only the execution is parallelised.
+    const [
+      voucherSalesRows,
+      outstanding,
+      monthlyTrend,
+      topItems,
+      paymentDelayTrend,
+      returnInsightRows,
+      profitabilityRows,
+      lastPaymentRows,
+    ] = await Promise.all([
+      voucherSalesP,
+      outstandingP,
+      monthlyTrendP,
+      topItemsP,
+      paymentDelayTrendP,
+      returnInsightP,
+      profitabilityP,
+      lastPaymentP,
+    ]);
+    const [voucherSales] = voucherSalesRows;
+    const salesBase = voucherSales;
+    const [returnInsight] = returnInsightRows;
+    const [profitability] = profitabilityRows;
+    const [lastPayment] = lastPaymentRows;
 
     const currentMonthSales = Number(salesBase.current_month_sales ?? 0);
     const lastMonthSales = Number(salesBase.last_month_sales ?? 0);
@@ -929,7 +997,7 @@ export class ThreeSixtyReportsService {
     // DN purchase returns can subtract from the supplier's net purchases;
     // the sign helper takes care of the directionality. Mirrors the
     // sales-side family-aware aggregation introduced for customer 360.
-    const [purchase] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const purchaseP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margPurchaseAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_purchase,
         COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margPurchaseAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_purchase,
@@ -941,9 +1009,9 @@ export class ThreeSixtyReportsService {
       WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('P', 'B') AND ${margSupplierFilter}
     `);
 
-    const payable = await this.getOutstandingSnapshot(tenantId, supplier.cid, supplier.company_id, 'SUPPLIER');
+    const payableP = this.getOutstandingSnapshot(tenantId, supplier.cid, supplier.company_id, 'SUPPLIER');
 
-    const [performance] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const performanceP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH filtered_pos AS (
         SELECT po.*
         FROM purchase_orders po
@@ -1010,7 +1078,7 @@ export class ThreeSixtyReportsService {
     // both P and B header types and the corresponding line types via
     // compatiblePurchaseLineSql; mt.is_cancelled = FALSE keeps cancelled
     // lines out of the rollup.
-    const topItems = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const topItemsP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0)) * ${margPurchaseAmountSignSql('mv')}) DESC)::int AS rank,
         COALESCE(p.name, mp.name, CONCAT('Missing item master: ', mt.pid), 'Missing item reference') AS name,
@@ -1068,7 +1136,7 @@ export class ThreeSixtyReportsService {
     // Family-signed monthly purchase trend: P invoices add, B/DN returns
     // subtract, everything else 0. Headers widen to ('P','B') so returns are
     // visible to the sign multiplier.
-    const monthlyTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const monthlyTrendP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         to_char(month_bucket, 'Mon YYYY') AS month,
         COALESCE(SUM(mv.final_amt * ${margPurchaseAmountSignSql('mv')}), 0)::float8 AS purchase_value
@@ -1082,7 +1150,7 @@ export class ThreeSixtyReportsService {
       ORDER BY month_bucket
     `);
 
-    const openOrders = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const openOrdersP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         po.order_number,
         po.order_date,
@@ -1106,7 +1174,7 @@ export class ThreeSixtyReportsService {
       LIMIT 8
     `);
 
-    const deliveryTrend = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const deliveryTrendP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH receipt_rollup AS (
         SELECT
           po.id AS purchase_order_id,
@@ -1138,7 +1206,7 @@ export class ThreeSixtyReportsService {
       ORDER BY month_bucket
     `);
 
-    const [priceVariance] = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const priceVarianceP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       WITH item_rates AS (
         SELECT
           mt.pid,
@@ -1178,7 +1246,36 @@ export class ThreeSixtyReportsService {
       FROM variances
     `);
 
-    const supplierPerformance = isAllSuppliers ? null : await this.getSupplierPerformanceSnapshot(tenantId, supplier, ctx);
+    const supplierPerformanceP = isAllSuppliers
+      ? Promise.resolve(null)
+      : this.getSupplierPerformanceSnapshot(tenantId, supplier, ctx);
+
+    // Independent reads — resolve concurrently (SQL unchanged, execution only).
+    const [
+      purchaseRows,
+      payable,
+      performanceRows,
+      topItems,
+      monthlyTrend,
+      openOrders,
+      deliveryTrend,
+      priceVarianceRows,
+      supplierPerformance,
+    ] = await Promise.all([
+      purchaseP,
+      payableP,
+      performanceP,
+      topItemsP,
+      monthlyTrendP,
+      openOrdersP,
+      deliveryTrendP,
+      priceVarianceP,
+      supplierPerformanceP,
+    ]);
+    const [purchase] = purchaseRows;
+    const [performance] = performanceRows;
+    const [priceVariance] = priceVarianceRows;
+
     const performanceView = {
       ...performance,
       on_time_delivery_pct: supplierPerformance?.on_time_delivery_pct ?? performance.on_time_delivery_pct,
@@ -1342,7 +1439,7 @@ export class ThreeSixtyReportsService {
       OR (UPPER(${mv}.type) = 'R' AND ${mt}.type IN ('R', 'W'))
       OR (UPPER(${mv}.type) = 'T' AND ${mt}.type IN ('X', 'T'))
       OR (UPPER(${mv}.type) = 'W' AND ${mt}.type IN ('W', 'R'))
-    )`;
+    ) AND ${mt}.is_cancelled = FALSE`;
   }
 
   private compatiblePurchaseLineSql(voucherAlias: string, transactionAlias: string): Prisma.Sql {
@@ -1355,7 +1452,7 @@ export class ThreeSixtyReportsService {
       (UPPER(${mv}.type) = 'P' AND ${mt}.type IN ('P', 'Q'))
       OR (UPPER(${mv}.type) = 'B' AND ${mt}.type = 'B')
       OR (UPPER(${mv}.type) = 'Q' AND ${mt}.type IN ('Q', 'B'))
-    )`;
+    ) AND ${mt}.is_cancelled = FALSE`;
   }
 
   private async findItem(tenantId: string, search?: string) {
