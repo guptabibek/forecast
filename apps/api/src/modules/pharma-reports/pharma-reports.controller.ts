@@ -27,7 +27,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { MargEdeService } from '../marg-ede/marg-ede.service';
+import { MargOutstandingService } from '../marg-ede/marg-outstanding.service';
 import {
     ABCAnalysisFilterDto,
     AlertConfigDto,
@@ -72,7 +72,7 @@ export class PharmaReportsController {
     private readonly dashboardKpi: DashboardKpiService,
     private readonly inventoryAlerts: InventoryAlertsService,
     private readonly reportExport: ReportExportService,
-    private readonly margEdeService: MargEdeService,
+    private readonly margOutstanding: MargOutstandingService,
     private readonly threeSixtyReports: ThreeSixtyReportsService,
     private readonly salesPurchaseAnalysis: SalesPurchaseAnalysisService,
     private readonly accountingReports: AccountingReportsService,
@@ -627,7 +627,7 @@ export class PharmaReportsController {
       ? partyType
       : 'ALL';
 
-    return this.margEdeService.getMargOutstandingSummary(user.tenantId, {
+    return this.margOutstanding.getMargOutstandingSummary(user.tenantId, {
       partyType: normalizedType,
       companyId: companyId ? Number(companyId) : undefined,
       limit: limit ? Number(limit) : undefined,
@@ -670,7 +670,7 @@ export class PharmaReportsController {
       ? partyType
       : 'ALL';
 
-    return this.margEdeService.getMargOutstandingByGroup(user.tenantId, {
+    return this.margOutstanding.getMargOutstandingByGroup(user.tenantId, {
       partyType: normalizedType,
       companyId: companyId ? Number(companyId) : undefined,
       limit: limit ? Number(limit) : undefined,
@@ -708,7 +708,7 @@ export class PharmaReportsController {
     @Query('bucketBoundaries') bucketBoundaries?: string,
     @Query('bucketIndex') bucketIndex?: string,
   ) {
-    return this.margEdeService.getMargOutstandingDetail(user.tenantId, partyCode, {
+    return this.margOutstanding.getMargOutstandingDetail(user.tenantId, partyCode, {
       companyId: companyId ? Number(companyId) : undefined,
       includeSettled: includeSettled === 'true' || includeSettled === '1',
       limit: limit ? Number(limit) : undefined,
@@ -746,7 +746,7 @@ export class PharmaReportsController {
     @Query('sortDir') sortDir?: string,
     @Query('filters') filters?: string,
   ) {
-    return this.margEdeService.getMargPartyLedger(user.tenantId, partyCode, {
+    return this.margOutstanding.getMargPartyLedger(user.tenantId, partyCode, {
       companyId: companyId ? Number(companyId) : undefined,
       fromDate,
       toDate,

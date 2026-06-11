@@ -1,5 +1,6 @@
 import { ActualType, InventoryTransactionType, LedgerEntryType } from '@prisma/client';
 import { MargEdeService } from './marg-ede.service';
+import { MargOutstandingService } from './marg-outstanding.service';
 import { MARG_SYNC_MODE, MARG_SYNC_SCOPE } from './marg-sync.types';
 
 describe('MargEdeService helpers', () => {
@@ -1826,7 +1827,8 @@ describe('MargEdeService helpers', () => {
     // by MDis.Type=P (purchase invoices); Book P rows have no MDis header and
     // carry bank-payment remarks (e.g. "STAN CHART BANK..."). The earlier
     // mapping had A and P swapped.
-    const helper = service as any;
+    // describeMargBook moved to MargOutstandingService (read-model extraction).
+    const helper = new MargOutstandingService({} as any) as any;
     expect(helper.describeMargBook('S')).toBe('Sales');
     expect(helper.describeMargBook('A')).toBe('Purchase');
     expect(helper.describeMargBook('P')).toBe('Payment');

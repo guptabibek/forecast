@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { LineChart, PieChart } from '../../components/charts';
 import { DetailPopupActions } from '../../components/reports/DetailPopupActions';
 import type { Column } from '../../components/ui';
@@ -55,8 +55,17 @@ function rowValue(row: Record<string, unknown>, key: string) {
   return String(value);
 }
 
-const ALL_DIMENSION_TABS: Array<{ key: SalesPurchaseDimension; label: string; description: string; pharmaOnly?: boolean }> = [
+const ALL_DIMENSION_TABS: Array<{
+  key: SalesPurchaseDimension;
+  label: string;
+  description: string;
+  pharmaOnly?: boolean;
+  salesOnly?: boolean;
+  purchaseOnly?: boolean;
+}> = [
   { key: 'salesman', label: 'Salesman', description: 'Sales by Salesman / MR — top performers and laggards' },
+  { key: 'customer', label: 'Customer', description: 'Sales by customer / party — top buyers ranked by value & share', salesOnly: true },
+  { key: 'supplier', label: 'Supplier', description: 'Purchases by supplier / party — top vendors ranked by value & share', purchaseOnly: true },
   { key: 'salt', label: 'Salt', description: 'Sales by drug salt (active ingredient) — therapeutic mix', pharmaOnly: true },
   { key: 'productCompany', label: 'Top Companies', description: 'Manufacturer / Marketer ranking by value' },
   { key: 'productGroup', label: 'Top Groups', description: 'Therapeutic group / classification ranking' },
@@ -84,8 +93,20 @@ const SCOPE_TABS: Array<{ key: ScopeKey; label: string; hint: string }> = [
 
 export default function SalesPurchaseAnalysisPage() {
   const { isPharma } = useTenantConfig();
-  const DIMENSION_TABS = useMemo(() => ALL_DIMENSION_TABS.filter((d) => !d.pharmaOnly || isPharma), [isPharma]);
   const [kind, setKind] = useState<SalesPurchaseAnalysisKind>('sales');
+  // Customer is a sales-only dimension; Supplier is purchase-only. Everything
+  // else is shared. The list is kind-aware so the irrelevant party dimension
+  // never shows for the other side.
+  const DIMENSION_TABS = useMemo(
+    () =>
+      ALL_DIMENSION_TABS.filter(
+        (d) =>
+          (!d.pharmaOnly || isPharma) &&
+          (!d.salesOnly || kind === 'sales') &&
+          (!d.purchaseOnly || kind === 'purchase'),
+      ),
+    [isPharma, kind],
+  );
   const [view, setView] = useState<ViewKey>('overview');
   // Document scope: invoices (default) / returns / net-of-returns. Threaded
   // into every query as `scope`; the backend defaults to 'invoice' so this is
@@ -93,6 +114,15 @@ export default function SalesPurchaseAnalysisPage() {
   const [scope, setScope] = useState<'invoice' | 'return' | 'net'>('invoice');
   const [drilldown, setDrilldown] = useState<Drilldown>(null);
   const [dimension, setDimension] = useState<SalesPurchaseDimension>('salesman');
+
+  // Switching kind (sales ⇄ purchase) can strand the user on a party dimension
+  // that no longer applies (customer on purchase, supplier on sales). Snap back
+  // to a shared default so the By-Dimension grid never queries an invalid combo.
+  useEffect(() => {
+    if (!DIMENSION_TABS.some((d) => d.key === dimension)) {
+      setDimension('salesman');
+    }
+  }, [DIMENSION_TABS, dimension]);
 
   type SortDir = 'asc' | 'desc';
   const [partiesSort, setPartiesSort] = useState<{ key: 'value' | 'share'; dir: SortDir } | null>(null);

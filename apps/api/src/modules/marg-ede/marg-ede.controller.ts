@@ -33,6 +33,7 @@ import {
     UpdateMargGlMappingRuleDto,
 } from './dto';
 import { MargEdeService } from './marg-ede.service';
+import { MargOutstandingService } from './marg-outstanding.service';
 import { MARG_SYNC_MODE, MARG_SYNC_SCOPE, MargSyncMode, MargSyncScope } from './marg-sync.types';
 
 @ApiTags('Marg EDE Integration')
@@ -45,6 +46,7 @@ export class MargEdeController {
 
   constructor(
     private readonly margEdeService: MargEdeService,
+    private readonly margOutstandingService: MargOutstandingService,
     private readonly auditService: AuditService,
     @Optional() @InjectQueue(QUEUE_NAMES.MARG_SYNC) private readonly margSyncQueue: Queue | null,
   ) {}
@@ -894,7 +896,7 @@ export class MargEdeController {
     const normalizedType = partyType === 'CUSTOMER' || partyType === 'SUPPLIER' || partyType === 'ALL'
       ? partyType
       : 'ALL';
-    return this.margEdeService.getMargOutstandingSummary(user.tenantId, {
+    return this.margOutstandingService.getMargOutstandingSummary(user.tenantId, {
       partyType: normalizedType,
       companyId: companyId ? Number(companyId) : undefined,
       limit: limit ? Number(limit) : undefined,
@@ -916,7 +918,7 @@ export class MargEdeController {
     @Query('companyId') companyId?: string,
     @Query('includeSettled') includeSettled?: string,
   ) {
-    return this.margEdeService.getMargOutstandingDetail(user.tenantId, partyCode, {
+    return this.margOutstandingService.getMargOutstandingDetail(user.tenantId, partyCode, {
       companyId: companyId ? Number(companyId) : undefined,
       includeSettled: includeSettled === 'true' || includeSettled === '1',
     });
@@ -943,7 +945,7 @@ export class MargEdeController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    return this.margEdeService.getMargPartyLedger(user.tenantId, partyCode, {
+    return this.margOutstandingService.getMargPartyLedger(user.tenantId, partyCode, {
       companyId: companyId ? Number(companyId) : undefined,
       fromDate,
       toDate,
