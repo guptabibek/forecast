@@ -1,8 +1,10 @@
 import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
-import { AiAccessStatus } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { AiAccessStatus, AiUsageBillingStatus, Prisma } from '@prisma/client';
 import { TenantCacheService } from '../../core/cache/tenant-cache.service';
 import { PrismaService } from '../../core/database/prisma.service';
 import { AiAccessService } from '../ai-billing/access.service';
+import { WalletService } from '../ai-billing/wallet.service';
 import { AiReportingService } from '../ai-reporting/ai-reporting.service';
 import { SemanticReportQuery } from '../ai-reporting/semantic-query.types';
 import {
@@ -38,7 +40,23 @@ export class InsightGenerationService {
     @Inject(INSIGHT_PROVIDERS) private readonly providers: IInsightProvider[],
     // AI governance: suspended/disabled tenants get no fresh insights.
     @Optional() private readonly billingAccess?: AiAccessService,
+    // Insight generation is metered: a flat per-provider-run fee is reserved
+    // before the cycle and settled for the providers that actually ran.
+    @Optional() private readonly billingWallet?: WalletService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
+
+  /** Credits charged per insight provider run (no LLM tokens are involved —
+   *  this prices the platform compute). 0 disables insight metering. */
+  private providerRunFee(): Prisma.Decimal {
+    const raw = Number(this.config?.get('AI_INSIGHTS_PROVIDER_RUN_FEE') ?? 0.01);
+    return new Prisma.Decimal(Number.isFinite(raw) && raw >= 0 ? raw : 0.01);
+  }
+
+  private billingEnforced(): boolean {
+    const raw = String(this.config?.get('AI_BILLING_ENFORCEMENT') ?? 'true').trim().toLowerCase();
+    return ['true', '1', 'yes', 'on'].includes(raw);
+  }
 
   listRegisteredProviders(): Array<{ providerId: string; displayName: string; category: string; defaultEnabled: boolean }> {
     return this.providers.map((provider) => ({
@@ -133,6 +151,29 @@ export class InsightGenerationService {
     const configById = new Map(configs.map((config) => [config.providerId, config]));
     const providerFilter = options?.providerIds?.length ? new Set(options.providerIds) : null;
 
+    // Which providers will actually run (for the credit reservation).
+    const runnable = this.providers.filter((provider) => {
+      if (providerFilter && !providerFilter.has(provider.providerId)) return false;
+      const config = configById.get(provider.providerId);
+      return config ? config.enabled : provider.defaultEnabled;
+    });
+
+    // Metering: reserve fee × planned providers up front (insufficient
+    // credits = no insights, like every other AI surface), settle for the
+    // providers that actually ran. Throws 402 to manual/pin callers; the
+    // cron's per-tenant try/catch absorbs it for scheduled cycles.
+    const fee = this.providerRunFee();
+    let reservationId: string | null = null;
+    const metered = Boolean(this.billingWallet) && this.billingEnforced() && fee.greaterThan(0) && runnable.length > 0;
+    if (metered) {
+      const reservation = await this.billingWallet!.reserveCredits({
+        tenantId,
+        userId: null,
+        amount: fee.times(runnable.length),
+      });
+      reservationId = reservation.id;
+    }
+
     const systemUser = {
       id: INSIGHT_SYSTEM_USER_ID,
       tenantId,
@@ -152,11 +193,9 @@ export class InsightGenerationService {
     let insightsUpserted = 0;
     let insightsArchived = 0;
 
-    for (const provider of this.providers) {
-      if (providerFilter && !providerFilter.has(provider.providerId)) continue;
+    try {
+    for (const provider of runnable) {
       const config = configById.get(provider.providerId);
-      const enabled = config ? config.enabled : provider.defaultEnabled;
-      if (!enabled) continue;
 
       const ctx: InsightProviderContext = {
         tenantId,
@@ -192,12 +231,57 @@ export class InsightGenerationService {
         await this.recordProviderRun(tenantId, provider.providerId, 'error', message);
       }
     }
+    } finally {
+      // Settle the metering hold: charge for the providers that actually ran
+      // (zero charge just releases the hold). Crash-safe via finally.
+      if (reservationId) {
+        await this.settleGenerationCharge(tenantId, reservationId, fee, providersRun);
+      }
+    }
 
     await this.cache.invalidateNamespace(tenantId, INSIGHTS_CACHE_NAMESPACE);
     this.logger.log(
       `Insight generation finished: tenantId=${tenantId}, providers=${providersRun}, failed=${providersFailed}, upserted=${insightsUpserted}, archived=${insightsArchived}`,
     );
     return { tenantId, providersRun, providersFailed, insightsUpserted, insightsArchived };
+  }
+
+  /**
+   * Charge the insight-generation fee through the standard ledger lifecycle
+   * and record a token-less usage log row so the spend shows up in customer
+   * usage history and platform reporting.
+   */
+  private async settleGenerationCharge(tenantId: string, reservationId: string, fee: Prisma.Decimal, providersRun: number) {
+    try {
+      const charge = fee.times(providersRun);
+      const result = await this.billingWallet!.finalizeReservation(reservationId, charge, {
+        createdById: null,
+        notes: `AI insights generation (${providersRun} provider run${providersRun === 1 ? '' : 's'})`,
+      });
+      if (charge.greaterThan(0)) {
+        await this.prisma.aiUsageLog.create({
+          data: {
+            tenantId,
+            userId: null,
+            providerName: 'platform',
+            modelCode: 'insights-generation',
+            callType: 'insights_generation',
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            providerCost: new Prisma.Decimal(0),
+            customerCharge: charge,
+            margin: charge,
+            reservationId,
+            transactionId: result.transaction?.id ?? null,
+            status: AiUsageBillingStatus.CHARGED,
+            metadata: { providersRun },
+          },
+        });
+      }
+    } catch (error: any) {
+      this.logger.error(`Insight generation charge settle failed for tenant ${tenantId}: ${String(error?.message ?? error)}`);
+    }
   }
 
   private async upsertInsight(tenantId: string, provider: IInsightProvider, candidate: InsightCandidate, runStarted: Date) {
