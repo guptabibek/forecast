@@ -58,8 +58,9 @@ const ASC_WORDS = /\b(bottom|worst|lowest|least|smallest|minimum)\b/;
 // question" fallback, which would otherwise capture the MEASURE ("lowest
 // sales" → "sales") instead of the entity ("routes with lowest sales").
 const NOUN_PATTERNS: RegExp[] = [
-  // "top 5 routes with/by/in most sales", "top 10 customers by revenue"
-  /\b(?:top|bottom|best|worst|highest|lowest|largest|biggest|leading)\s+(?:\d{1,3}\s+)?(?:performing\s+|selling\s+|profitable\s+|growing\s+|moving\s+)?([a-z][a-z _-]{1,40}?)\s+(?:with|by|in|on|of|for|across|based|this|last|that|having|contributing)\b/,
+  // "top 5 routes with/by/in most sales", "top 10 customers by revenue",
+  // "top 10 items whose sales decreased"
+  /\b(?:top|bottom|best|worst|highest|lowest|largest|biggest|leading)\s+(?:\d{1,3}\s+)?(?:performing\s+|selling\s+|profitable\s+|growing\s+|moving\s+)?([a-z][a-z _-]{1,40}?)\s+(?:with|by|in|on|of|for|across|based|this|last|that|whose|where|having|contributing)\b/,
   // "cities with highest purchase", "routes having the lowest sales"
   /\b([a-z][a-z _-]{1,40}?)\s+(?:with|having|by)\s+(?:the\s+)?(?:most|highest|lowest|least|largest|smallest|best|worst|maximum|minimum|top)\b/,
   // "states contributing highest revenue", "areas generating the most sales"
@@ -165,6 +166,90 @@ export function repairDatasetCoherence(
     assumptions: [
       ...(query.assumptions ?? []),
       'Adjusted metric/dimension identifiers to the selected dataset.',
+    ],
+  };
+}
+
+export interface ChangeRankingIntent {
+  /** 'decrease' ranks most-negative change first (asc); 'increase' the reverse. */
+  direction: 'decrease' | 'increase';
+  comparisonType: 'previous_period' | 'previous_year';
+  limit: number | null;
+}
+
+const DECREASE_WORDS = /\b(decreas\w*|declin\w*|drop\w*|fell|fall\w*|down|shrink\w*|reduc\w*|degrowth|lost|losing)\b/;
+const INCREASE_WORDS = /\b(increas\w*|grow\w*|growth|rise|rising|rose|gain\w*|jump\w*|up)\b/;
+const PERIOD_REFERENCE = /\b(previous|last|prior|compared?|compare|vs|versus|than)\b.*\b(month|week|quarter|year|period)\b|\b(month|week|quarter|year|period)\s+(over|on)\s+(month|week|quarter|year|period)\b/;
+
+/**
+ * "Top N <entity> whose <measure> decreased/increased compared to the
+ * previous <period>" — a ranking over the PERIOD-OVER-PERIOD DELTA, which the
+ * stacked comparison listing can never answer. Detected deterministically so
+ * the engine repairs LLM output that degraded to two period lists or a
+ * single-period ranking.
+ */
+export function detectChangeRankingIntent(question: string): ChangeRankingIntent | null {
+  const text = normalize(question);
+  if (!PERIOD_REFERENCE.test(text)) return null;
+  const decrease = DECREASE_WORDS.test(text);
+  const increase = INCREASE_WORDS.test(text);
+  if (!decrease && !increase) return null;
+
+  const limitMatch = text.match(/\b(?:top|bottom|first)\s+(\d{1,3})\b/);
+  const limit = limitMatch ? Number(limitMatch[1]) : null;
+  return {
+    // "decrease" wins when both appear ("items going down despite growth …").
+    direction: decrease ? 'decrease' : 'increase',
+    comparisonType: /\b(year|yoy)\b/.test(text) && !/\bmonth\b/.test(text) ? 'previous_year' : 'previous_period',
+    limit: limit && limit >= 1 && limit <= 500 ? limit : null,
+  };
+}
+
+/**
+ * Ensures a change-ranking question compiles as one: comparison.rankBy =
+ * 'change', sort direction from increase/decrease, a grouping dimension
+ * (resolved from the question when the LLM dropped it), and a current-period
+ * time range. No-op for questions without change-ranking intent.
+ */
+export function repairChangeRankingIntent(
+  question: string,
+  query: SemanticReportQuery,
+  catalog: SemanticCatalog,
+): SemanticReportQuery {
+  if (query.queryKind !== 'single_report' || !query.metrics?.length) return query;
+  const intent = detectChangeRankingIntent(question);
+  if (!intent) return query;
+
+  // Dimension: keep the LLM's, otherwise resolve the ranked noun ourselves.
+  let dimensions = query.dimensions ?? [];
+  if (!dimensions.length) {
+    const ranking = detectRankingIntent(question);
+    const dimension = ranking?.noun ? resolveGroupingDimension(ranking.noun, query.datasetId, catalog) : null;
+    if (!dimension) return query; // cannot rank change without a dimension
+    dimensions = [dimension.dimensionId];
+  }
+
+  const direction = intent.direction === 'decrease' ? 'asc' : 'desc';
+  return {
+    ...query,
+    mode: 'comparison',
+    analysisType: 'ranking',
+    dimensions,
+    displayColumns: [],
+    comparison: {
+      enabled: true,
+      type: query.comparison?.type === 'previous_year' || intent.comparisonType === 'previous_year' ? 'previous_year' : 'previous_period',
+      startDate: null,
+      endDate: null,
+      rankBy: 'change',
+    },
+    // Current period defaults to this month when the question gave none.
+    timeRange: query.timeRange ?? { preset: 'this_month' },
+    sort: [{ metricId: query.metrics[0], direction }],
+    limit: intent.limit ?? query.limit ?? 10,
+    assumptions: [
+      ...(query.assumptions ?? []),
+      `Ranking by ${intent.direction} in ${query.metrics[0]} versus the ${intent.comparisonType === 'previous_year' ? 'same period last year' : 'previous period'}.`,
     ],
   };
 }

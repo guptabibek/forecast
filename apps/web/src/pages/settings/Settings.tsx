@@ -15,7 +15,6 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { z } from 'zod';
-import { AiProviderSettingsPanel } from './AiProviderSettingsPanel';
 
 /* --- Backend response shape --- */
 interface TenantSettings {
@@ -527,7 +526,20 @@ export default function Settings() {
                       </label>
                     </div>
                     <div className="mt-6 border-t border-secondary-200 pt-6">
-                      <AiProviderSettingsPanel />
+                      {/* Provider configuration moved to the centralized AI
+                          Billing platform: keys, models, and pricing are
+                          managed by the platform administrator only. */}
+                      <div className="rounded-lg border border-primary-100 bg-primary-50/60 p-4 dark:border-primary-900 dark:bg-primary-900/20">
+                        <h3 className="text-sm font-semibold text-secondary-900 dark:text-white">AI provider &amp; billing</h3>
+                        <p className="mt-1 text-xs text-secondary-600 dark:text-secondary-400">
+                          AI providers, models, and API keys are managed centrally by the platform.
+                          Your workspace uses prepaid AI credits — view your balance, buy credits,
+                          and see token-level usage on the AI Billing page.
+                        </p>
+                        <a href="/billing/ai" className="mt-2 inline-block text-sm font-medium text-primary-600 hover:text-primary-700">
+                          Open AI Billing →
+                        </a>
+                      </div>
                     </div>
                   </div>
                 </>

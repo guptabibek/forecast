@@ -55,7 +55,16 @@
       "Bash(awk '{print $2}')",
       "Bash(curl -s -o /dev/null -w \"3080 status: %{http_code}, type: %{content_type}\\\\n\" http://localhost:3080/)",
       "Bash(curl -s http://localhost:4001/api/v1/health)",
-      "Bash(curl -s -o /dev/null -w \"4001 /api/v1: %{http_code}\\\\n\" http://localhost:4001/api/v1)"
+      "Bash(curl -s -o /dev/null -w \"4001 /api/v1: %{http_code}\\\\n\" http://localhost:4001/api/v1)",
+      "Bash(sed -n '/private encryptSecret/,/^  }/p' src/modules/ai-reporting/ai-provider.service.ts)",
+      "Bash(sed -n '/private decryptSecret/,/^  }/p' src/modules/ai-reporting/ai-provider.service.ts)",
+      "Bash(sed -n '/private encryptionKey/,/^  }/p' src/modules/ai-reporting/ai-provider.service.ts)",
+      "Bash(sed -n '1,40p' src/main.ts)",
+      "Bash(cd \"d:\\\\RabbitTech\\\\forecast-saas\\\\apps\\\\api\" && grep -n \"CREATE TYPE\\\\|AddForeignKey\\\\|^ALTER TABLE.*ADD CONSTRAINT\" /tmp/billing_migration.sql | sed -n '1,50p')",
+      "Read(//tmp/**)",
+      "Bash(grep -n 'tenantId\\\\|TENANT_SCOPED\\\\|EXCLUDED\\\\|middleware\\\\|$use\\\\|$extends' src/core/database/prisma.service.ts)",
+      "Bash(grep -vE \"^\\\\s*$\")",
+      "Bash(curl -s -o /dev/null http://localhost:4001/api/v1)"
     ]
   }
 }

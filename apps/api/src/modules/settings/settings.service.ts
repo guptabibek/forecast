@@ -537,13 +537,29 @@ export class SettingsService {
     );
     const row = rows[0];
 
-    // Module enablement is now the SA-level switch; the per-tenant row's `enabled`
-    // is the admin-level toggle. Module check is enforced by ModuleGuard at the
-    // controller, so here we only surface the tenant flag for UI display.
     const moduleEnabled = await this.isModuleEnabled(tenantId, 'ai-reporting');
 
+    // Centralized AI billing platform: AI is "on" for a tenant when the super
+    // admin enabled the module AND a centrally configured provider+model with
+    // credentials exists (tenants no longer manage providers/keys). The
+    // legacy per-tenant config row is honored only while the central registry
+    // is empty (transition deployments).
+    const central = await this.prisma.$queryRawUnsafe<Array<{ ready: number }>>(
+      `SELECT COUNT(*)::int AS ready
+       FROM ai_billing_models m
+       JOIN ai_billing_providers p ON p.id = m.provider_id
+       WHERE m.status = 'ACTIVE' AND p.status = 'ACTIVE' AND p.api_key_encrypted IS NOT NULL`,
+    ).then((r) => (r[0]?.ready ?? 0) > 0).catch(() => false);
+    // The legacy per-tenant config only counts while billing enforcement is
+    // OFF — with enforcement on, the execution pipeline refuses legacy calls,
+    // so advertising AI as enabled would show menus that lead to errors.
+    const enforcement = ['true', '1', 'yes', 'on'].includes(
+      String(process.env.AI_BILLING_ENFORCEMENT ?? 'true').trim().toLowerCase(),
+    );
+    const credentialsConfigured = central || (!enforcement && (row?.enabled ?? false));
+
     return {
-      enabled: moduleEnabled && (row?.enabled ?? false),
+      enabled: moduleEnabled && credentialsConfigured,
       environmentEnabled: moduleEnabled,
       summariesEnabled: row?.summaries_enabled ?? true,
       maxRows: row?.max_result_rows ?? 500,

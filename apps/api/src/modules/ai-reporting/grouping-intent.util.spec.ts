@@ -1,6 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { detectRankingIntent, repairDatasetCoherence, repairGroupingIntent } from './grouping-intent.util';
+import {
+  detectChangeRankingIntent,
+  detectRankingIntent,
+  repairChangeRankingIntent,
+  repairDatasetCoherence,
+  repairGroupingIntent,
+} from './grouping-intent.util';
 import { SemanticCatalog, SemanticReportQuery } from './semantic-query.types';
 
 // Tests run against the REAL shipped catalog so they also prove the regional
@@ -125,6 +131,70 @@ describe('repairGroupingIntent', () => {
     const { repaired, unsupportedNoun } = repairGroupingIntent('Top 5 gizmos with most sales', degradedQuery(), catalog);
     expect(repaired).toBe(false);
     expect(unsupportedNoun).toBeUndefined();
+  });
+});
+
+describe('change-ranking intent (delta vs previous period)', () => {
+  it.each([
+    ['top 10 item whose sale decrease compare to previous month', 'decrease', 'previous_period', 10],
+    ['top 5 customers with biggest drop in sales vs last month', 'decrease', 'previous_period', 5],
+    ['products whose sales declined compared to previous quarter', 'decrease', 'previous_period', null],
+    ['top 10 items with highest growth over last month', 'increase', 'previous_period', 10],
+    ['customers with biggest increase in purchase vs last year', 'increase', 'previous_year', null],
+  ])('"%s" → %s/%s limit=%s', (question, direction, comparisonType, limit) => {
+    const intent = detectChangeRankingIntent(question);
+    expect(intent).not.toBeNull();
+    expect(intent!.direction).toBe(direction);
+    expect(intent!.comparisonType).toBe(comparisonType);
+    expect(intent!.limit).toBe(limit);
+  });
+
+  it('ignores questions without a previous-period reference or change vocabulary', () => {
+    expect(detectChangeRankingIntent('top 10 customers by revenue')).toBeNull();
+    expect(detectChangeRankingIntent('total sales this month')).toBeNull();
+    expect(detectChangeRankingIntent('sales compared to previous month')).toBeNull();
+  });
+
+  it('repairs the exact failing NLQ into a change-ranked comparison query', () => {
+    // The LLM degraded this to a stacked comparison sorted ascending.
+    const degraded = degradedQuery({
+      mode: 'comparison',
+      dimensions: ['sales_net_product'],
+      displayColumns: [],
+      comparison: { enabled: true, type: 'previous_period', startDate: null, endDate: null },
+      timeRange: { preset: 'this_month' },
+      limit: 10,
+    });
+    const repaired = repairChangeRankingIntent('top 10 item whose sale decrease compare to previous month', degraded, catalog);
+    expect(repaired.comparison).toMatchObject({ enabled: true, type: 'previous_period', rankBy: 'change' });
+    expect(repaired.mode).toBe('comparison');
+    expect(repaired.sort).toEqual([{ metricId: 'sales_net_amount', direction: 'asc' }]);
+    expect(repaired.limit).toBe(10);
+  });
+
+  it('resolves the dimension itself when the LLM dropped it, and defaults the current period', () => {
+    const repaired = repairChangeRankingIntent(
+      'top 10 items whose sales decreased compared to previous month',
+      degradedQuery({ dimensions: [], displayColumns: [], timeRange: undefined }),
+      catalog,
+    );
+    expect(repaired.dimensions).toEqual(['sales_net_product']);
+    expect(repaired.timeRange).toEqual({ preset: 'this_month' });
+    expect(repaired.comparison?.rankBy).toBe('change');
+  });
+
+  it('growth questions rank descending', () => {
+    const repaired = repairChangeRankingIntent(
+      'top 10 products with highest growth vs previous month',
+      degradedQuery({ dimensions: ['sales_net_product'], displayColumns: [] }),
+      catalog,
+    );
+    expect(repaired.sort).toEqual([{ metricId: 'sales_net_amount', direction: 'desc' }]);
+  });
+
+  it('leaves non-change questions untouched', () => {
+    const input = degradedQuery();
+    expect(repairChangeRankingIntent('Top 10 customers by revenue', input, catalog)).toBe(input);
   });
 });
 

@@ -49,6 +49,7 @@ const navigation: NavigationItem[] = [
   // separate `reports` module. Gating lives in canShowNavItem.
   { name: 'AI Reporting', href: '/reports/ai', icon: SparklesIcon, module: 'ai-reporting' },
   { name: 'AI Insights', href: '/insights', icon: SparklesIcon, module: 'ai-reporting' },
+  { name: 'AI Billing', href: '/billing/ai', icon: CurrencyDollarIcon, module: 'ai-reporting' },
   {
     name: 'Planning & Forecasting',
     module: 'planning',
@@ -122,6 +123,7 @@ const navigation: NavigationItem[] = [
     module: 'platform-admin',
     items: [
       { name: 'Tenants', href: '/platform', icon: WrenchScrewdriverIcon, module: 'platform-admin' },
+      { name: 'AI Management', href: '/platform/ai-billing', icon: SparklesIcon, module: 'platform-admin' },
     ],
   },
 ];
@@ -172,7 +174,7 @@ export default function Sidebar({
     (navItem: NavItemType) => {
       // AI menus are governed solely by the two AI conditions above — no role,
       // permission, or other module checks.
-      if (navItem.href === '/reports/ai' || navItem.href === '/insights') {
+      if (navItem.href === '/reports/ai' || navItem.href === '/insights' || navItem.href === '/billing/ai') {
         return aiReportingEnabled;
       }
       return canShowSidebarHref(role, navItem.href) && isModuleEnabled(navItem.module);

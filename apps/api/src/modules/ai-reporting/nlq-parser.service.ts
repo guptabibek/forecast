@@ -4,7 +4,7 @@ import { CLARIFICATION_RESPONSE_RULES } from './prompts/clarification.prompt';
 import { buildDashboardPlannerPrompt } from './prompts/dashboard-planner.prompt';
 import { NLQ_PROMPT_VERSION, NLQ_SYSTEM_PROMPT } from './prompts/nlq-system.prompt';
 import { buildSemanticQueryGenerationPrompt } from './prompts/semantic-query-generation.prompt';
-import { repairDatasetCoherence, repairGroupingIntent } from './grouping-intent.util';
+import { repairChangeRankingIntent, repairDatasetCoherence, repairGroupingIntent } from './grouping-intent.util';
 import { SemanticCatalogLoader } from './semantic-catalog.loader';
 import {
   AiReportAnalysisType,
@@ -153,8 +153,9 @@ export class NlqParserService {
     if (query.queryKind !== 'single_report') return query;
     const catalog = this.catalogLoader.getCatalog();
     // First normalize stray sibling-dataset IDs (dataset right, vocabulary
-    // wrong), then repair dropped grouping intent.
-    const coherent = repairDatasetCoherence(query, catalog);
+    // wrong), then shape change-ranking questions (delta vs previous period),
+    // then repair dropped grouping intent.
+    const coherent = repairChangeRankingIntent(question, repairDatasetCoherence(query, catalog), catalog);
     const result = repairGroupingIntent(question, coherent, catalog);
     if (result.unsupportedNoun) {
       return {
@@ -351,6 +352,9 @@ export class NlqParserService {
       type,
       startDate: this.optionalString(value.startDate) ?? null,
       endDate: this.optionalString(value.endDate) ?? null,
+      // 'change' ranks by the period-over-period delta instead of stacking
+      // both periods ("top 10 items whose sales decreased vs last month").
+      ...(String(value.rankBy) === 'change' ? { rankBy: 'change' as const } : {}),
     };
   }
 

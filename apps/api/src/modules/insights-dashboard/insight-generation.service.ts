@@ -1,6 +1,8 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { AiAccessStatus } from '@prisma/client';
 import { TenantCacheService } from '../../core/cache/tenant-cache.service';
 import { PrismaService } from '../../core/database/prisma.service';
+import { AiAccessService } from '../ai-billing/access.service';
 import { AiReportingService } from '../ai-reporting/ai-reporting.service';
 import { SemanticReportQuery } from '../ai-reporting/semantic-query.types';
 import {
@@ -34,6 +36,8 @@ export class InsightGenerationService {
     private readonly aiReporting: AiReportingService,
     private readonly cache: TenantCacheService,
     @Inject(INSIGHT_PROVIDERS) private readonly providers: IInsightProvider[],
+    // AI governance: suspended/disabled tenants get no fresh insights.
+    @Optional() private readonly billingAccess?: AiAccessService,
   ) {}
 
   listRegisteredProviders(): Array<{ providerId: string; displayName: string; category: string; defaultEnabled: boolean }> {
@@ -115,6 +119,15 @@ export class InsightGenerationService {
    * never archives other providers' insights).
    */
   async generateForTenant(tenantId: string, options?: { providerIds?: string[] }): Promise<TenantGenerationResult> {
+    // AI access governance applies to insight computation too — a tenant
+    // whose AI is disabled or suspended gets no fresh insights.
+    if (this.billingAccess) {
+      const policy = await this.billingAccess.getEffectivePolicyForUser(tenantId);
+      if (policy.status !== AiAccessStatus.ENABLED) {
+        this.logger.log(`Insight generation skipped for tenant ${tenantId}: AI access ${policy.status}`);
+        return { tenantId, providersRun: 0, providersFailed: 0, insightsUpserted: 0, insightsArchived: 0 };
+      }
+    }
     const runStarted = new Date();
     const configs = await this.prisma.aiInsightProviderConfig.findMany({ where: { tenantId } });
     const configById = new Map(configs.map((config) => [config.providerId, config]));
