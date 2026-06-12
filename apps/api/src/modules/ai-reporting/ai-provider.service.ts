@@ -2,6 +2,8 @@ import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, Opt
 import { ConfigService } from '@nestjs/config';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/database/prisma.service';
+import { AiChargeService, ChargeTicket } from '../ai-billing/charge.service';
+import { AiRegistryService } from '../ai-billing/registry.service';
 import { AiReportingUnavailable } from './ai-reporting.errors';
 
 interface ChatMessage {
@@ -101,6 +103,8 @@ interface ResolvedProviderConfig {
   monthlyCostLimitCents?: number | null;
   inputTokenCostPer1mCents?: number | null;
   outputTokenCostPer1mCents?: number | null;
+  /** Set when resolved from the centralized AI billing registry. */
+  central?: { providerId: string; providerName: string; modelId: string } | null;
 }
 
 export interface AiTenantProviderSettingsUpdate {
@@ -159,6 +163,11 @@ export class AiProviderService {
   constructor(
     private readonly config: ConfigService,
     @Optional() private readonly prisma?: PrismaService,
+    // Centralized AI billing platform (optional so bare unit-spec construction
+    // keeps working). When present, keys/models come from the super-admin
+    // registry and every call runs the reserve→execute→settle lifecycle.
+    @Optional() private readonly billingRegistry?: AiRegistryService,
+    @Optional() private readonly billingCharge?: AiChargeService,
   ) {}
 
   async generateJson(
@@ -562,6 +571,24 @@ export class AiProviderService {
 
     const timeoutMs = resolved.timeoutMs;
     const maxTokens = options.maxTokens ?? resolved.maxTokens;
+
+    // Billing lifecycle: validate access, resolve pricing, reserve credits
+    // BEFORE the provider call. Throws 402/403 when the tenant must not run
+    // this request (insufficient credits, suspended access, spend limits).
+    let chargeTicket: ChargeTicket | null = null;
+    if (this.billingCharge && options.tenantId && resolved.central) {
+      chargeTicket = await this.billingCharge.prepare({
+        tenantId: options.tenantId,
+        userId: options.userId ?? null,
+        providerId: resolved.central.providerId,
+        providerName: resolved.central.providerName,
+        modelId: resolved.central.modelId,
+        modelCode: resolved.model,
+        callType: options.callType,
+        estimatedPromptTokens: Math.ceil(messages.reduce((sum, m) => sum + m.content.length, 0) / 4),
+        maxCompletionTokens: maxTokens,
+      });
+    }
     const body: Record<string, unknown> = {
       model: resolved.model,
       messages,
@@ -612,6 +639,20 @@ export class AiProviderService {
             latencyMs: Date.now() - started,
             usage: payload?.usage,
           });
+          if (chargeTicket) {
+            await this.billingCharge?.settle(chargeTicket, {
+              success: true,
+              executionMs: Date.now() - started,
+              requestId: options.requestId ?? null,
+              usage: {
+                promptTokens: this.optionalUsageInt(payload?.usage?.prompt_tokens) ?? 0,
+                completionTokens: this.optionalUsageInt(payload?.usage?.completion_tokens) ?? 0,
+                cachedTokens: this.optionalUsageInt(payload?.usage?.prompt_tokens_details?.cached_tokens) ?? 0,
+                reasoningTokens: this.optionalUsageInt(payload?.usage?.completion_tokens_details?.reasoning_tokens) ?? 0,
+                totalTokens: this.optionalUsageInt(payload?.usage?.total_tokens) ?? undefined,
+              },
+            });
+          }
           return content.trim();
         } catch (error: any) {
           if (error instanceof AiReportingUnavailable) throw error;
@@ -637,6 +678,14 @@ export class AiProviderService {
         errorCode: error?.response?.code ?? error?.response?.error ?? error?.name ?? 'AI_PROVIDER_ERROR',
         errorMessage: error?.response?.message ?? error?.message ?? 'AI provider request failed',
       });
+      if (chargeTicket) {
+        // Failed request: release the credit hold, log usage as FAILED, no charge.
+        await this.billingCharge?.settle(chargeTicket, {
+          success: false,
+          executionMs: Date.now() - started,
+          requestId: options.requestId ?? null,
+        });
+      }
       throw error;
     }
   }
@@ -650,9 +699,43 @@ export class AiProviderService {
     if (!tenantId) {
       throw new AiReportingUnavailable('AI reporting requires a tenant context');
     }
+
+    // Centralized AI platform first: providers/models/keys are super-admin
+    // managed in the billing registry, with priority-ordered failover.
+    if (this.billingRegistry) {
+      const target = await this.billingRegistry.resolveExecutionTarget(this.cleanString(modelOverride) ?? null);
+      if (target) {
+        return {
+          provider: 'openai',
+          model: target.model.modelCode,
+          summaryModel: null,
+          apiKey: target.provider.apiKey,
+          endpointUrl: target.provider.endpointUrl,
+          organizationId: target.provider.organizationId,
+          maxTokens: maxTokensOverride ?? 1500,
+          temperature: 0,
+          timeoutMs: AI_OPERATIONAL_DEFAULTS.timeoutMs,
+          central: {
+            providerId: target.provider.id,
+            providerName: target.provider.name,
+            modelId: target.model.id,
+          },
+        };
+      }
+      // With billing enforcement ON there is NO legacy fallback: an AI call
+      // that bypassed the central registry would run unmetered and unbilled.
+      // Enforcement OFF keeps the legacy per-tenant config as a transition
+      // path for deployments still seeding the registry.
+      if (this.billingCharge?.enforcementEnabled()) {
+        throw new AiReportingUnavailable(
+          'AI is not available: no active centrally configured provider/model. Ask the platform administrator to configure Administration → AI Management.',
+        );
+      }
+    }
+
     const row = await this.readTenantProviderConfig(tenantId);
     if (!row) {
-      throw new AiReportingUnavailable('Tenant AI provider is not configured — set it in Settings → AI Reporting');
+      throw new AiReportingUnavailable('AI provider is not configured — ask the platform administrator to configure AI Management');
     }
     if (!row.enabled) {
       throw new AiReportingUnavailable('Tenant AI provider configuration is disabled');

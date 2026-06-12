@@ -19,6 +19,12 @@ const DATE_FILTER_DATASETS = new Set([
   'sales_invoices',
   'purchase_items',
   'purchase_invoices',
+  // Net-of-returns rollups carry invoice_date and are the canonical targets
+  // for period comparisons and change rankings.
+  'sales_net',
+  'purchase_net',
+  'sales_returns',
+  'purchase_returns',
   'stock_ledger',
   'tax_register',
   'ledger_entries',
@@ -52,6 +58,9 @@ export class SqlCompilerService {
   compile(query: SemanticReportQuery, security: ReportingSecurityContext): CompiledSql {
     const dataset = this.required(this.catalog.getDataset(query.datasetId), `Unknown dataset ${query.datasetId}`);
     if (query.comparison?.enabled) {
+      if (query.comparison.rankBy === 'change' && query.dimensions?.length && query.metrics?.length) {
+        return this.compileChangeRanking(query, dataset, security);
+      }
       return this.compileComparison(query, dataset, security);
     }
     const select: string[] = [];
@@ -168,6 +177,104 @@ export class SqlCompilerService {
       selectedColumnMetadata: [
         { key: 'comparison_period', label: 'Comparison Period', dataType: 'string' },
         ...(current.selectedColumnMetadata ?? []),
+      ],
+    };
+  }
+
+  /**
+   * Rank dimension values by their CHANGE between the current and previous
+   * period ("top 10 items whose sales decreased vs previous month"). Both
+   * periods are aggregated per dimension value, FULL OUTER JOINed (so items
+   * that vanished or are new still rank), and ordered by the signed delta of
+   * the primary metric — ascending = biggest decreases first. Adds `change`
+   * (metric units) and `change_pct` columns.
+   */
+  private compileChangeRanking(query: SemanticReportQuery, dataset: CatalogDataset, security: ReportingSecurityContext): CompiledSql {
+    if (!DATE_FILTER_DATASETS.has(dataset.datasetId)) {
+      throw new AiReportingBadRequest('INVALID_SEMANTIC_QUERY', 'Change-ranking reports require a dataset date field');
+    }
+    const currentRange = this.resolveDateRange(query.timeRange, security);
+    if (!currentRange) {
+      throw new AiReportingBadRequest('INVALID_SEMANTIC_QUERY', 'Change-ranking reports require a current date range');
+    }
+    const comparisonRange = this.resolveComparisonRange(currentRange, query.comparison);
+
+    // Per-period aggregation must cover EVERY dimension value (ranking is on
+    // the join), so the user's limit applies only to the final ranked output.
+    const INNER_GROUP_LIMIT = 50000;
+    const innerQuery = (range: { startDate: string; endDate: string }): SemanticReportQuery => ({
+      ...query,
+      comparison: { enabled: false, type: 'none', startDate: null, endDate: null },
+      displayColumns: [],
+      sort: undefined,
+      limit: INNER_GROUP_LIMIT,
+      output: undefined,
+      timeRange: { ...query.timeRange, preset: 'custom', startDate: range.startDate, endDate: range.endDate },
+    });
+    const current = this.compile(innerQuery(currentRange), security);
+    const previous = this.compile(innerQuery(comparisonRange), security);
+    const offsetPreviousSql = previous.sql.replace(/\$(\d+)/g, (_match, index) => `$${Number(index) + current.params.length}`);
+
+    const metricIds = query.metrics;
+    const keyColumns = current.selectedColumns.filter((column) => !metricIds.includes(column));
+    if (!keyColumns.length) {
+      throw new AiReportingBadRequest('INVALID_SEMANTIC_QUERY', 'Change-ranking reports require a grouping dimension');
+    }
+    const primary = metricIds[0];
+    const primaryMetric = this.catalog.getMetric(primary);
+    const metaByKey = new Map((current.selectedColumnMetadata ?? []).map((column) => [column.key, column]));
+
+    // NULL-safe join: dimension columns can legitimately be NULL (unmapped
+    // ids). Spelled as a COALESCE equality because (a) the SQL safety
+    // validator reads "IS NOT DISTINCT FROM prev" as a table reference and
+    // (b) Postgres FULL JOIN requires hash-joinable conditions — OR-based
+    // null checks are rejected with 0A000.
+    const NULL_SENTINEL = `'__null__'`;
+    const joinCondition = keyColumns
+      .map((column) =>
+        `COALESCE(cur.${this.ident(column)}::text, ${NULL_SENTINEL}) = COALESCE(prev.${this.ident(column)}::text, ${NULL_SENTINEL})`)
+      .join(' AND ');
+    const selectKeys = keyColumns.map((column) => `COALESCE(cur.${this.ident(column)}, prev.${this.ident(column)}) AS ${this.ident(column)}`);
+    const selectMetrics = metricIds.flatMap((metricId) => [
+      `COALESCE(cur.${this.ident(metricId)}, 0) AS ${this.ident(metricId)}`,
+      `COALESCE(prev.${this.ident(metricId)}, 0) AS ${this.ident(`previous_${metricId}`)}`,
+    ]);
+    const changeExpr = `(COALESCE(cur.${this.ident(primary)}, 0) - COALESCE(prev.${this.ident(primary)}, 0))`;
+    const direction = String(query.sort?.[0]?.direction ?? 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    const params = [...current.params, ...previous.params];
+    const sql = [
+      `SELECT ${[...selectKeys, ...selectMetrics].join(', ')},`,
+      `${changeExpr} AS change,`,
+      `CASE WHEN COALESCE(prev.${this.ident(primary)}, 0) <> 0 THEN (${changeExpr} / ABS(prev.${this.ident(primary)}) * 100)::float8 END AS change_pct`,
+      `FROM (${current.sql}) cur`,
+      `FULL OUTER JOIN (${offsetPreviousSql}) prev ON ${joinCondition}`,
+      `ORDER BY change ${direction}, ${this.ident(keyColumns[0])}`,
+      `LIMIT $${params.length + 1}`,
+    ].join(' ');
+    params.push(query.limit ?? 10);
+
+    const metricLabel = primaryMetric?.displayName ?? this.toLabel(primary);
+    return {
+      sql,
+      params,
+      datasetId: dataset.datasetId,
+      viewName: dataset.viewName,
+      expectsRowsLimit: true,
+      appliedSecurityFilters: [...new Set([...current.appliedSecurityFilters, ...previous.appliedSecurityFilters])],
+      selectedColumns: [...keyColumns, ...metricIds.flatMap((metricId) => [metricId, `previous_${metricId}`]), 'change', 'change_pct'],
+      selectedColumnMetadata: [
+        ...keyColumns.map((column) => metaByKey.get(column) ?? { key: column, label: this.toLabel(column) }),
+        ...metricIds.flatMap((metricId) => {
+          const metric = this.catalog.getMetric(metricId);
+          const label = metric?.displayName ?? this.toLabel(metricId);
+          return [
+            { key: metricId, label: `${label} (Current)`, dataType: metric?.dataType },
+            { key: `previous_${metricId}`, label: `${label} (Previous)`, dataType: metric?.dataType },
+          ];
+        }),
+        { key: 'change', label: `Change in ${metricLabel}`, dataType: primaryMetric?.dataType ?? 'number' },
+        { key: 'change_pct', label: 'Change %', dataType: 'percentage' },
       ],
     };
   }

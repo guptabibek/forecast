@@ -43,6 +43,8 @@ const Users = lazy(() => import('@pages/settings/Users'));
 const Roles = lazy(() => import('@pages/settings/Roles'));
 const PlatformDashboard = lazy(() => import('@pages/platform/PlatformDashboard'));
 const TenantManage = lazy(() => import('@pages/platform/TenantManage'));
+const AiBilling = lazy(() => import('@pages/billing/AiBilling'));
+const AiBillingAdmin = lazy(() => import('@pages/platform/AiBillingAdmin'));
 
 function RouteFallback() {
   return (
@@ -232,6 +234,7 @@ export default function App() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/reports/ai" element={<RoleAwareRoute requiredModule="ai-reporting"><AiReporting /></RoleAwareRoute>} />
         <Route path="/insights" element={<RoleAwareRoute requiredModule="ai-reporting"><InsightsDashboard /></RoleAwareRoute>} />
+        <Route path="/billing/ai" element={<RoleAwareRoute requiredModule="ai-reporting"><AiBilling /></RoleAwareRoute>} />
         <Route path="/pharma-reports/*" element={<RoleAwareRoute requiredModule="reports"><PharmaReportsRoutes /></RoleAwareRoute>} />
 
         {/* Settings */}
@@ -258,6 +261,7 @@ export default function App() {
       >
         <Route path="/platform" element={<PlatformDashboard />} />
         <Route path="/platform/tenants/:id" element={<TenantManage />} />
+        <Route path="/platform/ai-billing" element={<AiBillingAdmin />} />
       </Route>
 
       {/* 404 */}

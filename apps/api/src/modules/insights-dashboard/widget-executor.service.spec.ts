@@ -131,6 +131,27 @@ describe('WidgetExecutorService', () => {
     expect(payload.analytics).toBeNull();
   });
 
+  it('blocks widget execution when AI access is suspended or the wallet is suspended', async () => {
+    const widget = widgetWith({ preset: 'this_month' }, 0);
+    const dashboardService = { requireWidget: jest.fn().mockResolvedValue(widget) } as any;
+    const aiReporting = { executeStoredReport: jest.fn() } as any;
+    const cache = { get: jest.fn(), set: jest.fn(), del: jest.fn() } as any;
+
+    const suspendedAccess = {
+      getEffectivePolicyForUser: jest.fn().mockResolvedValue({ status: 'SUSPENDED' }),
+    } as any;
+    const okWallet = { getOrCreateWallet: jest.fn().mockResolvedValue({ status: 'ACTIVE' }) } as any;
+    const gated = new WidgetExecutorService(dashboardService, aiReporting, cache, suspendedAccess, okWallet);
+    await expect(gated.execute(user, 'widget-1')).rejects.toMatchObject({ response: { code: 'AI_ACCESS_SUSPENDED' } });
+
+    const okAccess = { getEffectivePolicyForUser: jest.fn().mockResolvedValue({ status: 'ENABLED' }) } as any;
+    const suspendedWallet = { getOrCreateWallet: jest.fn().mockResolvedValue({ status: 'SUSPENDED' }) } as any;
+    const walletGated = new WidgetExecutorService(dashboardService, aiReporting, cache, okAccess, suspendedWallet);
+    await expect(walletGated.execute(user, 'widget-1')).rejects.toMatchObject({ response: { code: 'WALLET_SUSPENDED' } });
+
+    expect(aiReporting.executeStoredReport).not.toHaveBeenCalled();
+  });
+
   it('returns the cached payload without executing when present', async () => {
     const widget = widgetWith({ preset: 'this_month' }, 0);
     const { service, aiReporting, cache } = buildService(widget);

@@ -1,5 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { AiAccessStatus, AiWalletStatus } from '@prisma/client';
 import { TenantCacheService } from '../../core/cache/tenant-cache.service';
+import { AiAccessService } from '../ai-billing/access.service';
+import { AiAccessDeniedError, WalletSuspendedError } from '../ai-billing/billing.errors';
+import { WalletService } from '../ai-billing/wallet.service';
 import { AiReportingService, StoredReportExecutionResult } from '../ai-reporting/ai-reporting.service';
 import { SemanticReportQuery } from '../ai-reporting/semantic-query.types';
 import { DashboardService } from './dashboard.service';
@@ -31,6 +35,11 @@ export class WidgetExecutorService {
     private readonly dashboardService: DashboardService,
     private readonly aiReporting: AiReportingService,
     private readonly cache: TenantCacheService,
+    // AI governance (optional so bare unit-spec construction keeps working):
+    // widgets consume no LLM tokens, but a DISABLED/SUSPENDED account or a
+    // suspended wallet must not keep using AI surfaces.
+    @Optional() private readonly billingAccess?: AiAccessService,
+    @Optional() private readonly billingWallet?: WalletService,
   ) {}
 
   /**
@@ -39,6 +48,7 @@ export class WidgetExecutorService {
    * never spans users). No LLM call is made on this path.
    */
   async execute(user: any, widgetId: string, options?: { force?: boolean }): Promise<WidgetExecutionResult> {
+    await this.assertAiGovernance(user);
     const widget = await this.dashboardService.requireWidget(user, widgetId);
 
     if (!options?.force) {
@@ -78,6 +88,29 @@ export class WidgetExecutorService {
 
   async invalidate(tenantId: string, widgetId: string) {
     await this.cache.del(tenantId, CACHE_NAMESPACE, widgetId);
+  }
+
+  /**
+   * Widgets are SQL-only (no tokens to charge), but the AI access policy
+   * (ENABLED / DISABLED / SUSPENDED) and wallet suspension still apply —
+   * "AI suspended" means ALL AI surfaces, not just LLM calls.
+   */
+  private async assertAiGovernance(user: { id?: string; tenantId: string }) {
+    if (this.billingAccess) {
+      const policy = await this.billingAccess.getEffectivePolicyForUser(user.tenantId, user.id ?? null);
+      if (policy.status === AiAccessStatus.DISABLED) {
+        throw new AiAccessDeniedError('AI_ACCESS_DISABLED', 'AI access is disabled for this account');
+      }
+      if (policy.status === AiAccessStatus.SUSPENDED) {
+        throw new AiAccessDeniedError('AI_ACCESS_SUSPENDED', 'AI access is suspended for this account');
+      }
+    }
+    if (this.billingWallet) {
+      const wallet = await this.billingWallet.getOrCreateWallet(user.tenantId);
+      if (wallet.status === AiWalletStatus.SUSPENDED || wallet.status === AiWalletStatus.CLOSED) {
+        throw new WalletSuspendedError('AI wallet is suspended — recharge to use AI dashboards');
+      }
+    }
   }
 
   /**

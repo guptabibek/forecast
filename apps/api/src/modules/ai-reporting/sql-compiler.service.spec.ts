@@ -350,3 +350,89 @@ describe('SqlCompilerService', () => {
     expect(() => compiler.compile(query({}), { ...security, requestedBranchIds: [], allowedBranchIds: [] })).toThrow(ForbiddenException);
   });
 });
+
+describe('SqlCompilerService change ranking (delta vs previous period)', () => {
+  const security: ReportingSecurityContext = {
+    tenantId: '11111111-1111-4111-8111-111111111111',
+    userId: '22222222-2222-4222-8222-222222222222',
+    userRole: 'ADMIN',
+    permissions: ['reports.ai.execute', 'reports.sales.view'],
+    requestedCompanyId: 11093,
+    requestedBranchIds: ['33333333-3333-4333-8333-333333333333'],
+    allowedCompanyIds: [11093],
+    allowedBranchIds: ['33333333-3333-4333-8333-333333333333'],
+    hasExplicitCompanyScope: true,
+    hasExplicitBranchScope: true,
+    fiscalYear: { startDate: '2026-04-01', endDate: '2027-03-31' },
+  };
+
+  function build() {
+    const loader = new SemanticCatalogLoader();
+    loader.onModuleInit();
+    return { compiler: new SqlCompilerService(loader), safety: new SqlSafetyValidator(loader) };
+  }
+
+  const changeQuery: SemanticReportQuery = {
+    queryKind: 'single_report',
+    title: 'Top 10 items whose sales decreased vs previous month',
+    datasetId: 'sales_net',
+    mode: 'comparison',
+    analysisType: 'ranking',
+    metrics: ['sales_net_amount'],
+    dimensions: ['sales_net_product'],
+    timeRange: { preset: 'this_month' },
+    comparison: { enabled: true, type: 'previous_period', startDate: null, endDate: null, rankBy: 'change' },
+    sort: [{ metricId: 'sales_net_amount', direction: 'asc' }],
+    limit: 10,
+  };
+
+  it('joins both periods per dimension value and ranks by the signed delta', () => {
+    const { compiler, safety } = build();
+    const compiled = compiler.compile(changeQuery, security);
+
+    expect(compiled.sql).toMatch(/^SELECT\b/);
+    expect(compiled.sql).toContain('FULL OUTER JOIN');
+    // null-safe, hash-joinable dimension join
+    expect(compiled.sql).toContain("COALESCE(cur.");
+    expect(compiled.sql).toContain("'__null__'");
+    expect(compiled.sql).toContain('AS change,');
+    expect(compiled.sql).toContain('AS change_pct');
+    // decrease → most negative change first
+    expect(compiled.sql).toMatch(/ORDER BY change ASC/);
+    // the user limit is the FINAL ranked limit, parameterized
+    expect(compiled.sql).toMatch(/LIMIT \$\d+$/);
+    expect(compiled.params[compiled.params.length - 1]).toBe(10);
+    // both periods carry tenant/company/branch security filters
+    expect((compiled.sql.match(/tenant_id = \$\d+::uuid/g) ?? []).length).toBe(2);
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('emits typed columns: current/previous metric, change (metric units), change_pct (percentage)', () => {
+    const { compiler } = build();
+    const compiled = compiler.compile(changeQuery, security);
+    const byKey = new Map((compiled.selectedColumnMetadata ?? []).map((column) => [column.key, column]));
+    expect(byKey.get('sales_net_amount')?.label).toContain('(Current)');
+    expect(byKey.get('previous_sales_net_amount')?.label).toContain('(Previous)');
+    expect(byKey.get('change')?.dataType).toBe('currency');
+    expect(byKey.get('change_pct')?.dataType).toBe('percentage');
+  });
+
+  it('increase questions rank descending', () => {
+    const { compiler } = build();
+    const compiled = compiler.compile(
+      { ...changeQuery, sort: [{ metricId: 'sales_net_amount', direction: 'desc' }] },
+      security,
+    );
+    expect(compiled.sql).toMatch(/ORDER BY change DESC/);
+  });
+
+  it('comparison without rankBy keeps the legacy stacked shape', () => {
+    const { compiler } = build();
+    const compiled = compiler.compile(
+      { ...changeQuery, comparison: { enabled: true, type: 'previous_period', startDate: null, endDate: null } },
+      security,
+    );
+    expect(compiled.sql).toContain("'current' AS comparison_period");
+    expect(compiled.sql).toContain('UNION ALL');
+  });
+});

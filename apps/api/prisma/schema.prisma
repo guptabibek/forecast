@@ -2817,36 +2817,36 @@ model MargTransaction {
 
 /// Staged Marg voucher headers (MDis = master distribution records)
 model MargVoucher {
-  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId     String    @map("tenant_id") @db.Uuid
-  margId       BigInt    @map("marg_id")
-  companyId    Int       @map("company_id")
-  voucher      String    @db.VarChar(50)
-  type         String    @db.VarChar(10)
-  vcn          String?   @db.VarChar(50)
-  date         DateTime  @db.Date
-  cid          String?   @db.VarChar(20)
-  finalAmt     Decimal?  @map("final_amt") @db.Decimal(18, 4)
-  cash         Decimal?  @db.Decimal(18, 4)
-  others       Decimal?  @db.Decimal(18, 4)
-  salesman     String?   @db.VarChar(100)
-  mr           String?   @db.VarChar(100)
-  route        String?   @db.VarChar(100)
-  area         String?   @db.VarChar(100)
-  orn          String?   @db.VarChar(100)
-  addField     String?   @map("add_field")
-  oDate        DateTime? @map("o_date") @db.Date
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  margId      BigInt    @map("marg_id")
+  companyId   Int       @map("company_id")
+  voucher     String    @db.VarChar(50)
+  type        String    @db.VarChar(10)
+  vcn         String?   @db.VarChar(50)
+  date        DateTime  @db.Date
+  cid         String?   @db.VarChar(20)
+  finalAmt    Decimal?  @map("final_amt") @db.Decimal(18, 4)
+  cash        Decimal?  @db.Decimal(18, 4)
+  others      Decimal?  @db.Decimal(18, 4)
+  salesman    String?   @db.VarChar(100)
+  mr          String?   @db.VarChar(100)
+  route       String?   @db.VarChar(100)
+  area        String?   @db.VarChar(100)
+  orn         String?   @db.VarChar(100)
+  addField    String?   @map("add_field")
+  oDate       DateTime? @map("o_date") @db.Date
   /// Set TRUE when parseMargCancellation detects `CANCELLED : 1` on this
   /// voucher's AddField (header or any of its lines). Populated at staging
   /// time so reports / projections can filter cancelled documents with a
   /// single boolean check instead of re-parsing AddField in every query.
   /// Cancelled vouchers contribute no commercial actual, inventory
   /// movement, ledger entry, procurement document, or report total.
-  isCancelled  Boolean   @default(false) @map("is_cancelled")
-  cancelledOn  DateTime? @map("cancelled_on")
-  rawData      Json?     @map("raw_data")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  isCancelled Boolean   @default(false) @map("is_cancelled")
+  cancelledOn DateTime? @map("cancelled_on")
+  rawData     Json?     @map("raw_data")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   @@unique([tenantId, companyId, voucher, type])
   @@index([tenantId, date])
@@ -2996,35 +2996,35 @@ model MargPartyBalance {
 
 /// Staged Marg outstandings from API type 1
 model MargOutstanding {
-  id                  String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId            String   @map("tenant_id") @db.Uuid
-  margId              BigInt   @map("marg_id")
-  companyId           Int      @map("company_id")
-  ord                 String   @db.VarChar(20)
-  date                DateTime @db.Date
-  vcn                 String?  @db.VarChar(50)
-  days                Int      @default(0)
-  finalAmt            Decimal? @map("final_amt") @db.Decimal(18, 4)
-  balance             Decimal? @db.Decimal(18, 4)
-  pdLess              Decimal? @map("pd_less") @db.Decimal(18, 4)
-  groupCode           String?  @map("group_code") @db.VarChar(20)
-  voucher             String?  @db.VarChar(50)
-  sVoucher            String?  @map("s_voucher") @db.VarChar(50)
-  addField            String?  @map("add_field")
+  id                String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  margId            BigInt   @map("marg_id")
+  companyId         Int      @map("company_id")
+  ord               String   @db.VarChar(20)
+  date              DateTime @db.Date
+  vcn               String?  @db.VarChar(50)
+  days              Int      @default(0)
+  finalAmt          Decimal? @map("final_amt") @db.Decimal(18, 4)
+  balance           Decimal? @db.Decimal(18, 4)
+  pdLess            Decimal? @map("pd_less") @db.Decimal(18, 4)
+  groupCode         String?  @map("group_code") @db.VarChar(20)
+  voucher           String?  @db.VarChar(50)
+  sVoucher          String?  @map("s_voucher") @db.VarChar(50)
+  addField          String?  @map("add_field")
   /// Soft-delete marker set by the authoritative-snapshot closure pass.
   /// Outstandings that disappear from Marg's APIType=1 payload (because
   /// they've been settled or cancelled at source) are marked
   /// source_deleted = TRUE rather than physically deleted, preserving an
   /// audit trail. Reports filter `WHERE NOT sourceDeleted` to exclude
   /// settled rows from open AR/AP aging.
-  sourceDeleted       Boolean  @default(false) @map("source_deleted")
+  sourceDeleted     Boolean  @default(false) @map("source_deleted")
   /// Sync log that most recently observed this row in the payload. Lets the
   /// closure pass detect rows that an authoritative snapshot did NOT emit
   /// (lastSeenSyncLogId != currentSyncLogId).
-  lastSeenSyncLogId   String?  @map("last_seen_sync_log_id") @db.Uuid
-  rawData             Json?    @map("raw_data")
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  lastSeenSyncLogId String?  @map("last_seen_sync_log_id") @db.Uuid
+  rawData           Json?    @map("raw_data")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
 
   @@unique([tenantId, companyId, margId])
   @@index([tenantId, date])
@@ -4984,28 +4984,28 @@ model AiDashboardWidget {
 
 /// System-generated insight surfaced on the AI Insights Dashboard
 model AiInsight {
-  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenantId        String    @map("tenant_id") @db.Uuid
-  providerId      String    @map("provider_id") @db.VarChar(80)
-  category        String    @db.VarChar(60)
-  severity        String    @db.VarChar(20)
-  status          String    @default("NEW") @db.VarChar(20)
-  title           String    @db.VarChar(300)
-  summary         String
-  confidence      Decimal?  @db.Decimal(5, 4)
-  metrics         Json?
-  evidence        Json?
-  actions         Json?
-  drillDownQuestion String? @map("drill_down_question") @db.VarChar(1000)
-  dedupeKey       String    @map("dedupe_key") @db.VarChar(200)
-  firstDetectedAt DateTime  @default(now()) @map("first_detected_at")
-  lastEvaluatedAt DateTime  @default(now()) @map("last_evaluated_at")
-  acknowledgedBy  String?   @map("acknowledged_by") @db.Uuid
-  acknowledgedAt  DateTime? @map("acknowledged_at")
-  resolvedBy      String?   @map("resolved_by") @db.Uuid
-  resolvedAt      DateTime? @map("resolved_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  id                String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  providerId        String    @map("provider_id") @db.VarChar(80)
+  category          String    @db.VarChar(60)
+  severity          String    @db.VarChar(20)
+  status            String    @default("NEW") @db.VarChar(20)
+  title             String    @db.VarChar(300)
+  summary           String
+  confidence        Decimal?  @db.Decimal(5, 4)
+  metrics           Json?
+  evidence          Json?
+  actions           Json?
+  drillDownQuestion String?   @map("drill_down_question") @db.VarChar(1000)
+  dedupeKey         String    @map("dedupe_key") @db.VarChar(200)
+  firstDetectedAt   DateTime  @default(now()) @map("first_detected_at")
+  lastEvaluatedAt   DateTime  @default(now()) @map("last_evaluated_at")
+  acknowledgedBy    String?   @map("acknowledged_by") @db.Uuid
+  acknowledgedAt    DateTime? @map("acknowledged_at")
+  resolvedBy        String?   @map("resolved_by") @db.Uuid
+  resolvedAt        DateTime? @map("resolved_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   events AiInsightEvent[]
 
@@ -5046,4 +5046,460 @@ model AiInsightProviderConfig {
 
   @@unique([tenantId, providerId])
   @@map("ai_insight_provider_configs")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// AI Billing, Credit Management & Governance Platform
+//
+// Financial-grade subsystem: no balance ever changes without an append-only
+// ledger row (ai_wallet_transactions). Provider API keys live ONLY here
+// (super-admin managed, AES-256-GCM encrypted) — tenants never see them.
+// Money columns are Decimal(18,6) in wallet currency (credits, USD).
+// ════════════════════════════════════════════════════════════════════════════
+
+enum AiBillingProviderStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum AiBillingModelStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum AiPricingScope {
+  GLOBAL
+  PLAN
+  TENANT
+}
+
+enum AiPricingStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum AiWalletStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum AiLedgerType {
+  PURCHASE
+  MANUAL_CREDIT
+  USAGE_CHARGE
+  REFUND
+  BONUS_CREDIT
+  PROMO_CREDIT
+  DISPUTE_RESOLUTION
+  CHARGE_REVERSAL
+  CREDIT_EXPIRY
+  ADMIN_ADJUSTMENT
+  CORRECTION
+}
+
+enum AiReservationStatus {
+  ACTIVE
+  FINALIZED
+  RELEASED
+  EXPIRED
+}
+
+enum AiPurchaseMethod {
+  STRIPE
+  BANK_TRANSFER
+}
+
+enum AiPurchaseStatus {
+  PENDING
+  COMPLETED
+  REJECTED
+  CANCELLED
+  EXPIRED
+  REFUNDED
+}
+
+enum AiAccessScope {
+  USER
+  TENANT
+  PLAN
+}
+
+enum AiAccessStatus {
+  ENABLED
+  DISABLED
+  SUSPENDED
+}
+
+enum AiDisputeType {
+  UNEXPECTED_CHARGE
+  DUPLICATE_CHARGE
+  FAILED_REQUEST
+  INCORRECT_BILLING
+  REFUND_REQUEST
+  TOKEN_USAGE_DISAGREEMENT
+}
+
+enum AiDisputeStatus {
+  OPEN
+  UNDER_INVESTIGATION
+  AWAITING_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum AiRefundKind {
+  WALLET_CREDIT
+  CASH
+}
+
+enum AiRefundStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum AiUsageBillingStatus {
+  CHARGED
+  FAILED
+  UNBILLED
+}
+
+/// Centrally managed AI provider (super admin only). API key never leaves the API.
+model AiBillingProvider {
+  id              String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name            String                  @unique @db.VarChar(100)
+  kind            String                  @db.VarChar(40) // openai | anthropic | gemini | azure_openai | custom
+  apiKeyEncrypted String?                 @map("api_key_encrypted")
+  apiKeyLast4     String?                 @map("api_key_last4") @db.VarChar(8)
+  endpointUrl     String?                 @map("endpoint_url") @db.VarChar(500)
+  organizationId  String?                 @map("organization_id") @db.VarChar(200)
+  /// Lower value = tried first (failover order)
+  priority        Int                     @default(100)
+  status          AiBillingProviderStatus @default(ACTIVE)
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  models AiBillingModel[]
+
+  @@index([status, priority])
+  @@map("ai_billing_providers")
+}
+
+/// Centrally managed model under a provider.
+model AiBillingModel {
+  id           String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  providerId   String               @map("provider_id") @db.Uuid
+  modelCode    String               @map("model_code") @db.VarChar(120)
+  displayName  String               @map("display_name") @db.VarChar(160)
+  status       AiBillingModelStatus @default(ACTIVE)
+  maxContext   Int?                 @map("max_context")
+  isDefault    Boolean              @default(false) @map("is_default")
+  capabilities Json                 @default("{}")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+
+  provider AiBillingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  pricing  AiModelPricing[]
+
+  @@unique([providerId, modelCode])
+  @@index([status, isDefault])
+  @@map("ai_billing_models")
+}
+
+/// Versioned pricing: what the provider charges US vs what WE charge the
+/// customer, per 1M tokens (or per unit for images), with GLOBAL < PLAN <
+/// TENANT override precedence and effective-date windows.
+model AiModelPricing {
+  id            String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  modelId       String          @map("model_id") @db.Uuid
+  scope         AiPricingScope  @default(GLOBAL)
+  planTier      TenantTier?     @map("plan_tier")
+  tenantId      String?         @map("tenant_id") @db.Uuid
+  currency      String          @default("USD") @db.VarChar(3)
+  status        AiPricingStatus @default(ACTIVE)
+  effectiveFrom DateTime        @map("effective_from")
+  effectiveTo   DateTime?       @map("effective_to")
+
+  providerInputCost       Decimal @default(0) @map("provider_input_cost") @db.Decimal(18, 6)
+  providerOutputCost      Decimal @default(0) @map("provider_output_cost") @db.Decimal(18, 6)
+  providerCachedInputCost Decimal @default(0) @map("provider_cached_input_cost") @db.Decimal(18, 6)
+  providerReasoningCost   Decimal @default(0) @map("provider_reasoning_cost") @db.Decimal(18, 6)
+  providerEmbeddingCost   Decimal @default(0) @map("provider_embedding_cost") @db.Decimal(18, 6)
+  providerImageCost       Decimal @default(0) @map("provider_image_cost") @db.Decimal(18, 6)
+
+  customerInputPrice       Decimal @default(0) @map("customer_input_price") @db.Decimal(18, 6)
+  customerOutputPrice      Decimal @default(0) @map("customer_output_price") @db.Decimal(18, 6)
+  customerCachedInputPrice Decimal @default(0) @map("customer_cached_input_price") @db.Decimal(18, 6)
+  customerReasoningPrice   Decimal @default(0) @map("customer_reasoning_price") @db.Decimal(18, 6)
+  customerEmbeddingPrice   Decimal @default(0) @map("customer_embedding_price") @db.Decimal(18, 6)
+  customerImagePrice       Decimal @default(0) @map("customer_image_price") @db.Decimal(18, 6)
+
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  model AiBillingModel @relation(fields: [modelId], references: [id], onDelete: Cascade)
+
+  @@index([modelId, scope, status, effectiveFrom])
+  @@index([tenantId, status])
+  @@map("ai_model_pricing")
+}
+
+/// Prepaid credit wallet — one per tenant. Balances are NEVER written
+/// directly by feature code; only WalletService inside a row-locked
+/// transaction together with a ledger row.
+model AiWallet {
+  id              String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId        String         @unique @map("tenant_id") @db.Uuid
+  currency        String         @default("USD") @db.VarChar(3)
+  balance         Decimal        @default(0) @db.Decimal(18, 6)
+  reservedBalance Decimal        @default(0) @map("reserved_balance") @db.Decimal(18, 6)
+  totalPurchased  Decimal        @default(0) @map("total_purchased") @db.Decimal(18, 6)
+  totalConsumed   Decimal        @default(0) @map("total_consumed") @db.Decimal(18, 6)
+  totalRefunded   Decimal        @default(0) @map("total_refunded") @db.Decimal(18, 6)
+  totalAdjusted   Decimal        @default(0) @map("total_adjusted") @db.Decimal(18, 6)
+  status          AiWalletStatus @default(ACTIVE)
+
+  lowBalanceThreshold      Decimal? @map("low_balance_threshold") @db.Decimal(18, 6)
+  criticalBalanceThreshold Decimal? @map("critical_balance_threshold") @db.Decimal(18, 6)
+  suspendThreshold         Decimal? @map("suspend_threshold") @db.Decimal(18, 6)
+
+  autoRechargeEnabled      Boolean  @default(false) @map("auto_recharge_enabled")
+  autoRechargeThreshold    Decimal? @map("auto_recharge_threshold") @db.Decimal(18, 6)
+  autoRechargeAmount       Decimal? @map("auto_recharge_amount") @db.Decimal(18, 6)
+  autoRechargeMonthlyLimit Decimal? @map("auto_recharge_monthly_limit") @db.Decimal(18, 6)
+
+  lastActivityAt DateTime? @map("last_activity_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  transactions AiWalletTransaction[]
+  reservations AiCreditReservation[]
+
+  @@index([status])
+  @@map("ai_wallets")
+}
+
+/// APPEND-ONLY financial ledger. Every balance change references exactly one
+/// row here, with before/after snapshots for audit. Never updated or deleted.
+model AiWalletTransaction {
+  id                String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  walletId          String       @map("wallet_id") @db.Uuid
+  tenantId          String       @map("tenant_id") @db.Uuid
+  type              AiLedgerType
+  /// Signed: credits positive, charges negative
+  amount            Decimal      @db.Decimal(18, 6)
+  balanceBefore     Decimal      @map("balance_before") @db.Decimal(18, 6)
+  balanceAfter      Decimal      @map("balance_after") @db.Decimal(18, 6)
+  referenceNo       String       @map("reference_no") @db.VarChar(40)
+  relatedEntityType String?      @map("related_entity_type") @db.VarChar(40)
+  relatedEntityId   String?      @map("related_entity_id") @db.VarChar(64)
+  createdById       String?      @map("created_by_id") @db.Uuid
+  notes             String?      @db.VarChar(1000)
+  metadata          Json         @default("{}")
+  createdAt         DateTime     @default(now()) @map("created_at")
+
+  wallet AiWallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@unique([referenceNo])
+  @@index([walletId, createdAt])
+  @@index([tenantId, type, createdAt])
+  @@map("ai_wallet_transactions")
+}
+
+/// Pre-flight credit hold: reserve → execute AI request → finalize (charge
+/// actuals) or release. Prevents race conditions and negative balances.
+model AiCreditReservation {
+  id          String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  walletId    String              @map("wallet_id") @db.Uuid
+  tenantId    String              @map("tenant_id") @db.Uuid
+  userId      String?             @map("user_id") @db.Uuid
+  amount      Decimal             @db.Decimal(18, 6)
+  status      AiReservationStatus @default(ACTIVE)
+  requestId   String?             @map("request_id") @db.Uuid
+  expiresAt   DateTime            @map("expires_at")
+  finalizedAt DateTime?           @map("finalized_at")
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  wallet AiWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, status])
+  @@index([status, expiresAt])
+  @@map("ai_credit_reservations")
+}
+
+/// Credit purchase via Stripe checkout or manual bank transfer review queue.
+model AiCreditPurchase {
+  id                    String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId              String           @map("tenant_id") @db.Uuid
+  walletId              String           @map("wallet_id") @db.Uuid
+  userId                String           @map("user_id") @db.Uuid
+  method                AiPurchaseMethod
+  amount                Decimal          @db.Decimal(18, 6)
+  currency              String           @default("USD") @db.VarChar(3)
+  status                AiPurchaseStatus @default(PENDING)
+  stripeSessionId       String?          @unique @map("stripe_session_id") @db.VarChar(255)
+  stripePaymentIntentId String?          @map("stripe_payment_intent_id") @db.VarChar(255)
+  stripeEventId         String?          @unique @map("stripe_event_id") @db.VarChar(255)
+  proofUrl              String?          @map("proof_url") @db.VarChar(1000)
+  proofNote             String?          @map("proof_note") @db.VarChar(2000)
+  reviewedById          String?          @map("reviewed_by_id") @db.Uuid
+  reviewedAt            DateTime?        @map("reviewed_at")
+  reviewNote            String?          @map("review_note") @db.VarChar(2000)
+  idempotencyKey        String?          @unique @map("idempotency_key") @db.VarChar(120)
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+
+  @@index([tenantId, status, createdAt])
+  @@index([method, status])
+  @@map("ai_credit_purchases")
+}
+
+/// Token-level usage with the money trail: provider cost vs customer charge
+/// per request, linked to the reservation and the ledger transaction.
+model AiUsageLog {
+  id               String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId         String               @map("tenant_id") @db.Uuid
+  userId           String?              @map("user_id") @db.Uuid
+  providerId       String?              @map("provider_id") @db.Uuid
+  providerName     String               @map("provider_name") @db.VarChar(100)
+  modelId          String?              @map("model_id") @db.Uuid
+  modelCode        String               @map("model_code") @db.VarChar(120)
+  requestId        String?              @map("request_id") @db.Uuid
+  callType         String               @map("call_type") @db.VarChar(40)
+  promptTokens     Int                  @default(0) @map("prompt_tokens")
+  completionTokens Int                  @default(0) @map("completion_tokens")
+  cachedTokens     Int                  @default(0) @map("cached_tokens")
+  reasoningTokens  Int                  @default(0) @map("reasoning_tokens")
+  totalTokens      Int                  @default(0) @map("total_tokens")
+  executionMs      Int?                 @map("execution_ms")
+  providerCost     Decimal              @default(0) @map("provider_cost") @db.Decimal(18, 6)
+  customerCharge   Decimal              @default(0) @map("customer_charge") @db.Decimal(18, 6)
+  margin           Decimal              @default(0) @db.Decimal(18, 6)
+  reservationId    String?              @map("reservation_id") @db.Uuid
+  transactionId    String?              @map("transaction_id") @db.Uuid
+  pricingId        String?              @map("pricing_id") @db.Uuid
+  status           AiUsageBillingStatus @default(CHARGED)
+  metadata         Json                 @default("{}")
+  createdAt        DateTime             @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, userId, createdAt])
+  @@index([modelCode, createdAt])
+  @@map("ai_usage_logs")
+}
+
+/// AI access control — USER overrides TENANT overrides PLAN. Absent = enabled.
+model AiAccessPolicy {
+  id                  String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  scope               AiAccessScope
+  tenantId            String?        @map("tenant_id") @db.Uuid
+  userId              String?        @map("user_id") @db.Uuid
+  planTier            TenantTier?    @map("plan_tier")
+  status              AiAccessStatus @default(ENABLED)
+  /// null = all ACTIVE models allowed; otherwise array of model codes
+  allowedModelCodes   Json?          @map("allowed_model_codes")
+  dailyRequestLimit   Int?           @map("daily_request_limit")
+  monthlyRequestLimit Int?           @map("monthly_request_limit")
+  maxQueryCost        Decimal?       @map("max_query_cost") @db.Decimal(18, 6)
+  maxDailySpend       Decimal?       @map("max_daily_spend") @db.Decimal(18, 6)
+  maxMonthlySpend     Decimal?       @map("max_monthly_spend") @db.Decimal(18, 6)
+  notes               String?        @db.VarChar(1000)
+  createdById         String?        @map("created_by_id") @db.Uuid
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+
+  @@index([scope, tenantId])
+  @@index([scope, userId])
+  @@index([scope, planTier])
+  @@map("ai_access_policies")
+}
+
+/// Billing dispute raised by a customer, worked by super admin.
+model AiDispute {
+  id                   String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId             String          @map("tenant_id") @db.Uuid
+  raisedById           String          @map("raised_by_id") @db.Uuid
+  type                 AiDisputeType
+  status               AiDisputeStatus @default(OPEN)
+  subject              String          @db.VarChar(300)
+  description          String          @db.VarChar(5000)
+  relatedTransactionId String?         @map("related_transaction_id") @db.Uuid
+  relatedUsageLogId    String?         @map("related_usage_log_id") @db.Uuid
+  assignedToId         String?         @map("assigned_to_id") @db.Uuid
+  resolutionNotes      String?         @map("resolution_notes") @db.VarChar(5000)
+  resolvedById         String?         @map("resolved_by_id") @db.Uuid
+  resolvedAt           DateTime?       @map("resolved_at")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+
+  messages AiDisputeMessage[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([status, assignedToId])
+  @@map("ai_disputes")
+}
+
+/// Conversation thread + evidence attachments on a dispute.
+model AiDisputeMessage {
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  disputeId     String   @map("dispute_id") @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  authorId      String?  @map("author_id") @db.Uuid
+  authorRole    String   @map("author_role") @db.VarChar(20) // CUSTOMER | ADMIN | SYSTEM
+  body          String   @db.VarChar(5000)
+  attachmentUrl String?  @map("attachment_url") @db.VarChar(1000)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  dispute AiDispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([disputeId, createdAt])
+  @@map("ai_dispute_messages")
+}
+
+/// Refund record — wallet credit (ledger) or cash (Stripe refund).
+model AiRefund {
+  id             String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  walletId       String         @map("wallet_id") @db.Uuid
+  purchaseId     String?        @map("purchase_id") @db.Uuid
+  disputeId      String?        @map("dispute_id") @db.Uuid
+  amount         Decimal        @db.Decimal(18, 6)
+  kind           AiRefundKind
+  reason         String         @db.VarChar(1000)
+  status         AiRefundStatus @default(PENDING)
+  approvedById   String         @map("approved_by_id") @db.Uuid
+  stripeRefundId String?        @map("stripe_refund_id") @db.VarChar(255)
+  transactionId  String?        @map("transaction_id") @db.Uuid
+  evidenceUrl    String?        @map("evidence_url") @db.VarChar(1000)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  @@index([tenantId, createdAt])
+  @@map("ai_refunds")
+}
+
+/// IMMUTABLE audit trail for every sensitive billing action (who/what/when/
+/// why + before/after state + IP). Insert-only by convention and by a DB
+/// trigger that rejects UPDATE/DELETE.
+model AiBillingAuditLog {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  actorId     String?  @map("actor_id") @db.Uuid
+  actorEmail  String?  @map("actor_email") @db.VarChar(255)
+  actorRole   String?  @map("actor_role") @db.VarChar(40)
+  tenantId    String?  @map("tenant_id") @db.Uuid
+  action      String   @db.VarChar(80)
+  entityType  String   @map("entity_type") @db.VarChar(60)
+  entityId    String?  @map("entity_id") @db.VarChar(64)
+  beforeState Json?    @map("before_state")
+  afterState  Json?    @map("after_state")
+  reason      String?  @db.VarChar(2000)
+  ipAddress   String?  @map("ip_address") @db.VarChar(64)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action, createdAt])
+  @@map("ai_billing_audit_logs")
 }
