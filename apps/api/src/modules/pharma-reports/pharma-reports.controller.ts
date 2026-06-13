@@ -296,12 +296,12 @@ export class PharmaReportsController {
   @Get('360/search')
   @ApiOperation({ summary: 'Search 360 report entities for dropdown selection' })
   @ApiResponse({ status: 200, description: '360 search options' })
-  @ApiQuery({ name: 'type', required: true, enum: ['item', 'customer', 'supplier'] })
+  @ApiQuery({ name: 'type', required: true, enum: ['item', 'customer', 'supplier', 'route', 'city', 'salesman'] })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   async search360Options(
     @CurrentUser() user: any,
-    @Query('type') type: 'item' | 'customer' | 'supplier',
+    @Query('type') type: 'item' | 'customer' | 'supplier' | 'route' | 'city' | 'salesman',
     @Query('search') search?: string,
     @Query('limit') limit?: string,
   ) {
@@ -351,6 +351,45 @@ export class PharmaReportsController {
     @Query('locationId') locationId?: string,
   ) {
     return this.threeSixtyReports.getSupplier360(user.tenantId, search, period, locationId);
+  }
+
+  @Get('360/route')
+  @ApiOperation({ summary: 'Route 360 report with sales KPIs, trends, top items and customers by route' })
+  @ApiResponse({ status: 200, description: 'Route 360 report' })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'period', required: false, enum: ['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'this_quarter', 'last_quarter', 'fy', 'last_fy', 'calendar', 'last12'] })
+  async getRoute360(
+    @CurrentUser() user: any,
+    @Query('search') search?: string,
+    @Query('period') period?: 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'this_quarter' | 'last_quarter' | 'fy' | 'last_fy' | 'calendar' | 'last12',
+  ) {
+    return this.threeSixtyReports.getRoute360(user.tenantId, search, period);
+  }
+
+  @Get('360/city')
+  @ApiOperation({ summary: 'City 360 report with sales KPIs, trends, top items and customers by city/area' })
+  @ApiResponse({ status: 200, description: 'City 360 report' })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'period', required: false, enum: ['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'this_quarter', 'last_quarter', 'fy', 'last_fy', 'calendar', 'last12'] })
+  async getCity360(
+    @CurrentUser() user: any,
+    @Query('search') search?: string,
+    @Query('period') period?: 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'this_quarter' | 'last_quarter' | 'fy' | 'last_fy' | 'calendar' | 'last12',
+  ) {
+    return this.threeSixtyReports.getCity360(user.tenantId, search, period);
+  }
+
+  @Get('360/salesman')
+  @ApiOperation({ summary: 'Sales Team 360 report with sales KPIs, trends, top items and customers by salesman' })
+  @ApiResponse({ status: 200, description: 'Sales Team 360 report' })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'period', required: false, enum: ['today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'this_quarter', 'last_quarter', 'fy', 'last_fy', 'calendar', 'last12'] })
+  async getSalesTeam360(
+    @CurrentUser() user: any,
+    @Query('search') search?: string,
+    @Query('period') period?: 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'this_quarter' | 'last_quarter' | 'fy' | 'last_fy' | 'calendar' | 'last12',
+  ) {
+    return this.threeSixtyReports.getSalesTeam360(user.tenantId, search, period);
   }
 
   // =====================================================================

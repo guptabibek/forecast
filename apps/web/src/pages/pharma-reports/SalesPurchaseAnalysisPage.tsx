@@ -208,7 +208,7 @@ export default function SalesPurchaseAnalysisPage() {
         filterField: kind === 'sales' ? 'customer' : 'supplier',
       },
       // { key: 'branch_name', header: 'Warehouse / Branch', accessor: 'branch_name', filterType: 'text', filterField: 'warehouse' },
-      { key: 'salesman', header: kind === 'sales' ? 'Salesman' : 'User', accessor: (row) => row.salesman_name || row.salesman || row.user_name || '-', filterType: 'text', filterField: 'user' },
+      { key: 'salesman', header: kind === 'sales' ? 'Salesman' : 'User', accessor: (row) => row.salesman_name || row.salesman || row.user_name || '-', filterType: 'text', filterField: kind === 'sales' ? 'salesman_name' : 'user'},
       { key: 'payment_mode', header: 'Payment', accessor: 'payment_mode', sortable: true, filterType: 'select', filterField: 'payment_mode', filterOptions: [{ value: 'CASH', label: 'Cash' }, { value: 'CREDIT', label: 'Credit' }, { value: 'MIXED', label: 'Mixed' }] },
       { key: 'gross_amount', header: 'Gross', accessor: (row) => fmtCurrency(row.gross_amount), align: 'right', sortable: true, filterType: 'number', filterField: 'gross_amount' },
       { key: 'discount', header: 'Discount', accessor: (row) => fmtCurrency(row.discount), align: 'right', filterType: 'number', filterField: 'discount' },

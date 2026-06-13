@@ -111,11 +111,12 @@ export default function InventoryReportsPage() {
     { key: 'product_group', header: 'Group', accessor: (r) => r.product_group_name ?? r.product_group ?? '-', filterType: 'text', filterField: 'product_group' },
     { key: 'hsn_code', header: 'HSN', accessor: (r) => r.hsn_code ?? '-', filterType: 'text', filterField: 'hsn_code' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '100px', sortable: true, filterType: 'text', filterField: 'location_code' },
-    { key: 'on_hand_qty', header: 'On Hand', accessor: (r) => fmt(r.on_hand_qty), align: 'right', sortable: true, filterType: 'number', filterField: 'on_hand_qty' },
+  //  { key: 'on_hand_qty', header: 'On Hand', accessor: (r) => fmt(r.on_hand_qty), align: 'right', sortable: true, filterType: 'number', filterField: 'on_hand_qty' },
     { key: 'available_qty', header: 'Available', accessor: (r) => fmt(r.available_qty), align: 'right', sortable: true, filterType: 'number', filterField: 'available_qty' },
-    { key: 'in_transit_qty', header: 'In Transit', accessor: (r) => fmt(r.in_transit_qty), align: 'right', filterType: 'number', filterField: 'in_transit_qty' },
+  //  { key: 'in_transit_qty', header: 'In Transit', accessor: (r) => fmt(r.in_transit_qty), align: 'right', filterType: 'number', filterField: 'in_transit_qty' },
     { key: 'on_order_qty', header: 'On Order', accessor: (r) => fmt(r.on_order_qty), align: 'right', filterType: 'number', filterField: 'on_order_qty' },
     { key: 'inventory_value', header: 'Value', accessor: (r) => fmtCurrency(r.inventory_value), align: 'right', sortable: true, filterType: 'number', filterField: 'inventory_value' },
+    { key: 'last_supplier_name', header: 'Last Supplier', accessor: (r) => r.last_supplier_name ?? '—', sortable: true, filterType: 'text', filterField: 'last_supplier_name' },
   ]);
 
   const batchCols: Column<BatchInventoryRow>[] = reportCols([
@@ -124,10 +125,10 @@ export default function InventoryReportsPage() {
     { key: 'batch_number', header: 'Batch', accessor: 'batch_number', width: '120px', sortable: true, filterType: 'text', filterField: 'batch_number' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '90px', filterType: 'text', filterField: 'location_code' },
     { key: 'quantity', header: 'Qty', accessor: (r) => fmt(r.quantity), align: 'right', sortable: true, filterType: 'number', filterField: 'quantity' },
-    { key: 'cost_per_unit', header: 'Unit Cost', accessor: (r) => fmtCurrency(r.cost_per_unit), align: 'right', filterType: 'number', filterField: 'cost_per_unit' },
+    { key: 'batch_value', header: 'Stock Value', accessor: (r) => fmtCurrency(r.batch_value), align: 'right', sortable: true, filterType: 'number', filterField: 'batch_value' },
     { key: 'expiry_date', header: 'Expiry', accessor: (r) => fmtDate(r.expiry_date), sortable: true, filterType: 'date', filterField: 'expiry_date' },
     {
-      key: 'days_to_expiry', header: 'Days Left', align: 'right',
+      key: 'days_to_expiry', header: 'Days Left', align: 'right', sortable: true, filterType: 'number', filterField: 'days_to_expiry',
       accessor: (r) => r.days_to_expiry != null ? (
         <span className={r.days_to_expiry <= 30 ? 'text-red-600 font-semibold' : r.days_to_expiry <= 90 ? 'text-amber-600' : ''}>
           {r.days_to_expiry}
@@ -174,10 +175,10 @@ export default function InventoryReportsPage() {
   const reorderCols: Column<ReorderRow>[] = reportCols([
     { key: 'sku', header: 'SKU', accessor: 'sku', width: '100px', sortable: true, filterType: 'text', filterField: 'sku' },
     { key: 'product_name', header: 'Product', accessor: 'product_name', filterType: 'text', filterField: 'product_name' },
-    ...(showSaltColumn ? [{ key: 'salt', header: 'Salt', accessor: (r: ReorderRow) => r.salt_name ?? r.salt ?? '-', filterType: 'text' as const, filterField: 'salt' }] : []),
+    // ...(showSaltColumn ? [{ key: 'salt', header: 'Salt', accessor: (r: ReorderRow) => r.salt_name ?? r.salt ?? '-', filterType: 'text' as const, filterField: 'salt' }] : []),
     { key: 'product_group', header: 'Group', accessor: (r) => r.product_group_name ?? r.product_group ?? '-', filterType: 'text', filterField: 'product_group' },
     { key: 'hsn_code', header: 'HSN', accessor: (r) => r.hsn_code ?? '-', width: '90px', filterType: 'text', filterField: 'hsn_code' },
-    { key: 'supplier_name', header: 'Supplier', accessor: (r) => r.supplier_display ?? r.supplier_name ?? '-', filterType: 'text', filterField: 'supplier_name' },
+    { key: 'supplier_name', header: 'Supplier', accessor: 'supplier_name', filterType: 'text', filterField: 'supplier_name' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '90px', filterType: 'text', filterField: 'location_code' },
     {
       key: 'reorder_status', header: 'Status',
@@ -237,8 +238,8 @@ export default function InventoryReportsPage() {
     { key: 'batch_number', header: 'Batch', accessor: 'batch_number', width: '120px', filterType: 'text', filterField: 'batch_number' },
     { key: 'location_code', header: 'Location', accessor: 'location_code', width: '90px', filterType: 'text', filterField: 'location_code' },
     { key: 'inward_date', header: 'Inward Date', accessor: (r) => fmtDate(r.inward_date), sortable: true, filterType: 'date', filterField: 'inward_date' },
-    { key: 'age_days', header: 'Age (Days)', accessor: (r) => r.age_days >= 0 ? fmt(r.age_days) : '—', align: 'right' },
-    { key: 'age_bucket', header: 'Bucket', accessor: (r) => <Badge variant={r.age_bucket.startsWith('>') ? 'error' : r.age_bucket.includes('181') ? 'warning' : 'default'} size="sm">{r.age_bucket}</Badge> },
+    { key: 'age_days', header: 'Age (Days)', accessor: (r) => r.age_days >= 0 ? fmt(r.age_days) : '—', align: 'right', sortable: true, filterType: 'number', filterField: 'age_days' },
+    { key: 'age_bucket', header: 'Bucket', sortable: true, filterField: 'age_bucket', accessor: (r) => <Badge variant={r.age_bucket.startsWith('>') ? 'error' : r.age_bucket.includes('181') ? 'warning' : 'default'} size="sm">{r.age_bucket}</Badge> },
     { key: 'quantity', header: 'Qty', accessor: (r) => fmt(r.quantity), align: 'right', sortable: true, filterType: 'number', filterField: 'quantity' },
     { key: 'batch_value', header: 'Value', accessor: (r) => fmtCurrency(r.batch_value), align: 'right', sortable: true, filterType: 'number', filterField: 'batch_value' },
   ]);
@@ -443,16 +444,34 @@ export default function InventoryReportsPage() {
         )}
 
         {activeTab === 'ageing' && (
-          <DataTable<StockAgeingRow>
-            data={ageing.data?.data ?? []}
-            columns={ageingCols}
-            keyExtractor={(r) => `${r.product_id}-${r.batch_number}`}
-            isLoading={ageing.isLoading}
-            emptyMessage="No ageing data"
-            sorting={ageingGrid.sortingProps}
-            filtering={ageingGrid.filteringProps}
-            pagination={ageingGrid.paginationProps(ageing.data?.total ?? 0)}
-          />
+          <>
+            <DataTable<StockAgeingRow>
+              data={ageing.data?.data ?? []}
+              columns={ageingCols}
+              keyExtractor={(r) => `${r.product_id}-${r.batch_number}`}
+              isLoading={ageing.isLoading}
+              emptyMessage="No ageing data"
+              sorting={ageingGrid.sortingProps}
+              filtering={ageingGrid.filteringProps}
+              pagination={ageingGrid.paginationProps(ageing.data?.total ?? 0)}
+            />
+            {ageing.data?.summary && ageing.data.summary.length > 0 && (
+              <div className="flex justify-end gap-8 px-6 py-3 border-t border-gray-200 bg-gray-50 text-sm font-semibold text-gray-700">
+                <span>
+                  Total Qty:{' '}
+                  <span className="text-gray-900">
+                    {fmt(ageing.data.summary.reduce((sum, s) => sum + s.total_qty, 0))}
+                  </span>
+                </span>
+                <span>
+                  Total Value:{' '}
+                  <span className="text-gray-900">
+                    {fmtCurrency(ageing.data.summary.reduce((sum, s) => sum + s.total_value, 0))}
+                  </span>
+                </span>
+              </div>
+            )}
+          </>
         )}
       </Card>
     </div>

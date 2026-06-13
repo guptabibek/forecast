@@ -23,7 +23,7 @@ type PeriodKey =
   | 'last_fy'
   | 'calendar'
   | 'last12';
-type ThreeSixtySearchType = 'item' | 'customer' | 'supplier';
+type ThreeSixtySearchType = 'item' | 'customer' | 'supplier' | 'route' | 'city' | 'salesman';
 
 interface ReportContext {
   asOf: Date;
@@ -724,7 +724,67 @@ export class ThreeSixtyReportsService {
       return rows;
     }
 
-    throw new BadRequestException('type must be item, customer, or supplier');
+    if (type === 'route') {
+      const rows = await this.prisma.$queryRaw<Array<{ value: string; label: string; code: string | null; description: string | null; source: 'LOCAL' | 'MARG' }>>(Prisma.sql`
+        SELECT s_code AS value, COALESCE(name, s_code) AS label, s_code AS code, NULL::text AS description, 'MARG'::text AS source
+        FROM marg_sale_types
+        WHERE tenant_id = ${tenantId}::uuid AND sg_code = 'ROUT'
+          AND (${term} = '%%' OR s_code ILIKE ${term} OR name ILIKE ${term})
+        ORDER BY name
+        LIMIT ${safeLimit}
+      `);
+      return rows;
+    }
+
+    if (type === 'city') {
+      const rows = await this.prisma.$queryRaw<Array<{ value: string; label: string; code: string | null; description: string | null; source: 'LOCAL' | 'MARG' }>>(Prisma.sql`
+        SELECT s_code AS value, COALESCE(name, s_code) AS label, s_code AS code, NULL::text AS description, 'MARG'::text AS source
+        FROM marg_sale_types
+        WHERE tenant_id = ${tenantId}::uuid AND sg_code = 'AREA'
+          AND (${term} = '%%' OR s_code ILIKE ${term} OR name ILIKE ${term})
+        ORDER BY name
+        LIMIT ${safeLimit}
+      `);
+      return rows;
+    }
+
+    if (type === 'salesman') {
+      const rows = await this.prisma.$queryRaw<Array<{ value: string; label: string; code: string | null; description: string | null; source: 'LOCAL' | 'MARG' }>>(Prisma.sql`
+        SELECT value, label, code, description, source FROM (
+          SELECT
+            s.code AS value,
+            COALESCE(s.name, s.code) AS label,
+            s.code,
+            NULL::text AS description,
+            'LOCAL'::text AS source,
+            CASE WHEN s.code ILIKE ${term} THEN 0 WHEN s.name ILIKE ${term} THEN 1 ELSE 2 END AS rank
+          FROM salesmen s
+          WHERE s.tenant_id = ${tenantId}::uuid
+            AND (${term} = '%%' OR s.code ILIKE ${term} OR s.name ILIKE ${term})
+          UNION ALL
+          SELECT
+            COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) AS value,
+            COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) AS label,
+            COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) AS code,
+            NULL::text AS description,
+            'MARG'::text AS source,
+            1 AS rank
+          FROM marg_vouchers mv
+          WHERE mv.tenant_id = ${tenantId}::uuid
+            AND COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) IS NOT NULL
+            AND (${term} = '%%' OR COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) ILIKE ${term})
+            AND NOT EXISTS (
+              SELECT 1 FROM salesmen s WHERE s.tenant_id = mv.tenant_id AND s.code = COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), ''))
+            )
+          GROUP BY COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), ''))
+        ) options
+        ORDER BY rank, label
+        LIMIT ${safeLimit}
+      `);
+      return rows;
+    }
+
+    throw new BadRequestException('type must be item, customer, supplier, route, city, or salesman');
   }
 
   async getCustomer360(tenantId: string, search?: string, period: PeriodKey = 'fy', locationId?: string) {
@@ -1352,6 +1412,349 @@ export class ThreeSixtyReportsService {
     };
   }
 
+  async getRoute360(tenantId: string, search?: string, period: PeriodKey = 'fy') {
+    const ctx = await this.getContext(tenantId, period);
+    const route = await this.findRoute(tenantId, search);
+    if (!route) throw new NotFoundException('No route found for the selected search.');
+
+    const isAll = route.is_all === true;
+    const voucherRouteFilter = isAll
+      ? Prisma.sql`TRUE`
+      : Prisma.sql`EXISTS (SELECT 1 FROM marg_transactions mt_rf WHERE mt_rf.tenant_id = mv.tenant_id AND mt_rf.company_id = mv.company_id AND mt_rf.voucher = mv.voucher AND NULLIF(TRIM(SPLIT_PART(COALESCE(mt_rf.add_field, ''), ';', 20)), '') = ${route.route_code})`;
+    const txnRouteFilter = isAll
+      ? Prisma.sql`TRUE`
+      : Prisma.sql`NULLIF(TRIM(SPLIT_PART(COALESCE(mt.add_field, ''), ';', 20)), '') = ${route.route_code}`;
+
+    const salesP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date), 0)::float8 AS current_period_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.priorFiscalStart}::date AND mv.date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS prior_period_sales,
+        COUNT(DISTINCT mv.company_id::text || ':' || mv.voucher) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'SALES_INVOICE' AND mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date)::int AS bill_count,
+        COUNT(DISTINCT mv.cid) FILTER (WHERE mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date)::int AS customer_count
+      FROM marg_vouchers mv
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+        AND ${voucherRouteFilter}
+    `);
+
+    const monthlyTrendP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        to_char(month_bucket, 'Mon YYYY') AS month,
+        COALESCE(SUM(sd.sales_amt), 0)::float8 AS sales_value
+      FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') month_bucket
+      LEFT JOIN (
+        SELECT date_trunc('month', mv.date) AS mb, (COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')})::float8 AS sales_amt
+        FROM marg_vouchers mv
+        WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+          AND ${voucherRouteFilter}
+      ) sd ON sd.mb = month_bucket
+      GROUP BY month_bucket
+      ORDER BY month_bucket
+    `);
+
+    const topItemsP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}) DESC)::int AS rank,
+        COALESCE(p.name, mprod.name, mt.pid) AS name,
+        COALESCE(p.code, mprod.code, mt.pid) AS code,
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS quantity,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS value
+      FROM marg_vouchers mv
+      JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
+      LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
+      LEFT JOIN products p ON p.tenant_id = mt.tenant_id AND p.id = mprod.product_id
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+        AND ${txnRouteFilter}
+        AND mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date
+      GROUP BY COALESCE(p.name, mprod.name, mt.pid), COALESCE(p.code, mprod.code, mt.pid)
+      ORDER BY value DESC
+      LIMIT 5
+    `);
+
+    const topCustomersP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) DESC)::int AS rank,
+        COALESCE(c.name, mp.par_name, mv.cid) AS name,
+        mv.cid AS code,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS value
+      FROM marg_vouchers mv
+      LEFT JOIN marg_parties mp ON mp.tenant_id = mv.tenant_id AND mp.company_id = mv.company_id AND mp.cid = mv.cid AND mp.is_deleted = false
+      LEFT JOIN customers c ON c.id = mp.customer_id
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+        AND ${voucherRouteFilter}
+        AND mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date
+      GROUP BY COALESCE(c.name, mp.par_name, mv.cid), mv.cid
+      ORDER BY value DESC
+      LIMIT 5
+    `);
+
+    const [salesRows, monthlyTrend, topItems, topCustomers] = await Promise.all([salesP, monthlyTrendP, topItemsP, topCustomersP]);
+    const [sales] = salesRows;
+    const currentMonthSales = Number(sales.current_month_sales ?? 0);
+    const lastMonthSales = Number(sales.last_month_sales ?? 0);
+    const currentPeriodSales = Number(sales.current_period_sales ?? 0);
+    const priorPeriodSales = Number(sales.prior_period_sales ?? 0);
+    const billCount = Number(sales.bill_count ?? 0);
+    const customerCount = Number(sales.customer_count ?? 0);
+    const yoyChange = this.pctChange(currentPeriodSales, priorPeriodSales);
+
+    const insights: string[] = [];
+    if (yoyChange != null && yoyChange < -10) insights.push('Route sales are down more than 10% versus the prior period. Review coverage and outlet activity.');
+    if (customerCount === 0) insights.push('No customers billed on this route in the selected period. Verify route assignment in Marg.');
+    if (yoyChange != null && yoyChange >= 10) insights.push(`Route is growing ${yoyChange.toFixed(1)}% versus the prior period.`);
+    if (!insights.length) insights.push('Route sales signals are within normal control limits.');
+
+    return {
+      asOf: ctx.asOf,
+      profile: { code: route.route_code ?? 'ALL', name: route.route_name },
+      kpis: {
+        currentMonthSales,
+        lastMonthSales,
+        momSalesChangePct: this.pctChange(currentMonthSales, lastMonthSales),
+        currentPeriodSales,
+        priorPeriodSales,
+        yoySalesChangePct: yoyChange,
+        billCount,
+        customerCount,
+        avgBillValue: billCount > 0 ? currentPeriodSales / billCount : null,
+      },
+      charts: { monthlyTrend },
+      tables: {
+        topItems: this.addShare(topItems),
+        topCustomers: this.addShare(topCustomers),
+      },
+      insights,
+    };
+  }
+
+  async getCity360(tenantId: string, search?: string, period: PeriodKey = 'fy') {
+    const ctx = await this.getContext(tenantId, period);
+    const city = await this.findCity(tenantId, search);
+    if (!city) throw new NotFoundException('No city/area found for the selected search.');
+
+    const isAll = city.is_all === true;
+    const cityCodeFilter = isAll ? Prisma.sql`TRUE` : Prisma.sql`mp_cty.area = ${city.city_code}`;
+
+    const salesP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date), 0)::float8 AS current_period_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.priorFiscalStart}::date AND mv.date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS prior_period_sales,
+        COUNT(DISTINCT mv.company_id::text || ':' || mv.voucher) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'SALES_INVOICE' AND mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date)::int AS bill_count,
+        COUNT(DISTINCT mv.cid) FILTER (WHERE mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date)::int AS customer_count
+      FROM marg_vouchers mv
+      LEFT JOIN marg_parties mp_cty ON mp_cty.tenant_id = mv.tenant_id AND mp_cty.company_id = mv.company_id AND mp_cty.cid = mv.cid AND mp_cty.is_deleted = false
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+        AND ${cityCodeFilter}
+    `);
+
+    const monthlyTrendP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        to_char(month_bucket, 'Mon YYYY') AS month,
+        COALESCE(SUM(sd.sales_amt), 0)::float8 AS sales_value
+      FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') month_bucket
+      LEFT JOIN (
+        SELECT date_trunc('month', mv.date) AS mb, (COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')})::float8 AS sales_amt
+        FROM marg_vouchers mv
+        LEFT JOIN marg_parties mp_cty ON mp_cty.tenant_id = mv.tenant_id AND mp_cty.company_id = mv.company_id AND mp_cty.cid = mv.cid AND mp_cty.is_deleted = false
+        WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+          AND ${cityCodeFilter}
+      ) sd ON sd.mb = month_bucket
+      GROUP BY month_bucket
+      ORDER BY month_bucket
+    `);
+
+    const topItemsP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}) DESC)::int AS rank,
+        COALESCE(p.name, mprod.name, mt.pid) AS name,
+        COALESCE(p.code, mprod.code, mt.pid) AS code,
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS quantity,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS value
+      FROM marg_vouchers mv
+      JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
+      LEFT JOIN marg_parties mp_cty ON mp_cty.tenant_id = mv.tenant_id AND mp_cty.company_id = mv.company_id AND mp_cty.cid = mv.cid AND mp_cty.is_deleted = false
+      LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
+      LEFT JOIN products p ON p.tenant_id = mt.tenant_id AND p.id = mprod.product_id
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+        AND ${cityCodeFilter}
+        AND mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date
+      GROUP BY COALESCE(p.name, mprod.name, mt.pid), COALESCE(p.code, mprod.code, mt.pid)
+      ORDER BY value DESC
+      LIMIT 5
+    `);
+
+    const topCustomersP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) DESC)::int AS rank,
+        COALESCE(c.name, mp_cty.par_name, mv.cid) AS name,
+        mv.cid AS code,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS value
+      FROM marg_vouchers mv
+      LEFT JOIN marg_parties mp_cty ON mp_cty.tenant_id = mv.tenant_id AND mp_cty.company_id = mv.company_id AND mp_cty.cid = mv.cid AND mp_cty.is_deleted = false
+      LEFT JOIN customers c ON c.id = mp_cty.customer_id
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+        AND ${cityCodeFilter}
+        AND mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date
+      GROUP BY COALESCE(c.name, mp_cty.par_name, mv.cid), mv.cid
+      ORDER BY value DESC
+      LIMIT 5
+    `);
+
+    const [salesRows, monthlyTrend, topItems, topCustomers] = await Promise.all([salesP, monthlyTrendP, topItemsP, topCustomersP]);
+    const [sales] = salesRows;
+    const currentMonthSales = Number(sales.current_month_sales ?? 0);
+    const lastMonthSales = Number(sales.last_month_sales ?? 0);
+    const currentPeriodSales = Number(sales.current_period_sales ?? 0);
+    const priorPeriodSales = Number(sales.prior_period_sales ?? 0);
+    const billCount = Number(sales.bill_count ?? 0);
+    const customerCount = Number(sales.customer_count ?? 0);
+    const yoyChange = this.pctChange(currentPeriodSales, priorPeriodSales);
+
+    const insights: string[] = [];
+    if (yoyChange != null && yoyChange < -10) insights.push('City sales are down more than 10% versus the prior period. Review distribution and outlet activity.');
+    if (customerCount === 0) insights.push('No customers billed in this city in the selected period.');
+    if (yoyChange != null && yoyChange >= 10) insights.push(`City is growing ${yoyChange.toFixed(1)}% versus the prior period.`);
+    if (!insights.length) insights.push('City sales signals are within normal control limits.');
+
+    return {
+      asOf: ctx.asOf,
+      profile: { code: city.city_code ?? 'ALL', name: city.city_name },
+      kpis: {
+        currentMonthSales,
+        lastMonthSales,
+        momSalesChangePct: this.pctChange(currentMonthSales, lastMonthSales),
+        currentPeriodSales,
+        priorPeriodSales,
+        yoySalesChangePct: yoyChange,
+        billCount,
+        customerCount,
+        avgBillValue: billCount > 0 ? currentPeriodSales / billCount : null,
+      },
+      charts: { monthlyTrend },
+      tables: {
+        topItems: this.addShare(topItems),
+        topCustomers: this.addShare(topCustomers),
+      },
+      insights,
+    };
+  }
+
+  async getSalesTeam360(tenantId: string, search?: string, period: PeriodKey = 'fy') {
+    const ctx = await this.getContext(tenantId, period);
+    const salesman = await this.findSalesman(tenantId, search);
+    if (!salesman) throw new NotFoundException('No salesman found for the selected search.');
+
+    const isAll = salesman.is_all === true;
+    const salesmanFilter = isAll
+      ? Prisma.sql`TRUE`
+      : Prisma.sql`COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) = ${salesman.salesman_code}`;
+
+    const salesP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.monthStart}::date AND mv.date < ${ctx.nextMonthStart}::date), 0)::float8 AS current_month_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.lastMonthStart}::date AND mv.date < ${ctx.monthStart}::date), 0)::float8 AS last_month_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date), 0)::float8 AS current_period_sales,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) FILTER (WHERE mv.date >= ${ctx.priorFiscalStart}::date AND mv.date < ${ctx.priorFiscalEnd}::date), 0)::float8 AS prior_period_sales,
+        COUNT(DISTINCT mv.company_id::text || ':' || mv.voucher) FILTER (WHERE ${margVoucherFamilySql('mv')} = 'SALES_INVOICE' AND mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date)::int AS bill_count,
+        COUNT(DISTINCT mv.cid) FILTER (WHERE mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date)::int AS customer_count
+      FROM marg_vouchers mv
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+        AND ${salesmanFilter}
+    `);
+
+    const monthlyTrendP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        to_char(month_bucket, 'Mon YYYY') AS month,
+        COALESCE(SUM(sd.sales_amt), 0)::float8 AS sales_value
+      FROM generate_series(date_trunc('month', ${ctx.trendStart}::date), date_trunc('month', ${ctx.asOf}::date), interval '1 month') month_bucket
+      LEFT JOIN (
+        SELECT date_trunc('month', mv.date) AS mb, (COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')})::float8 AS sales_amt
+        FROM marg_vouchers mv
+        WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+          AND ${salesmanFilter}
+      ) sd ON sd.mb = month_bucket
+      GROUP BY month_bucket
+      ORDER BY month_bucket
+    `);
+
+    const topItemsP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}) DESC)::int AS rank,
+        COALESCE(p.name, mprod.name, mt.pid) AS name,
+        COALESCE(p.code, mprod.code, mt.pid) AS code,
+        COALESCE(SUM(ABS(COALESCE(mt.qty, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS quantity,
+        COALESCE(SUM(ABS(COALESCE(mt.amount, 0)) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS value
+      FROM marg_vouchers mv
+      JOIN marg_transactions mt ON mt.tenant_id = mv.tenant_id AND mt.company_id = mv.company_id AND mt.voucher = mv.voucher AND ${this.compatibleSalesLineSql('mv', 'mt')}
+      LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
+      LEFT JOIN products p ON p.tenant_id = mt.tenant_id AND p.id = mprod.product_id
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+        AND ${salesmanFilter}
+        AND mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date
+      GROUP BY COALESCE(p.name, mprod.name, mt.pid), COALESCE(p.code, mprod.code, mt.pid)
+      ORDER BY value DESC
+      LIMIT 5
+    `);
+
+    const topCustomersP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}) DESC)::int AS rank,
+        COALESCE(c.name, mp.par_name, mv.cid) AS name,
+        mv.cid AS code,
+        COALESCE(SUM(COALESCE(mv.final_amt, 0) * ${margSalesAmountSignSql('mv')}), 0)::float8 AS value
+      FROM marg_vouchers mv
+      LEFT JOIN marg_parties mp ON mp.tenant_id = mv.tenant_id AND mp.company_id = mv.company_id AND mp.cid = mv.cid AND mp.is_deleted = false
+      LEFT JOIN customers c ON c.id = mp.customer_id
+      WHERE mv.tenant_id = ${tenantId}::uuid AND mv.is_cancelled = FALSE AND mv.type IN ('S', 'R')
+        AND ${salesmanFilter}
+        AND mv.date >= ${ctx.periodStart}::date AND mv.date <= ${ctx.periodEnd}::date
+      GROUP BY COALESCE(c.name, mp.par_name, mv.cid), mv.cid
+      ORDER BY value DESC
+      LIMIT 5
+    `);
+
+    const [salesRows, monthlyTrend, topItems, topCustomers] = await Promise.all([salesP, monthlyTrendP, topItemsP, topCustomersP]);
+    const [sales] = salesRows;
+    const currentMonthSales = Number(sales.current_month_sales ?? 0);
+    const lastMonthSales = Number(sales.last_month_sales ?? 0);
+    const currentPeriodSales = Number(sales.current_period_sales ?? 0);
+    const priorPeriodSales = Number(sales.prior_period_sales ?? 0);
+    const billCount = Number(sales.bill_count ?? 0);
+    const customerCount = Number(sales.customer_count ?? 0);
+    const yoyChange = this.pctChange(currentPeriodSales, priorPeriodSales);
+
+    const insights: string[] = [];
+    if (yoyChange != null && yoyChange < -10) insights.push('Salesman sales are down more than 10% versus the prior period. Review target achievement and customer coverage.');
+    if (customerCount === 0) insights.push('No customers billed by this salesman in the selected period.');
+    if (yoyChange != null && yoyChange >= 10) insights.push(`Salesman is growing ${yoyChange.toFixed(1)}% versus the prior period.`);
+    if (!insights.length) insights.push('Salesman sales signals are within normal control limits.');
+
+    return {
+      asOf: ctx.asOf,
+      profile: { code: salesman.salesman_code ?? 'ALL', name: salesman.salesman_name },
+      kpis: {
+        currentMonthSales,
+        lastMonthSales,
+        momSalesChangePct: this.pctChange(currentMonthSales, lastMonthSales),
+        currentPeriodSales,
+        priorPeriodSales,
+        yoySalesChangePct: yoyChange,
+        billCount,
+        customerCount,
+        avgBillValue: billCount > 0 ? currentPeriodSales / billCount : null,
+      },
+      charts: { monthlyTrend },
+      tables: {
+        topItems: this.addShare(topItems),
+        topCustomers: this.addShare(topCustomers),
+      },
+      insights,
+    };
+  }
+
   private async getContext(tenantId: string, period: PeriodKey): Promise<ReportContext> {
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
@@ -1453,6 +1856,67 @@ export class ThreeSixtyReportsService {
       OR (UPPER(${mv}.type) = 'B' AND ${mt}.type = 'B')
       OR (UPPER(${mv}.type) = 'Q' AND ${mt}.type IN ('Q', 'B'))
     ) AND ${mt}.is_cancelled = FALSE`;
+  }
+
+  private async findRoute(tenantId: string, search?: string) {
+    if (!(search ?? '').trim()) {
+      return { is_all: true, route_code: null as string | null, route_name: 'All Routes', code: 'ALL' };
+    }
+    const term = this.searchTerm(search);
+    const rows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT s_code AS route_code, COALESCE(name, s_code) AS route_name, s_code AS code
+      FROM marg_sale_types
+      WHERE tenant_id = ${tenantId}::uuid AND sg_code = 'ROUT'
+        AND (${term} = '%%' OR s_code ILIKE ${term} OR name ILIKE ${term})
+      ORDER BY name
+      LIMIT 1
+    `);
+    return rows[0] ?? null;
+  }
+
+  private async findCity(tenantId: string, search?: string) {
+    if (!(search ?? '').trim()) {
+      return { is_all: true, city_code: null as string | null, city_name: 'All Cities', code: 'ALL' };
+    }
+    const term = this.searchTerm(search);
+    const rows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT s_code AS city_code, COALESCE(name, s_code) AS city_name, s_code AS code
+      FROM marg_sale_types
+      WHERE tenant_id = ${tenantId}::uuid AND sg_code = 'AREA'
+        AND (${term} = '%%' OR s_code ILIKE ${term} OR name ILIKE ${term})
+      ORDER BY name
+      LIMIT 1
+    `);
+    return rows[0] ?? null;
+  }
+
+  private async findSalesman(tenantId: string, search?: string) {
+    if (!(search ?? '').trim()) {
+      return { is_all: true, salesman_code: null as string | null, salesman_name: 'All Sales Team', code: 'ALL' };
+    }
+    const term = this.searchTerm(search);
+    const rows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT code AS salesman_code, COALESCE(name, code) AS salesman_name, code
+      FROM salesmen
+      WHERE tenant_id = ${tenantId}::uuid
+        AND (${term} = '%%' OR code ILIKE ${term} OR name ILIKE ${term})
+      ORDER BY name
+      LIMIT 1
+    `);
+    if (rows[0]) return rows[0];
+    const margRows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT DISTINCT
+        COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) AS salesman_code,
+        COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) AS salesman_name,
+        COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) AS code
+      FROM marg_vouchers mv
+      WHERE mv.tenant_id = ${tenantId}::uuid
+        AND COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) IS NOT NULL
+        AND (${term} = '%%' OR COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) ILIKE ${term})
+      ORDER BY salesman_code
+      LIMIT 1
+    `);
+    return margRows[0] ?? null;
   }
 
   private async findItem(tenantId: string, search?: string) {

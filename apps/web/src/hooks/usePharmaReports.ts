@@ -28,6 +28,9 @@ export const pharmaKeys = {
   item360: (f?: { search?: string; period?: ThreeSixtyPeriod; locationId?: string }) => [...pharmaKeys.threeSixty(), 'item', f] as const,
   customer360: (f?: { search?: string; period?: ThreeSixtyPeriod; locationId?: string }) => [...pharmaKeys.threeSixty(), 'customer', f] as const,
   supplier360: (f?: { search?: string; period?: ThreeSixtyPeriod; locationId?: string }) => [...pharmaKeys.threeSixty(), 'supplier', f] as const,
+  route360: (f?: { search?: string; period?: ThreeSixtyPeriod }) => [...pharmaKeys.threeSixty(), 'route', f] as const,
+  city360: (f?: { search?: string; period?: ThreeSixtyPeriod }) => [...pharmaKeys.threeSixty(), 'city', f] as const,
+  salesTeam360: (f?: { search?: string; period?: ThreeSixtyPeriod }) => [...pharmaKeys.threeSixty(), 'salesman', f] as const,
 
   inventory: () => [...pharmaKeys.all, 'inventory'] as const,
   currentStock: (f?: PharmaFilters) => [...pharmaKeys.inventory(), 'current', f] as const,
@@ -130,6 +133,33 @@ export function useSupplier360(filters?: { search?: string; period?: ThreeSixtyP
   return useQuery({
     queryKey: pharmaKeys.supplier360(filters),
     queryFn: () => pharmaReportsService.getSupplier360(filters),
+    enabled,
+    ...dashboardQueryBehavior,
+  });
+}
+
+export function useRoute360(filters?: { search?: string; period?: ThreeSixtyPeriod }, enabled = true) {
+  return useQuery({
+    queryKey: pharmaKeys.route360(filters),
+    queryFn: () => pharmaReportsService.getRoute360(filters),
+    enabled,
+    ...dashboardQueryBehavior,
+  });
+}
+
+export function useCity360(filters?: { search?: string; period?: ThreeSixtyPeriod }, enabled = true) {
+  return useQuery({
+    queryKey: pharmaKeys.city360(filters),
+    queryFn: () => pharmaReportsService.getCity360(filters),
+    enabled,
+    ...dashboardQueryBehavior,
+  });
+}
+
+export function useSalesTeam360(filters?: { search?: string; period?: ThreeSixtyPeriod }, enabled = true) {
+  return useQuery({
+    queryKey: pharmaKeys.salesTeam360(filters),
+    queryFn: () => pharmaReportsService.getSalesTeam360(filters),
     enabled,
     ...dashboardQueryBehavior,
   });

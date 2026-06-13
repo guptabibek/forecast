@@ -7,13 +7,20 @@ import { AreaChart } from '../../components/charts/AreaChart';
 import { BarChart } from '../../components/charts/BarChart';
 import { Badge, Button, Card, QueryErrorBanner } from '../../components/ui';
 import {
+  useCity360,
   useCustomer360,
   useItem360,
+  useRoute360,
+  useSalesTeam360,
   useSupplier360,
 } from '../../hooks/usePharmaReports';
 import type {
+  City360Report,
   Customer360Report,
+  DimensionSalesReport,
   Item360Report,
+  Route360Report,
+  SalesTeam360Report,
   Supplier360Report,
   ThreeSixtyItemMappingDiagnostic,
   ThreeSixtyPeriod,
@@ -23,14 +30,17 @@ import { pharmaReportsService } from '../../services/api/pharma-reports.service'
 import { dataService } from '../../services/api/data.service';
 import { fmt, fmtCurrency, fmtDate, fmtPct } from './shared';
 
-type Tab = 'item' | 'customer' | 'supplier';
-type Report = Item360Report | Customer360Report | Supplier360Report;
+type Tab = 'item' | 'customer' | 'supplier' | 'route' | 'city' | 'salesman';
+type Report = Item360Report | Customer360Report | Supplier360Report | Route360Report | City360Report | SalesTeam360Report;
 type ChartDatum = Record<string, string | number | null | undefined>;
 
 const tabs: { key: Tab; label: string; placeholder: string }[] = [
   { key: 'item', label: 'Item 360', placeholder: 'Search by Item Name / Code / Barcode' },
   { key: 'customer', label: 'Customer 360', placeholder: 'Search by Customer Name / Code / GST / Mobile' },
   { key: 'supplier', label: 'Supplier 360', placeholder: 'Search by Supplier Name / Code / GST / Mobile' },
+  { key: 'route', label: 'Route 360', placeholder: 'Search by Route / State Name or Code' },
+  { key: 'city', label: 'City 360', placeholder: 'Search by City / Area Name or Code' },
+  { key: 'salesman', label: 'Sales Team 360', placeholder: 'Search by Salesman Name or Code' },
 ];
 
 const periodOptions: { value: ThreeSixtyPeriod; label: string }[] = [
@@ -69,6 +79,9 @@ const allEntityLabels: Record<Tab, string> = {
   item: 'All Items',
   customer: 'All Customers',
   supplier: 'All Suppliers',
+  route: 'All Routes',
+  city: 'All Cities',
+  salesman: 'All Sales Team',
 };
 
 const chartData = <T extends object>(value: T[] | null | undefined): ChartDatum[] =>
@@ -298,7 +311,19 @@ function ProfileCard({ activeTab, report }: { activeTab: Tab; report: Report }) 
   const { showSaltColumn } = useTenantConfig();
   const profile = report.profile;
   const title = asText(profile.name);
-  const codeLabel = activeTab === 'item' ? 'SKU' : activeTab === 'customer' ? 'Customer Code' : 'Supplier Code';
+  const codeLabel =
+    activeTab === 'item' ? 'SKU' :
+    activeTab === 'customer' ? 'Customer Code' :
+    activeTab === 'supplier' ? 'Supplier Code' :
+    activeTab === 'route' ? 'Route Code' :
+    activeTab === 'city' ? 'Area Code' :
+    'Salesman Code';
+  const tabIcon =
+    activeTab === 'item' ? 'I' :
+    activeTab === 'customer' ? 'C' :
+    activeTab === 'supplier' ? 'S' :
+    activeTab === 'route' ? 'R' :
+    activeTab === 'city' ? 'A' : 'T';
   const fields: Array<[string, unknown]> =
     activeTab === 'item'
       ? [
@@ -322,21 +347,23 @@ function ProfileCard({ activeTab, report }: { activeTab: Tab; report: Report }) 
             ['Sales Person', profile.salesPerson],
             ['Last Invoice', fmtDate(profile.lastInvoiceDate as string | null | undefined)],
           ]
-        : [
-            ['Supplier Type', profile.type],
-            ['GST No', profile.gstNo],
-            ['Payment Terms', profile.paymentTerms],
-            ['Avg Lead Time', profile.avgLeadTimeDays ? `${fmt(asNumber(profile.avgLeadTimeDays), 1)} Days` : '-'],
-            ['Contact Person', profile.contactPerson],
-            ['Last Purchase', fmtDate(profile.lastPurchaseDate as string | null | undefined)],
-          ];
+        : activeTab === 'supplier'
+          ? [
+              ['Supplier Type', profile.type],
+              ['GST No', profile.gstNo],
+              ['Payment Terms', profile.paymentTerms],
+              ['Avg Lead Time', profile.avgLeadTimeDays ? `${fmt(asNumber(profile.avgLeadTimeDays), 1)} Days` : '-'],
+              ['Contact Person', profile.contactPerson],
+              ['Last Purchase', fmtDate(profile.lastPurchaseDate as string | null | undefined)],
+            ]
+          : [];
 
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_2fr]">
       <Card>
         <div className="flex items-center gap-4">
           <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-primary-50 text-2xl font-bold text-primary-700">
-            {activeTab === 'item' ? 'I' : activeTab === 'customer' ? 'C' : 'S'}
+            {tabIcon}
           </div>
           <div>
             <h2 className="text-xl font-bold text-secondary-950">{title}</h2>
@@ -705,6 +732,45 @@ function MetricTable({ rows }: { rows: Array<[string, ReactNode]> }) {
   );
 }
 
+function DimensionReport({ report, periodLabel }: { report: DimensionSalesReport; periodLabel: string }) {
+  const k = report.kpis;
+  return (
+    <>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <KpiTile title="This Month Sales" value={fmtCurrency(k.currentMonthSales)} subtext={trendText(k.momSalesChangePct)} tone={(k.momSalesChangePct ?? 0) >= 0 ? 'good' : 'warn'} />
+        <KpiTile title={`${periodLabel} Sales`} value={fmtCurrency(k.currentPeriodSales)} subtext={trendText(k.yoySalesChangePct)} tone={(k.yoySalesChangePct ?? 0) >= 0 ? 'good' : 'warn'} />
+        <KpiTile title="Bills (Period)" value={fmt(k.billCount)} subtext={`${fmt(k.customerCount)} customers`} />
+        <KpiTile title="Avg Bill Value" value={k.avgBillValue == null ? '-' : fmtCurrency(k.avgBillValue)} subtext={`Prior period: ${fmtCurrency(k.priorPeriodSales)}`} />
+      </div>
+
+      <ChartGrid
+        leftTitle="Monthly Sales Trend"
+        left={<AreaChart data={chartData(report.charts.monthlyTrend)} xAxisKey="month" areas={[
+          { dataKey: 'sales_value', name: 'Sales', color: '#2563eb' },
+        ]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
+        rightTitle="Period Comparison"
+        right={
+          <div className="flex flex-col gap-3 pt-4">
+            <MetricTable rows={[
+              [`${periodLabel} Sales`, fmtCurrency(k.currentPeriodSales)],
+              ['Prior Period Sales', fmtCurrency(k.priorPeriodSales)],
+              ['YoY / Period Change', <span className={trendClass(k.yoySalesChangePct)}>{trendText(k.yoySalesChangePct)}</span>],
+              ['This Month Sales', fmtCurrency(k.currentMonthSales)],
+              ['Last Month Sales', fmtCurrency(k.lastMonthSales)],
+              ['MoM Change', <span className={trendClass(k.momSalesChangePct)}>{trendText(k.momSalesChangePct)}</span>],
+            ]} />
+          </div>
+        }
+      />
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ContributionTable title="Top Items" rows={report.tables.topItems} />
+        <ContributionTable title="Top Customers" rows={report.tables.topCustomers} />
+      </div>
+    </>
+  );
+}
+
 function ScoreCard({ title, score }: { title: string; score: number }) {
   const label = score >= 85 ? 'A Grade' : score >= 70 ? 'Monitor' : 'High Risk';
   return (
@@ -938,11 +1004,21 @@ export default function ThreeSixtyReportsPage() {
   });
 
   const params = useMemo(() => ({ search, period, locationId }), [search, period, locationId]);
+  const dimParams = useMemo(() => ({ search, period }), [search, period]);
   const item = useItem360(params, activeTab === 'item');
   const customer = useCustomer360(params, activeTab === 'customer');
   const supplier = useSupplier360(params, activeTab === 'supplier');
+  const route = useRoute360(dimParams, activeTab === 'route');
+  const city = useCity360(dimParams, activeTab === 'city');
+  const salesman = useSalesTeam360(dimParams, activeTab === 'salesman');
 
-  const activeQuery = activeTab === 'item' ? item : activeTab === 'customer' ? customer : supplier;
+  const activeQuery =
+    activeTab === 'item' ? item :
+    activeTab === 'customer' ? customer :
+    activeTab === 'supplier' ? supplier :
+    activeTab === 'route' ? route :
+    activeTab === 'city' ? city :
+    salesman;
   const report = activeQuery.data as Report | undefined;
   const activeMeta = tabs.find((tab) => tab.key === activeTab) ?? tabs[0];
   const hasActiveViewState = Boolean(search || draftSearch || selectedSearchValue || locationId || period !== 'fy');
@@ -966,7 +1042,7 @@ export default function ThreeSixtyReportsPage() {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-secondary-950">360 Reports</h1>
-            <p className="mt-1 text-sm text-secondary-500">Entity-wise item, customer, and supplier intelligence from Marg EDE and operational data.</p>
+            <p className="mt-1 text-sm text-secondary-500">Entity-wise intelligence for items, customers, suppliers, routes, cities, and sales team from Marg EDE and operational data.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {tabs.map((tab) => (
@@ -1052,6 +1128,9 @@ export default function ThreeSixtyReportsPage() {
           {activeTab === 'item' && <ItemReport report={report as Item360Report} periodLabel={periodShortLabels[period]} />}
           {activeTab === 'customer' && <CustomerReport report={report as Customer360Report} periodLabel={periodShortLabels[period]} />}
           {activeTab === 'supplier' && <SupplierReport report={report as Supplier360Report} periodLabel={periodShortLabels[period]} />}
+          {(activeTab === 'route' || activeTab === 'city' || activeTab === 'salesman') && (
+            <DimensionReport report={report as DimensionSalesReport} periodLabel={periodShortLabels[period]} />
+          )}
           <InsightCard insights={report.insights} />
         </>
       )}
