@@ -19,7 +19,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { RequireModule } from '../platform/require-module.decorator';
 import { DashboardService, WIDGET_SIZES, WidgetSize } from './dashboard.service';
-import { InsightGenerationService } from './insight-generation.service';
+import { InsightQueueService } from './insight-queue.service';
 import { WidgetExecutorService } from './widget-executor.service';
 
 class CreateDashboardDto {
@@ -135,19 +135,17 @@ export class DashboardController {
   constructor(
     private readonly dashboards: DashboardService,
     private readonly widgetExecutor: WidgetExecutorService,
-    private readonly insightGeneration: InsightGenerationService,
+    private readonly insightQueue: InsightQueueService,
   ) {}
 
   /**
    * Refreshes ONLY the pinned-report analysis insight for this tenant so a
    * just-pinned report shows up in the insights feed immediately instead of
-   * waiting for the 6-hourly cycle. Fire-and-forget: analysis failures must
-   * never fail the pin/unpin request itself.
+   * waiting for the 6-hourly cycle. Enqueued (or run detached without Redis):
+   * analysis failures must never fail the pin/unpin request itself.
    */
   private refreshPinnedReportInsights(tenantId: string) {
-    void this.insightGeneration
-      .generateForTenant(tenantId, { providerIds: ['pinned-reports'] })
-      .catch(() => undefined);
+    this.insightQueue.enqueueDetached(tenantId, ['pinned-reports']);
   }
 
   @Get()

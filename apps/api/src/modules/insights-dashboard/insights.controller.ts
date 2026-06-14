@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { RequireModule } from '../platform/require-module.decorator';
 import { InsightGenerationService } from './insight-generation.service';
+import { InsightQueueService } from './insight-queue.service';
 import { InsightsService } from './insights.service';
 
 function toStringArray(value: unknown): string[] | undefined {
@@ -74,6 +75,7 @@ export class InsightsController {
   constructor(
     private readonly insights: InsightsService,
     private readonly generation: InsightGenerationService,
+    private readonly insightQueue: InsightQueueService,
   ) {}
 
   @Get()
@@ -138,9 +140,12 @@ export class InsightsController {
   @Roles('ADMIN')
   @RequirePermissions()
   @ApiOperation({ summary: 'Trigger insight generation for the current tenant (admin only)' })
-  @ApiResponse({ status: 200, description: 'Generation summary' })
+  @ApiResponse({ status: 200, description: 'Accepted onto the generation queue, or the inline result when queues are disabled' })
   generate(@CurrentUser() user: any) {
-    return this.generation.generateForTenant(user.tenantId);
+    // Queued (async) in production so the request returns immediately instead
+    // of blocking on the full provider + LLM-narration run; falls back to an
+    // inline run when Redis/queues are not configured.
+    return this.insightQueue.requestTenant(user.tenantId);
   }
 
   @Get('providers')

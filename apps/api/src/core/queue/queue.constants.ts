@@ -5,6 +5,7 @@ export const QUEUE_NAMES = {
   EXPORT: 'export-queue',
   NOTIFICATION: 'notification-queue',
   MARG_SYNC: 'marg-sync-queue',
+  INSIGHTS: 'insights-queue',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

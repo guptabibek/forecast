@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InsightGenerationService } from './insight-generation.service';
+import { InsightQueueService } from './insight-queue.service';
 
 /**
  * Periodically regenerates AI insights for all active tenants.
@@ -20,6 +21,7 @@ export class InsightGenerationScheduler {
 
   constructor(
     private readonly generation: InsightGenerationService,
+    private readonly insightQueue: InsightQueueService,
     private readonly config: ConfigService,
   ) {}
 
@@ -28,8 +30,18 @@ export class InsightGenerationScheduler {
     // Same truthy values the platform's env validation accepts (true/1/yes/on).
     const raw = String(this.config.get('AI_INSIGHTS_ENABLED') ?? '').trim().toLowerCase();
     if (!['true', '1', 'yes', 'on'].includes(raw)) return;
-    this.logger.log('Starting scheduled AI insight generation cycle');
     const started = Date.now();
+
+    // With a queue, fan out one job per tenant — workers process them with
+    // bounded concurrency and retries, which scales to thousands of tenants.
+    // Without Redis, fall back to the sequential in-process cycle.
+    const enqueued = await this.insightQueue.enqueueAllTenants();
+    if (enqueued !== null) {
+      this.logger.log(`Scheduled AI insight generation fanned out: tenantsEnqueued=${enqueued}, durationMs=${Date.now() - started}`);
+      return;
+    }
+
+    this.logger.log('Starting scheduled AI insight generation cycle (inline — no queue configured)');
     const results = await this.generation.generateForAllTenants();
     this.logger.log(
       `Scheduled AI insight generation finished: tenants=${results.length}, durationMs=${Date.now() - started}`,

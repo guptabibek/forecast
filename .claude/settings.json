@@ -65,7 +65,15 @@
       "Bash(grep -n 'tenantId\\\\|TENANT_SCOPED\\\\|EXCLUDED\\\\|middleware\\\\|$use\\\\|$extends' src/core/database/prisma.service.ts)",
       "Bash(grep -vE \"^\\\\s*$\")",
       "Bash(curl -s -o /dev/null http://localhost:4001/api/v1)",
-      "Bash(curl -s -o /dev/null -w \"api :4001 → %{http_code}\\\\n\" --max-time 4 http://localhost:4001/api/v1)"
+      "Bash(curl -s -o /dev/null -w \"api :4001 → %{http_code}\\\\n\" --max-time 4 http://localhost:4001/api/v1)",
+      "Read(//d/d/RabbitTech/forecast-saas/apps/api/src/modules/insights-dashboard/**)",
+      "Bash(grep -v \"//\")",
+      "Read(//d/d/RabbitTech/forecast-saas/apps/api/src/modules/**)",
+      "Bash(cd \"/d/RabbitTech/forecast-saas\" && echo \"=== queue/bull/redis infra ===\" && grep -rln \"bull\\\\|bullmq\\\\|@nestjs/bull\\\\|ioredis\\\\|Queue\\\\b\" apps/api/src --include=*.ts | head -20; echo \"=== package deps ===\"; grep -iE \"bull|redis|@nestjs/\\(schedule|bull\\)|ioredis\" apps/api/package.json)",
+      "Read(//d/d/RabbitTech/forecast-saas/apps/api/**)",
+      "Bash(cd \"/d/RabbitTech/forecast-saas\" && find apps/api/src -maxdepth 2 -name \"main.ts\" -o -maxdepth 2 -name \"*.module.ts\" -path \"*app*\" | head; echo \"=== main.ts ===\"; cat apps/api/src/main.ts 2>/dev/null | head -120)",
+      "Read(//d/d/RabbitTech/**)",
+      "Bash(grep -nE 'cls|tenantId|$use|middleware|$extends|withTenant|setTenant' apps/api/src/core/database/prisma.service.ts)"
     ]
   }
 }

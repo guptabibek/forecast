@@ -30,6 +30,14 @@ services:
       # ai_tenant_provider_configs. Only the encryption key remains in env.
       AI_CONFIG_ENCRYPTION_KEY: ${AI_CONFIG_ENCRYPTION_KEY:-}
       AI_SEMANTIC_CATALOG_PATH: ${AI_SEMANTIC_CATALOG_PATH:-/app/ai-reporting/semantic-catalog.json}
+      AI_BILLING_ENFORCEMENT: ${AI_BILLING_ENFORCEMENT:-true}
+      # Stripe (AI billing card purchases + webhook). Must be listed here or
+      # the keys never reach the container, even when set in .env.docker —
+      # this environment block is an explicit whitelist (see note above).
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-}
+      FRONTEND_URL: ${FRONTEND_URL:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
