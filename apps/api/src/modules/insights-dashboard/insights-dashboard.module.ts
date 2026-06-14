@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { DatabaseModule } from '../../core/database/database.module';
+import { AiBillingModule } from '../ai-billing/ai-billing.module';
 import { AiReportingModule } from '../ai-reporting/ai-reporting.module';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
@@ -35,7 +36,10 @@ import { WidgetExecutorService } from './widget-executor.service';
  * changes.
  */
 @Module({
-  imports: [ConfigModule, DatabaseModule, AiReportingModule],
+  // AiBillingModule supplies AI access governance (enabled/suspended, wallet
+  // state) — insights run no LLM tokens, but they are AI surfaces and obey
+  // the same access controls.
+  imports: [ConfigModule, DatabaseModule, AiReportingModule, AiBillingModule],
   controllers: [DashboardController, InsightsController],
   providers: [
     DashboardService,

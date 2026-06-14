@@ -119,18 +119,17 @@ export function hasPermission(user: User | null | undefined, permission: string)
   return user.permissions?.includes(permission) === true;
 }
 
+/**
+ * Whether the AI Reporting / AI Insights surfaces are available to this user.
+ * Two conditions only, both resolved by the backend into the boolean passed as
+ * `featureEnabled` (settings.aiReporting.enabled):
+ *   1. the super admin enabled the `ai-reporting` module for the tenant, AND
+ *   2. the tenant's AI provider credentials are configured & enabled.
+ * Role/permission authorization is enforced by the API on every AI call; the
+ * client only decides discovery/visibility, so it does not re-check here.
+ */
 export function canUseAiReporting(user: User | null | undefined, featureEnabled = true): boolean {
-  if (!user) return false;
-  if (!featureEnabled) return false;
-  if (user.moduleAccess && user.moduleAccess.reports === false) return false;
-  if (roleMatches(user.role, 'ADMIN')) return true;
-  return hasPermission(user, 'reports.ai.view') ||
-    hasPermission(user, 'reports.ai.execute') ||
-    hasPermission(user, 'reports.ai.dashboard') ||
-    hasPermission(user, 'reports.ai_reporting.view') ||
-    hasPermission(user, 'reports.ai_reporting.execute') ||
-    hasPermission(user, 'report:ai:view') ||
-    hasPermission(user, 'report:ai:execute');
+  return Boolean(user) && featureEnabled === true;
 }
 
 export function getRoleLabel(role: UserRole | null | undefined): string {

@@ -1,9 +1,19 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { AiAccessStatus, AiWalletStatus } from '@prisma/client';
 import { TenantCacheService } from '../../core/cache/tenant-cache.service';
+import { AiAccessService } from '../ai-billing/access.service';
+import { AiAccessDeniedError, WalletSuspendedError } from '../ai-billing/billing.errors';
+import { WalletService } from '../ai-billing/wallet.service';
 import { AiReportingService, StoredReportExecutionResult } from '../ai-reporting/ai-reporting.service';
 import { SemanticReportQuery } from '../ai-reporting/semantic-query.types';
 import { DashboardService } from './dashboard.service';
 import { applyRollingWindow } from './rolling-window.util';
+import {
+  analyzeReportResult,
+  buildPreviousPeriodQuery,
+  sumPrimaryMetric,
+  WidgetAnalytics,
+} from './result-analytics.util';
 
 const CACHE_NAMESPACE = 'ai-dashboard:widget';
 const DEFAULT_CACHE_TTL_SECONDS = 300;
@@ -13,6 +23,8 @@ export interface WidgetExecutionResult extends StoredReportExecutionResult {
   widgetId: string;
   cached: boolean;
   cachedAt: string;
+  /** Deterministic analysis of the result (KPIs, growth, distribution, trend). */
+  analytics: WidgetAnalytics | null;
 }
 
 @Injectable()
@@ -23,6 +35,11 @@ export class WidgetExecutorService {
     private readonly dashboardService: DashboardService,
     private readonly aiReporting: AiReportingService,
     private readonly cache: TenantCacheService,
+    // AI governance (optional so bare unit-spec construction keeps working):
+    // widgets consume no LLM tokens, but a DISABLED/SUSPENDED account or a
+    // suspended wallet must not keep using AI surfaces.
+    @Optional() private readonly billingAccess?: AiAccessService,
+    @Optional() private readonly billingWallet?: WalletService,
   ) {}
 
   /**
@@ -31,6 +48,7 @@ export class WidgetExecutorService {
    * never spans users). No LLM call is made on this path.
    */
   async execute(user: any, widgetId: string, options?: { force?: boolean }): Promise<WidgetExecutionResult> {
+    await this.assertAiGovernance(user);
     const widget = await this.dashboardService.requireWidget(user, widgetId);
 
     if (!options?.force) {
@@ -57,6 +75,7 @@ export class WidgetExecutorService {
       widgetId: widget.id,
       cached: false,
       cachedAt: new Date().toISOString(),
+      analytics: await this.buildAnalytics(user, semanticQuery, filters, result),
     };
 
     const ttl = Math.min(widget.refreshIntervalSec ?? DEFAULT_CACHE_TTL_SECONDS, MAX_CACHE_TTL_SECONDS);
@@ -69,6 +88,69 @@ export class WidgetExecutorService {
 
   async invalidate(tenantId: string, widgetId: string) {
     await this.cache.del(tenantId, CACHE_NAMESPACE, widgetId);
+  }
+
+  /**
+   * Widgets are SQL-only (no tokens to charge), but the AI access policy
+   * (ENABLED / DISABLED / SUSPENDED) and wallet suspension still apply —
+   * "AI suspended" means ALL AI surfaces, not just LLM calls.
+   */
+  private async assertAiGovernance(user: { id?: string; tenantId: string }) {
+    if (this.billingAccess) {
+      const policy = await this.billingAccess.getEffectivePolicyForUser(user.tenantId, user.id ?? null);
+      if (policy.status === AiAccessStatus.DISABLED) {
+        throw new AiAccessDeniedError('AI_ACCESS_DISABLED', 'AI access is disabled for this account');
+      }
+      if (policy.status === AiAccessStatus.SUSPENDED) {
+        throw new AiAccessDeniedError('AI_ACCESS_SUSPENDED', 'AI access is suspended for this account');
+      }
+    }
+    if (this.billingWallet) {
+      const wallet = await this.billingWallet.getOrCreateWallet(user.tenantId);
+      if (wallet.status === AiWalletStatus.SUSPENDED || wallet.status === AiWalletStatus.CLOSED) {
+        throw new WalletSuspendedError('AI wallet is suspended — recharge to use AI dashboards');
+      }
+    }
+  }
+
+  /**
+   * Computes the analytics block for a successful widget execution. At most
+   * ONE extra query (the previous period, only for past-facing custom
+   * windows), cached together with the payload. Analytics are best-effort —
+   * a failure here never fails the widget itself.
+   */
+  private async buildAnalytics(
+    user: any,
+    semanticQuery: SemanticReportQuery,
+    filters: { companyId?: number; branchIds?: string[] },
+    result: StoredReportExecutionResult,
+  ): Promise<WidgetAnalytics | null> {
+    if (result.status !== 'success' || !result.rowCount) return null;
+    try {
+      const reportRows = { columns: result.columns, rows: result.rows, rowCount: result.rowCount };
+      const currentTotal = sumPrimaryMetric(reportRows, semanticQuery);
+
+      let previousTotal: number | null = null;
+      const previousQuery = buildPreviousPeriodQuery(semanticQuery, new Date());
+      if (previousQuery && currentTotal !== null) {
+        const previous = await this.aiReporting.executeStoredReport(user, {
+          semanticQuery: previousQuery,
+          companyId: filters.companyId,
+          branchIds: filters.branchIds,
+        });
+        if (previous.status === 'success') {
+          previousTotal = sumPrimaryMetric(
+            { columns: previous.columns, rows: previous.rows, rowCount: previous.rowCount },
+            previousQuery,
+          );
+        }
+      }
+
+      return analyzeReportResult({ query: semanticQuery, result: reportRows, currentTotal, previousTotal });
+    } catch (error: any) {
+      this.logger.warn(`Widget analytics skipped: ${String(error?.message ?? error).slice(0, 200)}`);
+      return null;
+    }
   }
 
   private applyVizOverride(query: SemanticReportQuery, vizType: string | null): SemanticReportQuery {

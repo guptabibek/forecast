@@ -92,3 +92,5 @@ playwright-report/
 .env.production.local
 .claude/
 graphify-out/
+.claude/settings.json
+.claude/settings.json

@@ -4,6 +4,7 @@ import { CLARIFICATION_RESPONSE_RULES } from './prompts/clarification.prompt';
 import { buildDashboardPlannerPrompt } from './prompts/dashboard-planner.prompt';
 import { NLQ_PROMPT_VERSION, NLQ_SYSTEM_PROMPT } from './prompts/nlq-system.prompt';
 import { buildSemanticQueryGenerationPrompt } from './prompts/semantic-query-generation.prompt';
+import { repairChangeRankingIntent, repairDatasetCoherence, repairGroupingIntent } from './grouping-intent.util';
 import { SemanticCatalogLoader } from './semantic-catalog.loader';
 import {
   AiReportAnalysisType,
@@ -137,7 +138,40 @@ export class NlqParserService {
       requestId: input.requestId,
       callType: 'semantic_parse',
     });
-    return this.normalizeAiResponse(response, input.question, input.dashboardOnly === true);
+    const normalized = this.normalizeAiResponse(response, input.question, input.dashboardOnly === true);
+    return this.applyGroupingIntentGuard(input.question, normalized);
+  }
+
+  /**
+   * Deterministic backstop for grouped/ranking questions the LLM degraded to
+   * ungrouped output ("Top 5 routes with most sales" → top 5 rows). Repairs
+   * the query when the ranked noun maps to a catalog dimension; converts to
+   * a precise unsupported response when the noun is a known business entity
+   * the catalog cannot group by. Leaves every other query untouched.
+   */
+  private applyGroupingIntentGuard(question: string, query: SemanticQuery): SemanticQuery {
+    if (query.queryKind !== 'single_report') return query;
+    const catalog = this.catalogLoader.getCatalog();
+    // First normalize stray sibling-dataset IDs (dataset right, vocabulary
+    // wrong), then shape change-ranking questions (delta vs previous period),
+    // then repair dropped grouping intent.
+    const coherent = repairChangeRankingIntent(question, repairDatasetCoherence(query, catalog), catalog);
+    const result = repairGroupingIntent(question, coherent, catalog);
+    if (result.unsupportedNoun) {
+      return {
+        queryKind: 'unsupported',
+        title: 'Unsupported grouping dimension',
+        reason: `The question ranks by "${result.unsupportedNoun}", but the reporting catalog has no ${result.unsupportedNoun} dimension to group by.`,
+        followUpQuestions: [],
+        assumptions: [],
+        errorCode: 'MISSING_GROUPING_DIMENSION',
+        missingCapabilities: [`${result.unsupportedNoun}_dimension`],
+        availableAlternatives: [],
+        recommendedSchemaFix: `Add a ${result.unsupportedNoun} dimension to the AI semantic catalog and expose its columns on the reporting views.`,
+        unsupportedReason: `No ${result.unsupportedNoun} dimension is available in the reporting catalog.`,
+      };
+    }
+    return result.query;
   }
 
   private normalizeAiResponse(response: unknown, question: string, dashboardOnly: boolean): SemanticQuery {
@@ -318,6 +352,9 @@ export class NlqParserService {
       type,
       startDate: this.optionalString(value.startDate) ?? null,
       endDate: this.optionalString(value.endDate) ?? null,
+      // 'change' ranks by the period-over-period delta instead of stacking
+      // both periods ("top 10 items whose sales decreased vs last month").
+      ...(String(value.rankBy) === 'change' ? { rankBy: 'change' as const } : {}),
     };
   }
 

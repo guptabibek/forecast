@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { DatabaseModule } from '../../core/database/database.module';
+import { AiBillingModule } from '../ai-billing/ai-billing.module';
 import { AiProviderService } from './ai-provider.service';
 import { AiReportingAuditService } from './ai-reporting.audit';
 import { AiReportingController } from './ai-reporting.controller';
@@ -16,7 +17,9 @@ import { SqlCompilerService } from './sql-compiler.service';
 import { SqlSafetyValidator } from './sql-safety.validator';
 
 @Module({
-  imports: [ConfigModule, DatabaseModule],
+  // AiBillingModule supplies the central provider/model registry and the
+  // reserve→execute→settle charge lifecycle around every LLM call.
+  imports: [ConfigModule, DatabaseModule, AiBillingModule],
   controllers: [AiReportingController],
   providers: [
     AiProviderService,

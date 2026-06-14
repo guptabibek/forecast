@@ -1,4 +1,4 @@
-import { canShowSidebarHref, canUseAiReporting, isSuperAdmin } from '@/permissions';
+import { canShowSidebarHref, isSuperAdmin } from '@/permissions';
 import { useAuthStore } from '@/stores/auth.store';
 import {
   ArrowPathIcon,
@@ -44,9 +44,12 @@ type NavigationItem = NavItemType | NavGroupType;
 
 const navigation: NavigationItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
-  // Top-level on purpose — it is the executive entry point, not one more
-  // report, and buried in the 19-item Reports group nobody finds it.
+  // AI surfaces are top-level (not inside the Reports group) so their
+  // visibility depends only on the AI feature being enabled — never on the
+  // separate `reports` module. Gating lives in canShowNavItem.
+  { name: 'AI Reporting', href: '/reports/ai', icon: SparklesIcon, module: 'ai-reporting' },
   { name: 'AI Insights', href: '/insights', icon: SparklesIcon, module: 'ai-reporting' },
+  { name: 'AI Billing', href: '/billing/ai', icon: CurrencyDollarIcon, module: 'ai-reporting' },
   {
     name: 'Planning & Forecasting',
     module: 'planning',
@@ -72,7 +75,6 @@ const navigation: NavigationItem[] = [
       { name: 'Supplier', href: '/pharma-reports/suppliers', icon: UsersIcon, module: 'reports' },
       { name: 'Batches', href: '/pharma-reports/batches', icon: CubeIcon, module: 'reports' },
       { name: 'Party Outstanding', href: '/pharma-reports/financial', icon: CurrencyDollarIcon, module: 'reports' },
-      { name: 'AI Reporting', href: '/reports/ai', icon: SparklesIcon, module: 'ai-reporting' },
       { name: '360 Reports', href: '/pharma-reports/360', icon: DocumentChartBarIcon, module: 'reports' },
       { name: 'Alerts', href: '/pharma-reports/alerts', icon: ExclamationTriangleIcon, module: 'reports' },
       { name: 'GL Accounts', href: '/pharma-reports/gl-accounts', icon: CurrencyDollarIcon, module: 'reports' },
@@ -121,6 +123,7 @@ const navigation: NavigationItem[] = [
     module: 'platform-admin',
     items: [
       { name: 'Tenants', href: '/platform', icon: WrenchScrewdriverIcon, module: 'platform-admin' },
+      { name: 'AI Management', href: '/platform/ai-billing', icon: SparklesIcon, module: 'platform-admin' },
     ],
   },
 ];
@@ -133,7 +136,6 @@ export default function Sidebar({
 }: SidebarProps) {
   const location = useLocation();
   const role = useAuthStore((s) => s.user?.role);
-  const user = useAuthStore((s) => s.user);
   const userModuleAccess = useAuthStore((s) => s.user?.moduleAccess);
   const { settings } = useBranding();
 
@@ -142,6 +144,10 @@ export default function Sidebar({
   const tagline = settings?.brandTagline;
 
   const enabledModules = settings?.enabledModules;
+  // The ONLY two conditions for showing the AI Reporting / AI Insights menus.
+  // The backend folds both into settings.aiReporting.enabled:
+  //   1. the super admin enabled the `ai-reporting` module for the tenant, AND
+  //   2. the tenant's AI provider credentials are configured & enabled.
   const aiReportingEnabled = settings?.aiReporting?.enabled === true;
 
   const isActiveRoute = (href: string) => {
@@ -165,12 +171,15 @@ export default function Sidebar({
   }, [enabledModules, role, userModuleAccess]);
 
   const canShowNavItem = useCallback(
-    (navItem: NavItemType) =>
-      canShowSidebarHref(role, navItem.href) &&
-      isModuleEnabled(navItem.module) &&
-      // AI surfaces additionally require the tenant AI feature + AI permissions.
-      ((navItem.href !== '/reports/ai' && navItem.href !== '/insights') || canUseAiReporting(user, aiReportingEnabled)),
-    [role, user, isModuleEnabled, aiReportingEnabled],
+    (navItem: NavItemType) => {
+      // AI menus are governed solely by the two AI conditions above — no role,
+      // permission, or other module checks.
+      if (navItem.href === '/reports/ai' || navItem.href === '/insights' || navItem.href === '/billing/ai') {
+        return aiReportingEnabled;
+      }
+      return canShowSidebarHref(role, navItem.href) && isModuleEnabled(navItem.module);
+    },
+    [role, isModuleEnabled, aiReportingEnabled],
   );
 
   const visibleNavigation = useMemo(

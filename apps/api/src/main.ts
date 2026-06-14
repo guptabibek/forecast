@@ -77,8 +77,17 @@ async function bootstrap() {
   );
   app.use(compression());
 
-  // Body size limits — prevent large payload DoS
-  app.use(json({ limit: '10mb' }));
+  // Body size limits — prevent large payload DoS.
+  // The Stripe webhook needs the RAW body for HMAC signature verification —
+  // capture it for that route only.
+  app.use(json({
+    limit: '10mb',
+    verify: (req: any, _res: unknown, buf: Buffer) => {
+      if (req.originalUrl?.includes('/ai-billing/webhooks/stripe')) {
+        req.rawBody = Buffer.from(buf);
+      }
+    },
+  }));
   app.use(urlencoded({ extended: true, limit: '10mb' }));
 
   app.enableCors({

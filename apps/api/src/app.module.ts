@@ -21,6 +21,7 @@ import { WorkflowModule } from './core/workflow/workflow.module';
 
 // Feature modules
 import { AuditFeatureModule } from './modules/audit/audit.module';
+import { AiBillingModule } from './modules/ai-billing/ai-billing.module';
 import { AiReportingModule } from './modules/ai-reporting/ai-reporting.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DataModule } from './modules/data/data.module';
@@ -118,6 +119,7 @@ function positiveInt(value: string | number | undefined, fallback: number): numb
     DataModule,
     SettingsModule,
     ReportsModule,
+    AiBillingModule,
     AiReportingModule,
     InsightsDashboardModule,
     ManufacturingModule,

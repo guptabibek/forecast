@@ -22,16 +22,21 @@ describe('permissions', () => {
     expect(canUseAiReporting(user, true)).toBe(true);
   });
 
-  it('requires an AI reporting permission for normal users', () => {
-    expect(canUseAiReporting(baseUser, true)).toBe(false);
-    expect(canUseAiReporting({ ...baseUser, permissions: ['reports.ai.view'] }, true)).toBe(true);
-  });
-
-  it('allows tenant admins to use AI reporting when the feature is enabled', () => {
+  it('shows AI reporting to any authenticated user when the AI feature is enabled, regardless of role or permissions', () => {
+    // The two conditions (module enabled by SA + credentials configured) are
+    // folded into featureEnabled by the backend; the client adds no further gate.
+    expect(canUseAiReporting(baseUser, true)).toBe(true);
     expect(canUseAiReporting({ ...baseUser, role: 'ADMIN' }, true)).toBe(true);
+    expect(canUseAiReporting({ ...baseUser, permissions: [] }, true)).toBe(true);
   });
 
-  it('hides AI reporting when the feature flag is disabled', () => {
-    expect(canUseAiReporting({ ...baseUser, permissions: ['reports.ai.view'] }, false)).toBe(false);
+  it('hides AI reporting when the AI feature is not fully enabled', () => {
+    expect(canUseAiReporting(baseUser, false)).toBe(false);
+    expect(canUseAiReporting({ ...baseUser, role: 'ADMIN' }, false)).toBe(false);
+  });
+
+  it('hides AI reporting when there is no authenticated user', () => {
+    expect(canUseAiReporting(null, true)).toBe(false);
+    expect(canUseAiReporting(undefined, true)).toBe(false);
   });
 });

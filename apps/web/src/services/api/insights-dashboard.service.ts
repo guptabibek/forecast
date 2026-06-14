@@ -61,6 +61,19 @@ export interface WidgetExecutionResult {
   unsupportedReason: string | null;
   cached: boolean;
   cachedAt: string;
+  analytics?: WidgetAnalytics | null;
+}
+
+export interface WidgetAnalyticsKpi {
+  label: string;
+  value: string;
+  tone: 'positive' | 'negative' | 'neutral';
+}
+
+export interface WidgetAnalytics {
+  kpis: WidgetAnalyticsKpi[];
+  insights: string[];
+  trend: { direction: 'rising' | 'falling' | 'flat'; points: Array<{ period: string; value: number }> } | null;
 }
 
 export interface Insight {

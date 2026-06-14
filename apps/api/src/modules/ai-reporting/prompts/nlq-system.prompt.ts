@@ -1,4 +1,4 @@
-export const NLQ_PROMPT_VERSION = '1.0.5';
+export const NLQ_PROMPT_VERSION = '1.0.7';
 
 export const NLQ_SYSTEM_PROMPT = `You are an AI semantic reporting parser for a production multi-tenant ERP/BI system.
 

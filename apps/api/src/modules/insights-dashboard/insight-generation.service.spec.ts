@@ -137,3 +137,84 @@ describe('InsightGenerationService', () => {
     expect(result.providersRun).toBe(0);
   });
 });
+
+describe('InsightGenerationService metering (credits per provider run)', () => {
+  const tenantId = '11111111-1111-4111-8111-111111111111';
+  const candidate = { dedupeKey: 'k1', severity: 'high' as const, title: 'T', summary: 'S', confidence: 0.9 };
+
+  function harness(options: { fee?: string; enforcement?: string; reserveFails?: boolean } = {}) {
+    const prisma: any = {
+      aiInsightProviderConfig: { findMany: jest.fn().mockResolvedValue([]), upsert: jest.fn().mockResolvedValue({}) },
+      aiInsight: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'insight-1' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      aiInsightEvent: { create: jest.fn().mockResolvedValue({}) },
+      aiUsageLog: { create: jest.fn().mockResolvedValue({ id: 'usage-1' }) },
+    };
+    const cache = { invalidateNamespace: jest.fn().mockResolvedValue(undefined) } as any;
+    const aiReporting = { executeStoredReport: jest.fn() } as any;
+    const provider = {
+      providerId: 'p1', displayName: 'P1', category: 'test', defaultEnabled: true,
+      generate: jest.fn().mockResolvedValue([candidate]),
+    };
+    const failingProvider = {
+      providerId: 'p2', displayName: 'P2', category: 'test', defaultEnabled: true,
+      generate: jest.fn().mockRejectedValue(new Error('boom')),
+    };
+    const wallet = {
+      reserveCredits: options.reserveFails
+        ? jest.fn().mockRejectedValue(Object.assign(new Error('Insufficient AI credits'), { name: 'InsufficientCreditsError' }))
+        : jest.fn().mockResolvedValue({ id: 'res-1' }),
+      finalizeReservation: jest.fn().mockResolvedValue({ transaction: { id: 'txn-1' } }),
+    } as any;
+    const access = { getEffectivePolicyForUser: jest.fn().mockResolvedValue({ status: 'ENABLED' }) } as any;
+    const config = {
+      get: jest.fn((key: string) => {
+        if (key === 'AI_INSIGHTS_PROVIDER_RUN_FEE') return options.fee ?? '0.01';
+        if (key === 'AI_BILLING_ENFORCEMENT') return options.enforcement ?? 'true';
+        return undefined;
+      }),
+    } as any;
+    const service = new InsightGenerationService(prisma, aiReporting, cache, [provider, failingProvider] as any, access, wallet, config);
+    return { service, prisma, wallet, provider, failingProvider };
+  }
+
+  it('reserves fee × planned providers, settles for the providers that RAN, and writes a usage log', async () => {
+    const { service, prisma, wallet } = harness();
+    const result = await service.generateForTenant(tenantId);
+
+    // 2 planned providers reserved...
+    expect(wallet.reserveCredits).toHaveBeenCalledWith(expect.objectContaining({ tenantId }));
+    expect(String(wallet.reserveCredits.mock.calls[0][0].amount)).toBe('0.02');
+    // ...but p2 failed, so only 1 run is charged.
+    expect(result.providersRun).toBe(1);
+    expect(String(wallet.finalizeReservation.mock.calls[0][1])).toBe('0.01');
+    expect(prisma.aiUsageLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        tenantId,
+        modelCode: 'insights-generation',
+        callType: 'insights_generation',
+        status: 'CHARGED',
+        transactionId: 'txn-1',
+      }),
+    }));
+  });
+
+  it('insufficient credits blocks the whole cycle (402 propagates to manual callers)', async () => {
+    const { service, provider } = harness({ reserveFails: true });
+    await expect(service.generateForTenant(tenantId)).rejects.toThrow(/Insufficient/);
+    expect(provider.generate).not.toHaveBeenCalled();
+  });
+
+  it('does not meter when enforcement is off or the fee is zero', async () => {
+    const off = harness({ enforcement: 'false' });
+    await off.service.generateForTenant(tenantId);
+    expect(off.wallet.reserveCredits).not.toHaveBeenCalled();
+
+    const free = harness({ fee: '0' });
+    await free.service.generateForTenant(tenantId);
+    expect(free.wallet.reserveCredits).not.toHaveBeenCalled();
+  });
+});

@@ -162,6 +162,15 @@ export interface SemanticComparison {
   type: 'previous_period' | 'previous_year' | 'custom' | 'none';
   startDate: string | null;
   endDate: string | null;
+  /**
+   * Result shape:
+   *  - 'current' (default): legacy side-by-side listing — the same query run
+   *    for both periods, stacked with a comparison_period label.
+   *  - 'change': rank rows BY THE DELTA between the periods (current −
+   *    previous per dimension value, with change/change_pct columns) — e.g.
+   *    "top 10 items whose sales decreased compared to previous month".
+   */
+  rankBy?: 'current' | 'change';
 }
 
 export interface SemanticOutput {

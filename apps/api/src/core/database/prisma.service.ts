@@ -9,13 +9,24 @@ import { ClsService } from 'nestjs-cls';
  */
 const SA_SYNTHETIC_TENANT_ID = '00000000-0000-0000-0000-000000000000';
 
+/**
+ * Platform-governance catalogs whose `tenantId` column is an OPTIONAL scope
+ * override, NOT a tenant-isolation key. Auto-injecting the CLS tenant into
+ * their queries silently hides GLOBAL/PLAN rows (tenant_id IS NULL) — e.g.
+ * global AI pricing became invisible to every tenant request. These models
+ * are only reachable through services that filter explicitly, and their
+ * customer-facing endpoints never expose them raw.
+ */
+const TENANT_SCOPING_EXEMPT_MODELS = new Set(['AiModelPricing', 'AiAccessPolicy']);
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
   private readonly tenantScopedModels = new Set(
     Prisma.dmmf.datamodel.models
       .filter((model) => model.fields.some((field) => field.name === 'tenantId'))
-      .map((model) => model.name),
+      .map((model) => model.name)
+      .filter((name) => !TENANT_SCOPING_EXEMPT_MODELS.has(name)),
   );
   private readonly allowUnscopedTenantQueryKey = 'allowUnscopedTenantQuery';
 
