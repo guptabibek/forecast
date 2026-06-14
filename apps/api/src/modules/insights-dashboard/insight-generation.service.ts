@@ -1,10 +1,9 @@
 import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { AiAccessStatus, AiUsageBillingStatus, Prisma } from '@prisma/client';
+import { AiAccessStatus } from '@prisma/client';
 import { TenantCacheService } from '../../core/cache/tenant-cache.service';
 import { PrismaService } from '../../core/database/prisma.service';
 import { AiAccessService } from '../ai-billing/access.service';
-import { WalletService } from '../ai-billing/wallet.service';
+import { AiProviderService } from '../ai-reporting/ai-provider.service';
 import { AiReportingService } from '../ai-reporting/ai-reporting.service';
 import { SemanticReportQuery } from '../ai-reporting/semantic-query.types';
 import {
@@ -13,12 +12,21 @@ import {
   InsightCandidate,
   InsightProviderContext,
 } from './insight-provider.interface';
+import { buildInsightNarrativePrompt } from './prompts/insight-narrative.prompt';
 
 const INSIGHTS_CACHE_NAMESPACE = 'ai-dashboard:insights';
 /** Synthetic identity used for tenant-level (not user-level) insight queries */
 const INSIGHT_SYSTEM_USER_ID = '00000000-0000-0000-0000-00000000a11e';
 /** A NEW insight that keeps being re-detected becomes ACTIVE after this long */
 const NEW_TO_ACTIVE_AFTER_MS = 24 * 60 * 60 * 1000;
+/** Upper bound on LLM narration calls per provider run — a safety cap so a
+ *  provider that emits many candidates (e.g. pinned reports) cannot trigger an
+ *  unbounded burst of billed calls in a single cycle. */
+const MAX_NARRATIONS_PER_PROVIDER_RUN = 10;
+/** Mirrors ResultSummarizerService: metric keys matching this are dropped
+ *  before the candidate is sent to the LLM when the tenant masks sensitive
+ *  fields. */
+const SENSITIVE_KEY = /(pan|vat|gst|phone|address|email|license|secret|token)/i;
 
 export interface TenantGenerationResult {
   tenantId: string;
@@ -40,23 +48,10 @@ export class InsightGenerationService {
     @Inject(INSIGHT_PROVIDERS) private readonly providers: IInsightProvider[],
     // AI governance: suspended/disabled tenants get no fresh insights.
     @Optional() private readonly billingAccess?: AiAccessService,
-    // Insight generation is metered: a flat per-provider-run fee is reserved
-    // before the cycle and settled for the providers that actually ran.
-    @Optional() private readonly billingWallet?: WalletService,
-    @Optional() private readonly config?: ConfigService,
+    // Insight narratives are rewritten by the LLM and billed on real token
+    // usage through the same prepare/settle pipeline as AI reporting.
+    @Optional() private readonly aiProvider?: AiProviderService,
   ) {}
-
-  /** Credits charged per insight provider run (no LLM tokens are involved —
-   *  this prices the platform compute). 0 disables insight metering. */
-  private providerRunFee(): Prisma.Decimal {
-    const raw = Number(this.config?.get('AI_INSIGHTS_PROVIDER_RUN_FEE') ?? 0.01);
-    return new Prisma.Decimal(Number.isFinite(raw) && raw >= 0 ? raw : 0.01);
-  }
-
-  private billingEnforced(): boolean {
-    const raw = String(this.config?.get('AI_BILLING_ENFORCEMENT') ?? 'true').trim().toLowerCase();
-    return ['true', '1', 'yes', 'on'].includes(raw);
-  }
 
   listRegisteredProviders(): Array<{ providerId: string; displayName: string; category: string; defaultEnabled: boolean }> {
     return this.providers.map((provider) => ({
@@ -95,7 +90,27 @@ export class InsightGenerationService {
     return this.listProviderConfigs(tenantId);
   }
 
-  /** Runs all enabled providers for every active tenant (scheduler entry point). */
+  /**
+   * Active tenants with AI reporting enabled — the set that gets insights.
+   * Shared by the inline cycle and the queue fan-out so both target exactly
+   * the same tenants.
+   */
+  async listGeneratableTenantIds(): Promise<string[]> {
+    const [tenants, disabledModules] = await Promise.all([
+      this.prisma.tenant.findMany({ where: { status: 'ACTIVE' }, select: { id: true } }),
+      this.prisma.tenantModule.findMany({ where: { module: 'ai-reporting', enabled: false }, select: { tenantId: true } }),
+    ]);
+    const disabled = new Set(disabledModules.map((row) => row.tenantId));
+    return tenants.map((tenant) => tenant.id).filter((id) => !disabled.has(id));
+  }
+
+  /**
+   * Runs all enabled providers for every active tenant, sequentially, in this
+   * process. Used as the no-queue fallback; when Redis is configured the
+   * scheduler fans out one queue job per tenant instead (see
+   * InsightQueueService) so the work is bounded, retried, and spread across
+   * workers rather than serialized in the API process.
+   */
   async generateForAllTenants(): Promise<TenantGenerationResult[]> {
     if (this.running) {
       this.logger.warn('Insight generation already running in this process; skipping cycle');
@@ -103,24 +118,14 @@ export class InsightGenerationService {
     }
     this.running = true;
     try {
-      const tenants = await this.prisma.tenant.findMany({
-        where: { status: 'ACTIVE' },
-        select: { id: true },
-      });
-      const disabledModules = await this.prisma.tenantModule.findMany({
-        where: { module: 'ai-reporting', enabled: false },
-        select: { tenantId: true },
-      });
-      const disabled = new Set(disabledModules.map((row) => row.tenantId));
-
+      const tenantIds = await this.listGeneratableTenantIds();
       const results: TenantGenerationResult[] = [];
-      for (const tenant of tenants) {
-        if (disabled.has(tenant.id)) continue;
+      for (const tenantId of tenantIds) {
         try {
-          results.push(await this.generateForTenant(tenant.id));
+          results.push(await this.generateForTenant(tenantId));
         } catch (error: any) {
           // AI reporting disabled for tenant, missing data, etc. — never abort the cycle.
-          this.logger.warn(`Insight generation skipped for tenant ${tenant.id}: ${String(error?.message ?? error).slice(0, 300)}`);
+          this.logger.warn(`Insight generation skipped for tenant ${tenantId}: ${String(error?.message ?? error).slice(0, 300)}`);
         }
       }
       return results;
@@ -151,28 +156,12 @@ export class InsightGenerationService {
     const configById = new Map(configs.map((config) => [config.providerId, config]));
     const providerFilter = options?.providerIds?.length ? new Set(options.providerIds) : null;
 
-    // Which providers will actually run (for the credit reservation).
+    // Which providers will actually run.
     const runnable = this.providers.filter((provider) => {
       if (providerFilter && !providerFilter.has(provider.providerId)) return false;
       const config = configById.get(provider.providerId);
       return config ? config.enabled : provider.defaultEnabled;
     });
-
-    // Metering: reserve fee × planned providers up front (insufficient
-    // credits = no insights, like every other AI surface), settle for the
-    // providers that actually ran. Throws 402 to manual/pin callers; the
-    // cron's per-tenant try/catch absorbs it for scheduled cycles.
-    const fee = this.providerRunFee();
-    let reservationId: string | null = null;
-    const metered = Boolean(this.billingWallet) && this.billingEnforced() && fee.greaterThan(0) && runnable.length > 0;
-    if (metered) {
-      const reservation = await this.billingWallet!.reserveCredits({
-        tenantId,
-        userId: null,
-        amount: fee.times(runnable.length),
-      });
-      reservationId = reservation.id;
-    }
 
     const systemUser = {
       id: INSIGHT_SYSTEM_USER_ID,
@@ -193,7 +182,6 @@ export class InsightGenerationService {
     let insightsUpserted = 0;
     let insightsArchived = 0;
 
-    try {
     for (const provider of runnable) {
       const config = configById.get(provider.providerId);
 
@@ -206,6 +194,7 @@ export class InsightGenerationService {
 
       try {
         const candidates = await provider.generate(ctx);
+        await this.narrateCandidates(tenantId, provider, candidates);
         for (const candidate of candidates) {
           await this.upsertInsight(tenantId, provider, candidate, runStarted);
           insightsUpserted += 1;
@@ -231,13 +220,6 @@ export class InsightGenerationService {
         await this.recordProviderRun(tenantId, provider.providerId, 'error', message);
       }
     }
-    } finally {
-      // Settle the metering hold: charge for the providers that actually ran
-      // (zero charge just releases the hold). Crash-safe via finally.
-      if (reservationId) {
-        await this.settleGenerationCharge(tenantId, reservationId, fee, providersRun);
-      }
-    }
 
     await this.cache.invalidateNamespace(tenantId, INSIGHTS_CACHE_NAMESPACE);
     this.logger.log(
@@ -247,41 +229,118 @@ export class InsightGenerationService {
   }
 
   /**
-   * Charge the insight-generation fee through the standard ledger lifecycle
-   * and record a token-less usage log row so the spend shows up in customer
-   * usage history and platform reporting.
+   * Rewrites candidate summaries in natural business language via the LLM,
+   * billed on real token usage through the same prepare/settle pipeline as AI
+   * reporting (AiChargeService, callType 'summary').
+   *
+   * Only NEW or CHANGED candidates are narrated: a candidate whose title and
+   * metrics match the stored insight (and which was already narrated) reuses
+   * the stored summary, so unchanged insights are not re-billed or made to
+   * flicker (the LLM is non-deterministic) on every cycle. One LLM call per
+   * candidate keeps each completion bounded (no truncation) and prevents
+   * mapping a narrative onto the wrong insight.
+   *
+   * Respects the tenant's `summariesEnabled` preference and sensitive-field
+   * masking, matching ResultSummarizerService. Best-effort: if AI is
+   * unavailable, unconfigured, the tenant disabled summaries, or it has
+   * insufficient credits, the deterministic template summary is kept, nothing
+   * is charged, and the insight is still recorded.
    */
-  private async settleGenerationCharge(tenantId: string, reservationId: string, fee: Prisma.Decimal, providersRun: number) {
-    try {
-      const charge = fee.times(providersRun);
-      const result = await this.billingWallet!.finalizeReservation(reservationId, charge, {
-        createdById: null,
-        notes: `AI insights generation (${providersRun} provider run${providersRun === 1 ? '' : 's'})`,
-      });
-      if (charge.greaterThan(0)) {
-        await this.prisma.aiUsageLog.create({
-          data: {
-            tenantId,
-            userId: null,
-            providerName: 'platform',
-            modelCode: 'insights-generation',
-            callType: 'insights_generation',
-            promptTokens: 0,
-            completionTokens: 0,
-            totalTokens: 0,
-            providerCost: new Prisma.Decimal(0),
-            customerCharge: charge,
-            margin: charge,
-            reservationId,
-            transactionId: result.transaction?.id ?? null,
-            status: AiUsageBillingStatus.CHARGED,
-            metadata: { providersRun },
-          },
-        });
+  private async narrateCandidates(tenantId: string, provider: IInsightProvider, candidates: InsightCandidate[]): Promise<void> {
+    if (!this.aiProvider || candidates.length === 0) return;
+
+    const opConfig = await this.aiProvider.getTenantOperationalConfig(tenantId);
+    if (!opConfig.summariesEnabled) return;
+
+    const stored = await this.prisma.aiInsight.findMany({
+      where: { tenantId, providerId: provider.providerId, dedupeKey: { in: candidates.map((c) => c.dedupeKey) } },
+      select: { dedupeKey: true, title: true, metrics: true, summary: true },
+    });
+    const storedByKey = new Map(stored.map((row) => [row.dedupeKey, row]));
+
+    let narrated = 0;
+    for (const candidate of candidates) {
+      const prior = storedByKey.get(candidate.dedupeKey);
+      // Unchanged AND already narrated last cycle (its stored summary differs
+      // from the freshly regenerated template) → reuse it, skip the LLM. We
+      // MUST copy it onto the candidate or upsertInsight would overwrite the
+      // stored AI summary with the template.
+      if (prior && this.candidateUnchanged(candidate, prior) && prior.summary && prior.summary !== candidate.summary) {
+        candidate.summary = prior.summary;
+        continue;
       }
-    } catch (error: any) {
-      this.logger.error(`Insight generation charge settle failed for tenant ${tenantId}: ${String(error?.message ?? error)}`);
+      if (narrated >= MAX_NARRATIONS_PER_PROVIDER_RUN) continue;
+      const narrative = await this.narrateOne(tenantId, provider, candidate, opConfig.maskSensitiveFields);
+      if (narrative) {
+        candidate.summary = narrative;
+        narrated += 1;
+      }
     }
+  }
+
+  /** True when the candidate's title and metrics match the stored insight —
+   *  i.e. nothing the narrative depends on has moved since last cycle. */
+  private candidateUnchanged(candidate: InsightCandidate, prior: { title: string; metrics: unknown }): boolean {
+    if (candidate.title.slice(0, 300) !== prior.title) return false;
+    return this.stableStringify(candidate.metrics ?? null) === this.stableStringify(prior.metrics ?? null);
+  }
+
+  /** Narrates a single candidate. Returns null (caller keeps the template) on
+   *  any failure — AI unavailable, insufficient credits, bad JSON, etc. */
+  private async narrateOne(
+    tenantId: string,
+    provider: IInsightProvider,
+    candidate: InsightCandidate,
+    maskSensitiveFields: boolean,
+  ): Promise<string | null> {
+    const prompt = buildInsightNarrativePrompt({
+      providerName: provider.displayName,
+      title: candidate.title,
+      severity: candidate.severity,
+      draftSummary: candidate.summary,
+      metricsJson: JSON.stringify(this.maskMetrics(candidate.metrics ?? null, maskSensitiveFields)),
+      evidenceJson: JSON.stringify(candidate.evidence ?? []),
+    });
+
+    try {
+      const response = await this.aiProvider!.generateJson([
+        {
+          role: 'system',
+          content: 'Return valid JSON only. Rewrite the insight summary in clear business language using only the supplied data. Do not invent numbers.',
+        },
+        { role: 'user', content: prompt },
+      ], {
+        tenantId,
+        callType: 'summary',
+        maxTokens: 220,
+      });
+      const summary = typeof (response as any)?.summary === 'string' ? (response as any).summary.trim() : '';
+      return summary ? summary.slice(0, 1500) : null;
+    } catch (error: any) {
+      this.logger.warn(`Insight narrative generation skipped for ${provider.providerId}/${candidate.dedupeKey} (tenant ${tenantId}): ${String(error?.message ?? error).slice(0, 200)}`);
+      return null;
+    }
+  }
+
+  /** Drops metric keys matching the sensitive-field pattern when the tenant
+   *  masks sensitive fields, mirroring ResultSummarizerService.maskRow. */
+  private maskMetrics(metrics: Record<string, unknown> | null, mask: boolean): Record<string, unknown> | null {
+    if (!metrics || !mask) return metrics;
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(metrics)) {
+      if (SENSITIVE_KEY.test(key)) continue;
+      out[key] = value;
+    }
+    return out;
+  }
+
+  /** Key-sorted JSON so two equal objects with different key order compare
+   *  equal (the stored metrics JSON may not preserve provider key order). */
+  private stableStringify(value: unknown): string {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+    if (Array.isArray(value)) return `[${value.map((item) => this.stableStringify(item)).join(',')}]`;
+    const entries = Object.keys(value as Record<string, unknown>).sort();
+    return `{${entries.map((key) => `${JSON.stringify(key)}:${this.stableStringify((value as Record<string, unknown>)[key])}`).join(',')}}`;
   }
 
   private async upsertInsight(tenantId: string, provider: IInsightProvider, candidate: InsightCandidate, runStarted: Date) {

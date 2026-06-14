@@ -43,13 +43,17 @@ honored only with enforcement OFF (transition deployments); its settings UI has 
 removed — tenants can no longer manage keys, providers, models, endpoints, or pricing.
 
 Token metering applies to actual LLM calls (semantic parse, summaries, config
-tests). Insight generation consumes no tokens but IS metered: a flat
-per-provider-run fee (`AI_INSIGHTS_PROVIDER_RUN_FEE`) goes through the same
-reserve→settle ledger lifecycle and appears in usage history as
-`insights-generation` rows — insufficient credits block the cycle like any
-other AI request. NLQ template shortcuts and pinned-widget executions (cached
-SQL reads) remain unmetered by design, though they obey AI access governance
-and wallet suspension.
+tests, insight narratives). Insight detection itself runs no LLM call (pure SQL
+via `executeStoredReport`) and is free; after a provider detects candidates,
+`InsightGenerationService` makes one `callType: 'summary'` LLM call per
+provider run to rewrite the candidates' summaries in natural language, through
+the exact same `AiChargeService.prepare()` → call → `settle()` lifecycle and
+pricing as AI reporting summaries — billed on real token usage, not a flat fee.
+This is best-effort: if AI is unavailable, unconfigured, or the tenant has
+insufficient credits, the deterministic template summary is kept, nothing is
+charged, and the insight is still recorded. NLQ template shortcuts and
+pinned-widget executions (cached SQL reads) remain unmetered by design, though
+they obey AI access governance and wallet suspension.
 
 ## 2. Database (migration `20260612090000_ai_billing_platform`)
 
@@ -160,7 +164,6 @@ Enforced in `prepare()` before any credits are reserved (402/403 with stable cod
 | Env | Meaning | Default |
 | --- | --- | --- |
 | `AI_BILLING_ENFORCEMENT` | bill + block AI requests through wallets (`true/1/yes/on`) | `true` |
-| `AI_INSIGHTS_PROVIDER_RUN_FEE` | credits charged per insight-provider run (insights consume no LLM tokens; this prices the platform compute — a full ~12-provider cycle ≈ 12×, a pin-triggered single-provider refresh = 1×; `0` disables insight metering) | `0.01` |
 | `STRIPE_SECRET_KEY` | Stripe API key (card purchases disabled when absent) | — |
 | `STRIPE_WEBHOOK_SECRET` | endpoint secret for signature verification | — |
 | `APP_PUBLIC_URL` / `FRONTEND_URL` | checkout success/cancel redirect base | `http://localhost:3000` |
@@ -213,6 +216,7 @@ FIXED shipped with this audit.
 | 9 | Low | Bank-transfer review queue showed tenant UUIDs | Queue rows carry the tenant name |
 | 10 | **Critical** | "No active pricing for model X" with correct pricing configured: the platform's tenant-scoping Prisma middleware auto-injects the CLS tenantId into every model with a `tenantId` field — `AiModelPricing`'s GLOBAL/PLAN rows (tenant_id NULL) became invisible to every tenant request, and PLAN-scope access policies were silently ignored. Raw-SQL probes and mocked-Prisma unit tests both missed it | `AiModelPricing` and `AiAccessPolicy` are platform-governance catalogs whose `tenantId` is a scope override, not an isolation key — exempted from auto-scoping in `PrismaService` (regression spec `prisma-tenant-scoping.spec.ts` locks the exemption AND that tenant-owned billing data stays scoped) |
 | 11 | Medium | AI Insights surfaces ignored AI governance — a DISABLED/SUSPENDED account or suspended wallet could keep using AI dashboards (insights/widgets consume no LLM tokens, so there is nothing to *meter*, but access control must still apply) | Widget execution checks the effective access policy + wallet status (403/402 with machine codes); insight generation skips tenants whose AI access is not ENABLED |
+| 12 | **Critical** | Stripe credit purchases were never auto-credited and left no trace: the global `TenantGuard` 403'd the webhook (no tenant context on a Stripe call) BEFORE the handler ran, so the wallet was never credited and the controller's logger never fired — the only symptom was "credits don't arrive, no logs" | `StripeWebhookController` carries `@SetMetadata(SKIP_TENANT_CHECK, true)` (system endpoint, resolves tenant from the purchase row) and `@SkipThrottle()` (Stripe retries from shared IPs); signature/secret failures are now logged at warn so misconfiguration is visible |
 
 ### Known gaps to address before / shortly after GA (prioritized)
 

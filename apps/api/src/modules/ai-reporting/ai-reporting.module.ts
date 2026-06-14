@@ -35,6 +35,9 @@ import { SqlSafetyValidator } from './sql-safety.validator';
     SqlCompilerService,
     SqlSafetyValidator,
   ],
-  exports: [AiReportingService],
+  // AiProviderService is exported so other AI surfaces (e.g. AI Insights
+  // narrative generation) can run LLM calls through the same
+  // billing-metered pipeline as AI reporting.
+  exports: [AiReportingService, AiProviderService],
 })
 export class AiReportingModule {}
