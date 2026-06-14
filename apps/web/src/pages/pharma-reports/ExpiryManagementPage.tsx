@@ -86,7 +86,7 @@ export default function ExpiryManagementPage() {
     },
     { key: 'quantity', header: 'Qty', accessor: (r) => fmt(r.quantity), align: 'right', filterType: 'number', filterField: 'quantity' },
     { key: 'at_risk_value', header: 'Value at Risk', accessor: (r) => fmtCurrency(r.at_risk_value), align: 'right', sortable: true, filterType: 'number', filterField: 'at_risk_value' },
-    { key: 'urgency', header: 'Urgency', accessor: (r) => <Badge variant={urgencyVariant[r.urgency] ?? 'default'} size="sm">{r.urgency}</Badge> },
+    { key: 'urgency', header: 'Urgency', sortable: true, filterField: 'urgency', filterType: 'select', filterOptions: [{ value: 'CRITICAL', label: 'Critical' }, { value: 'HIGH', label: 'High' }, { value: 'MEDIUM', label: 'Medium' }, { value: 'LOW', label: 'Low' }], accessor: (r) => <Badge variant={urgencyVariant[r.urgency] ?? 'default'} size="sm">{r.urgency}</Badge> },
   ]);
 
   const expiredCols: Column<ExpiredStockRow>[] = reportCols([

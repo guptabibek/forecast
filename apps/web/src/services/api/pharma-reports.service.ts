@@ -65,6 +65,7 @@ export interface CurrentStockRow {
   unit_cost: number;
   inventory_value: number;
   last_updated: string;
+  last_supplier_name: string | null;
 }
 
 export interface BatchInventoryRow {
@@ -858,7 +859,7 @@ export type ThreeSixtyPeriod =
   | 'last_fy'
   | 'calendar'
   | 'last12';
-export type ThreeSixtySearchType = 'item' | 'customer' | 'supplier';
+export type ThreeSixtySearchType = 'item' | 'customer' | 'supplier' | 'route' | 'city' | 'salesman';
 
 export interface ThreeSixtySearchOption {
   value: string;
@@ -956,6 +957,31 @@ export interface Supplier360Report {
   };
   insights: string[];
 }
+
+export interface DimensionSalesReport {
+  asOf: string;
+  profile: Record<string, unknown>;
+  kpis: {
+    currentMonthSales: number;
+    lastMonthSales: number;
+    momSalesChangePct: number | null;
+    currentPeriodSales: number;
+    priorPeriodSales: number;
+    yoySalesChangePct: number | null;
+    billCount: number;
+    customerCount: number;
+    avgBillValue: number | null;
+  };
+  charts: { monthlyTrend: ThreeSixtyMetricTrendPoint[] };
+  tables: {
+    topItems: ThreeSixtyContributionRow[];
+    topCustomers: ThreeSixtyContributionRow[];
+  };
+  insights: string[];
+}
+export type Route360Report = DimensionSalesReport;
+export type City360Report = DimensionSalesReport;
+export type SalesTeam360Report = DimensionSalesReport;
 
 // ── Sales/Purchase analytics extensions ────────────────────────────────────
 
@@ -1139,6 +1165,24 @@ export const pharmaReportsService = {
 
   getSupplier360: (filters?: { search?: string; period?: ThreeSixtyPeriod; locationId?: string }) =>
     apiClient.get<Supplier360Report>(`${BASE}/360/supplier`, {
+      params: toParams(filters ?? {}),
+      timeout: THREE_SIXTY_REPORT_TIMEOUT_MS,
+    }).then((r) => r.data),
+
+  getRoute360: (filters?: { search?: string; period?: ThreeSixtyPeriod }) =>
+    apiClient.get<Route360Report>(`${BASE}/360/route`, {
+      params: toParams(filters ?? {}),
+      timeout: THREE_SIXTY_REPORT_TIMEOUT_MS,
+    }).then((r) => r.data),
+
+  getCity360: (filters?: { search?: string; period?: ThreeSixtyPeriod }) =>
+    apiClient.get<City360Report>(`${BASE}/360/city`, {
+      params: toParams(filters ?? {}),
+      timeout: THREE_SIXTY_REPORT_TIMEOUT_MS,
+    }).then((r) => r.data),
+
+  getSalesTeam360: (filters?: { search?: string; period?: ThreeSixtyPeriod }) =>
+    apiClient.get<SalesTeam360Report>(`${BASE}/360/salesman`, {
       params: toParams(filters ?? {}),
       timeout: THREE_SIXTY_REPORT_TIMEOUT_MS,
     }).then((r) => r.data),

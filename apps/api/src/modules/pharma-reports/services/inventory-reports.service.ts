@@ -94,6 +94,7 @@ export interface CurrentStockRow {
   unit_cost: number;
   inventory_value: number;
   last_updated: Date;
+  last_supplier_name: string | null;
 }
 
 export interface BatchInventoryRow {
@@ -237,6 +238,7 @@ const CURRENT_STOCK_COLUMNS: AllowedSqlColumns = {
   allocated_qty: { expression: 'COALESCE(il.allocated_qty, 0)', type: 'number' },
   reserved_qty: { expression: 'COALESCE(il.reserved_qty, 0)', type: 'number' },
   in_transit_qty: { expression: 'COALESCE(il.in_transit_qty, 0)', type: 'number' },
+  last_supplier_name: { expression: 'last_purchase.supplier_name', type: 'string' },
   on_order_qty: { expression: 'COALESCE(il.on_order_qty, 0)', type: 'number' },
   unit_cost: { expression: 'COALESCE(il.average_cost, il.standard_cost, 0)', type: 'number' },
   inventory_value: { expression: 'COALESCE(il.inventory_value, 0)', type: 'number' },
@@ -256,6 +258,7 @@ const BATCH_INVENTORY_COLUMNS: AllowedSqlColumns = {
   batch_value: { expression: '(COALESCE(b.quantity, 0) * COALESCE(b.cost_per_unit, 0))', type: 'number' },
   manufacturing_date: { expression: 'b.manufacturing_date', type: 'date' },
   expiry_date: { expression: 'b.expiry_date', type: 'date' },
+  days_to_expiry: { expression: '(b.expiry_date::date - CURRENT_DATE)', type: 'number' },
   batch_status: { expression: 'b.status', type: 'enum' },
 };
 
@@ -381,6 +384,10 @@ const STOCK_AGEING_COLUMNS: AllowedSqlColumns = {
   inward_date: { expression: 'b.manufacturing_date', type: 'date' },
   quantity: { expression: 'b.quantity', type: 'number' },
   batch_value: { expression: '(COALESCE(b.quantity, 0) * COALESCE(b.cost_per_unit, 0))', type: 'number' },
+  // Both age_days and age_bucket sort by the underlying numeric age so bucket
+  // order is preserved (alphabetic order on the label string would be wrong).
+  age_days: { expression: 'CASE WHEN b.manufacturing_date IS NULL THEN -1 ELSE (CURRENT_DATE - b.manufacturing_date::date) END', type: 'number' },
+  age_bucket: { expression: 'CASE WHEN b.manufacturing_date IS NULL THEN -1 ELSE (CURRENT_DATE - b.manufacturing_date::date) END', type: 'number' },
 };
 
 const REORDER_POLICY_SCOPE_TYPES = new Set<ReorderPolicyScopeType>([
@@ -501,7 +508,8 @@ export class InventoryReportsService {
           COALESCE(il.on_order_qty, 0)::float8       AS on_order_qty,
           COALESCE(il.average_cost, il.standard_cost, 0)::float8  AS unit_cost,
           COALESCE(il.inventory_value, 0)::float8    AS inventory_value,
-          il.updated_at   AS last_updated
+          il.updated_at   AS last_updated,
+          last_purchase.supplier_name                AS last_supplier_name
         FROM inventory_levels il
         JOIN products p ON p.id = il.product_id AND p.tenant_id = il.tenant_id
         JOIN locations l ON l.id = il.location_id AND l.tenant_id = il.tenant_id
@@ -509,6 +517,28 @@ export class InventoryReportsService {
         LEFT JOIN product_salts ps ON ps.tenant_id = p.tenant_id AND ps.code = NULLIF(TRIM(p.salt), '')
         LEFT JOIN product_categories pg ON pg.tenant_id = p.tenant_id AND pg.code = NULLIF(TRIM(p.product_group), '')
         LEFT JOIN unit_of_measures uom ON uom.tenant_id = p.tenant_id AND uom.code = NULLIF(TRIM(p.unit_of_measure), '')
+        LEFT JOIN LATERAL (
+          SELECT NULLIF(TRIM(mpar.par_name), '') AS supplier_name
+          FROM marg_products mprod
+          JOIN marg_transactions mt
+            ON mt.tenant_id = mprod.tenant_id
+            AND mt.company_id = mprod.company_id
+            AND mt.pid = mprod.pid
+          JOIN marg_vouchers mv
+            ON mv.tenant_id = mt.tenant_id
+            AND mv.company_id = mt.company_id
+            AND mv.voucher = mt.voucher
+            AND mv.type = 'P'
+          LEFT JOIN marg_parties mpar
+            ON mpar.tenant_id = mv.tenant_id
+            AND mpar.company_id = mv.company_id
+            AND mpar.cid = mv.cid
+            AND mpar.is_deleted = false
+          WHERE mprod.tenant_id = il.tenant_id
+            AND mprod.product_id = p.id
+          ORDER BY mv.date DESC
+          LIMIT 1
+        ) last_purchase ON TRUE
         WHERE ${where}
         ORDER BY ${orderBy}
         LIMIT ${limit} OFFSET ${offset}

@@ -28,6 +28,8 @@ const NEAR_EXPIRY_COLUMNS: AllowedSqlColumns = {
   cost_per_unit: { expression: 'COALESCE(b.cost_per_unit, 0)', type: 'number' },
   at_risk_value: { expression: '(COALESCE(b.quantity, 0) * COALESCE(b.cost_per_unit, 0))', type: 'number' },
   batch_status: { expression: 'b.status', type: 'enum' },
+  // Numeric priority so sort order is CRITICAL→HIGH→MEDIUM→LOW (not alphabetic).
+  urgency: { expression: 'CASE WHEN (b.expiry_date::date - CURRENT_DATE) <= 30 THEN 1 WHEN (b.expiry_date::date - CURRENT_DATE) <= 90 THEN 2 WHEN (b.expiry_date::date - CURRENT_DATE) <= 180 THEN 3 ELSE 4 END', type: 'number' },
 };
 
 const EXPIRED_STOCK_COLUMNS: AllowedSqlColumns = {
