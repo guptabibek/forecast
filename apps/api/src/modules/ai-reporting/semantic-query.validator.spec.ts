@@ -53,6 +53,48 @@ describe('SemanticQueryValidator', () => {
     ...overrides,
   });
 
+  it('reassigns a display column the LLM mislabeled as a metric instead of failing MISSING_METRIC', () => {
+    const result = validator.validate({
+      status: 'ok',
+      queryKind: 'single_report',
+      mode: 'detail',
+      datasetId: 'item_velocity',
+      metrics: [{ metricId: 'velocity_days_since_last_sold' }],
+      dimensions: [],
+      displayColumns: [{ columnId: 'velocity_product_name' }],
+      filters: [{ filterId: 'never_sold_filter', operator: '=', value: true }],
+      time: { rangeType: 'unspecified' },
+    } as any, security) as SemanticReportQuery;
+
+    expect(result.queryKind).toBe('single_report');
+    expect(result.metrics).not.toContain('velocity_days_since_last_sold');
+    expect(result.displayColumns).toContain('velocity_days_since_last_sold');
+  });
+
+  it('normalizes a dynamic not_contains filter to NOT ILIKE and keeps it on item_velocity', () => {
+    const result = validator.validate({
+      status: 'ok',
+      queryKind: 'single_report',
+      mode: 'detail',
+      datasetId: 'item_velocity',
+      metrics: [],
+      dimensions: [],
+      displayColumns: [{ columnId: 'velocity_product_name' }, { columnId: 'velocity_days_since_last_sold' }],
+      filters: [
+        { filterId: 'never_sold_filter', operator: '=', value: true },
+        { filterId: 'product_filter', operator: 'not_contains', value: 'LOCAL FREIGHT' },
+      ],
+      time: { rangeType: 'unspecified' },
+    } as any, security) as SemanticReportQuery;
+
+    expect(result.queryKind).toBe('single_report');
+    expect(result.datasetId).toBe('item_velocity');
+    const productFilter = result.filters.find((f) => f.filterId === 'product_filter');
+    // must NOT be coerced back to '=' (which previously produced varchar = text[])
+    expect(productFilter?.operator).toBe('NOT ILIKE');
+    expect(productFilter?.value).toBe('LOCAL FREIGHT');
+  });
+
   it.each([
     ['top selling products this month', report({})],
     ['salesman-wise sales', report({ datasetId: 'sales_invoices', metrics: ['invoice_net_sales'], dimensions: ['sales_salesman'], sort: [{ metricId: 'invoice_net_sales', direction: 'desc' }] })],

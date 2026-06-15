@@ -1,0 +1,92 @@
+-- AI reporting: item-velocity / non-moving dataset.
+--
+-- One row per (tenant, company, Marg product). Backed by the Marg item master
+-- (marg_products) LEFT JOINed to each product's sales history, so items that
+-- have NEVER sold still appear (the master list, not a transaction list). This
+-- is what makes "items not sold / never sold / non-moving / dead stock / days
+-- since last sold" answerable — none of the transactional vw_ai_* views can do
+-- absence/anti-join queries.
+--
+-- "Sold" matches vw_ai_sales_items: a pure sale voucher (marg_vouchers.type='S')
+-- whose line types are G/S/O. Returns (R/T) and cancelled lines are excluded.
+-- Grain is company-level (marg_products has no branch), so security scoping is
+-- tenant_id + company_id only.
+
+CREATE OR REPLACE VIEW vw_ai_item_velocity AS
+SELECT
+  mprod.tenant_id,
+  mprod.company_id,
+  mprod.pid AS marg_product_pid,
+  p.id AS product_id,
+  COALESCE(p.code, mprod.code, mprod.pid) AS product_code,
+  COALESCE(p.name, mprod.name, 'Unmapped Item') AS product_name,
+  NULLIF(TRIM(COALESCE(p.product_group, mprod.g_code5)), '') AS product_group,
+  NULLIF(TRIM(p.category), '') AS product_category,
+  NULLIF(TRIM(COALESCE(p.product_company, mprod.g_code)), '') AS product_company,
+  pc.name AS product_company_name,
+  NULLIF(TRIM(COALESCE(p.salt, mprod.g_code3)), '') AS salt,
+  ps.name AS salt_name,
+  p.hsn_code,
+  NULLIF(TRIM(COALESCE(p.unit_of_measure, mprod.unit)), '') AS uom_code,
+  uom.name AS uom_name,
+  sold.first_sold_date,
+  sold.last_sold_date,
+  CASE WHEN sold.last_sold_date IS NOT NULL THEN (CURRENT_DATE - sold.last_sold_date) ELSE NULL END AS days_since_last_sold,
+  (sold.last_sold_date IS NULL) AS never_sold,
+  COALESCE(sold.total_sold_quantity, 0)::float8 AS total_sold_quantity,
+  COALESCE(sold.total_net_sales, 0)::float8 AS total_net_sales,
+  COALESCE(sold.sale_count, 0)::int AS sale_count,
+  COALESCE(stk.current_stock, 0)::float8 AS current_stock,
+  COALESCE(stk.stock_value, 0)::float8 AS stock_value,
+  CASE
+    WHEN sold.last_sold_date IS NULL THEN 'NEVER_SOLD'
+    WHEN (CURRENT_DATE - sold.last_sold_date) >= 90 AND COALESCE(stk.current_stock, 0) > 0 THEN 'NON_MOVING'
+    WHEN (CURRENT_DATE - sold.last_sold_date) >= 30 THEN 'SLOW_MOVING'
+    ELSE 'MOVING'
+  END AS movement_status
+FROM marg_products mprod
+LEFT JOIN products p ON p.id = mprod.product_id AND p.tenant_id = mprod.tenant_id
+LEFT JOIN product_companies pc ON pc.tenant_id = mprod.tenant_id AND pc.code = NULLIF(TRIM(COALESCE(p.product_company, mprod.g_code)), '')
+LEFT JOIN product_salts ps ON ps.tenant_id = mprod.tenant_id AND ps.code = NULLIF(TRIM(COALESCE(p.salt, mprod.g_code3)), '')
+LEFT JOIN unit_of_measures uom ON uom.tenant_id = mprod.tenant_id AND uom.code = NULLIF(TRIM(COALESCE(p.unit_of_measure, mprod.unit)), '')
+-- Pre-aggregate sales once per (tenant, company, pid) and hash-join, instead
+-- of a correlated per-product subquery. One pass over marg_transactions keeps
+-- this view usable on the master list without a dedicated pid index.
+LEFT JOIN (
+  SELECT
+    mt.tenant_id,
+    mt.company_id,
+    mt.pid,
+    MIN(mv.date)::date AS first_sold_date,
+    MAX(mv.date)::date AS last_sold_date,
+    SUM(ABS(COALESCE(mt.qty, 0))) AS total_sold_quantity,
+    SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))) AS total_net_sales,
+    COUNT(DISTINCT mv.voucher) AS sale_count
+  FROM marg_transactions mt
+  JOIN marg_vouchers mv
+    ON mv.tenant_id = mt.tenant_id
+   AND mv.company_id = mt.company_id
+   AND mv.voucher = mt.voucher
+   AND mv.type = 'S'
+  WHERE mt.type IN ('G', 'S', 'O')
+    AND mt.is_cancelled IS DISTINCT FROM true
+    AND mt.pid IS NOT NULL
+  GROUP BY mt.tenant_id, mt.company_id, mt.pid
+) sold
+  ON sold.tenant_id = mprod.tenant_id
+ AND sold.company_id = mprod.company_id
+ AND sold.pid = mprod.pid
+LEFT JOIN (
+  SELECT
+    ms.tenant_id,
+    ms.company_id,
+    ms.pid,
+    SUM(COALESCE(ms.stock, 0)) AS current_stock,
+    SUM(COALESCE(ms.stock, 0) * COALESCE(ms.p_rate, ms.lp_rate, 0)) AS stock_value
+  FROM marg_stocks ms
+  WHERE ms.source_deleted = false
+  GROUP BY ms.tenant_id, ms.company_id, ms.pid
+) stk
+  ON stk.tenant_id = mprod.tenant_id
+ AND stk.company_id = mprod.company_id
+ AND stk.pid = mprod.pid;

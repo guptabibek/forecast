@@ -111,7 +111,13 @@ export class SqlCompilerService {
 
     for (const metricId of query.metrics) {
       const metric = this.required(this.catalog.getMetric(metricId), `Unknown metric ${metricId}`);
-      select.push(`${metric.expression} AS ${this.ident(metric.metricId)}`);
+      // A display column already selected under this alias (e.g. raw tax_amount
+      // alongside the SUM(tax_amount) metric) would create two output columns
+      // with the same name and make ORDER BY <alias> ambiguous (42702). Keep the
+      // first-selected column and skip the duplicate projection.
+      if (!selectedColumns.includes(metric.metricId)) {
+        select.push(`${metric.expression} AS ${this.ident(metric.metricId)}`);
+      }
       addSelectedColumn(metric.metricId, metric.displayName, metric.dataType);
     }
 
@@ -399,6 +405,15 @@ export class SqlCompilerService {
       return `(${columns.map((c) => `${this.ident(c)} ILIKE ${param}`).join(' OR ')})`;
     }
 
+    // Exclusion across synonym columns: drop the row if ANY column matches, so
+    // the per-column NOT ILIKE predicates are AND-joined. COALESCE keeps NULL
+    // columns (e.g. a missing product name) from nulling out the whole row.
+    if (columns.length > 1 && operator === 'NOT ILIKE') {
+      const value = `%${String(filter.value ?? '').replace(/%/g, '')}%`;
+      const param = addParam(value);
+      return `(${columns.map((c) => `COALESCE(${this.ident(c)}, '') NOT ILIKE ${param}`).join(' AND ')})`;
+    }
+
     if (columns.length > 1 && ['=', '!=', 'IN', 'NOT IN'].includes(operator)) {
       const joiner = operator === '!=' || operator === 'NOT IN' ? ' AND ' : ' OR ';
       return `(${columns.map((column) => this.compileSingleColumnFilter(dataset, column, operator, filter.value, addParam)).join(joiner)})`;
@@ -417,6 +432,33 @@ export class SqlCompilerService {
   ): string {
     const column = this.ident(columnName);
     const isDate = this.isDateColumn(dataset, columnName);
+    // A {from,to} range object is a bounded range. The LLM sometimes pairs it
+    // with a scalar operator (e.g. expiry <= {from,to}); binding the object as
+    // jsonb and casting ::date then fails (42846). Resolve it to the relevant
+    // bound, or a BETWEEN when both sides are present and the operator isn't
+    // one-sided.
+    if (value && typeof value === 'object' && !Array.isArray(value) && ('from' in (value as any) || 'to' in (value as any))) {
+      const from = (value as any).from;
+      const to = (value as any).to;
+      if (operator === '<' || operator === '<=') {
+        value = to ?? from;
+      } else if (operator === '>' || operator === '>=') {
+        value = from ?? to;
+      } else if (from != null && to != null) {
+        const cast = this.isUuidColumn(columnName) ? '::uuid' : (isDate ? '::date' : '');
+        return `${column} BETWEEN ${addParam(from)}${cast} AND ${addParam(to)}${cast}`;
+      } else {
+        value = from ?? to;
+      }
+    }
+    // An equality/inequality carrying a list value is membership, not a scalar
+    // comparison. Postgres rejects `varchar = text[]` (42883), so coerce it to
+    // ANY/ALL. This happens when the LLM emits `=` with an array, or when the
+    // validator downgrades an `IN` to a catalog filter's canonical `=`/`!=`
+    // operator while keeping the original array value.
+    if (Array.isArray(value) && (operator === '=' || operator === '!=')) {
+      operator = operator === '=' ? 'IN' : 'NOT IN';
+    }
     if (operator === 'IN' || operator === 'NOT IN') {
       const arrayValue = Array.isArray(value) ? value : [value];
       const cast = this.isUuidColumn(columnName) ? '::uuid[]' : (isDate ? '::date[]' : '');
@@ -434,6 +476,12 @@ export class SqlCompilerService {
     if (operator === 'ILIKE') {
       const pattern = `%${String(value ?? '').replace(/%/g, '')}%`;
       return `${column} ILIKE ${addParam(pattern)}`;
+    }
+    if (operator === 'NOT ILIKE') {
+      const pattern = `%${String(value ?? '').replace(/%/g, '')}%`;
+      // COALESCE so NULL text columns are treated as non-matching (kept), not
+      // dropped — `NULL NOT ILIKE x` is NULL, which would exclude the row.
+      return `COALESCE(${column}, '') NOT ILIKE ${addParam(pattern)}`;
     }
     if (operator === 'IS DISTINCT FROM') {
       return `${column} IS DISTINCT FROM ${addParam(value)}`;
@@ -462,7 +510,7 @@ export class SqlCompilerService {
   }
 
   private compatibleFilterColumns(columns: string[], operator: string, value: unknown): string[] {
-    if (operator === 'ILIKE') return columns.filter((column) => !this.isUuidColumn(column));
+    if (operator === 'ILIKE' || operator === 'NOT ILIKE') return columns.filter((column) => !this.isUuidColumn(column));
     if (['=', '!='].includes(operator) && !this.isUuidLike(value)) return columns.filter((column) => !this.isUuidColumn(column));
     if (['IN', 'NOT IN'].includes(operator) && !this.allValuesUuidLike(value)) return columns.filter((column) => !this.isUuidColumn(column));
     return columns;

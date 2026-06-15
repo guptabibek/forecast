@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "1.4",
+  "catalogVersion": "1.5",
   "generatedFrom": [
     "docs/ai-reporting/reporting-views.schema.json",
     "docs/ai-reporting/report-inventory.json",
@@ -951,6 +951,65 @@
         "pri_supplier_name",
         "pri_quantity",
         "pri_net_amount"
+      ]
+    },
+    {
+      "datasetId": "item_velocity",
+      "viewName": "vw_ai_item_velocity",
+      "domain": "inventory",
+      "grain": "product",
+      "description": "Per-product item velocity from the Marg item master: last sold date, days since last sold, never-sold flag, movement status (NEVER_SOLD/NON_MOVING/SLOW_MOVING/MOVING), lifetime sold quantity, and current stock. The ONLY dataset that can list items that did NOT sell (it is the item master, not a transaction list). Use it for not-sold / never-sold / non-moving / dead-stock / slow-moving / idle / days-since-last-sold questions. Do NOT use a date range to express 'not sold in a period' - use the days_since_last_sold / never_sold filters instead.",
+      "allowedForNlq": true,
+      "requiredSecurityFilters": [
+        "tenant_id",
+        "company_id"
+      ],
+      "defaultFilters": [],
+      "dateFields": [
+        {
+          "fieldId": "velocity_last_sold_date",
+          "column": "last_sold_date",
+          "default": false
+        },
+        {
+          "fieldId": "velocity_first_sold_date",
+          "column": "first_sold_date",
+          "default": false
+        }
+      ],
+      "supportedReportIds": [],
+      "synonyms": [
+        "non moving items",
+        "dead stock",
+        "slow moving items",
+        "items not sold",
+        "never sold items",
+        "idle items",
+        "item velocity",
+        "days since last sale",
+        "stale stock",
+        "not sold products"
+      ],
+      "defaultAggregateMetrics": [
+        "idle_item_count"
+      ],
+      "defaultDetailColumns": [
+        "velocity_product_name",
+        "velocity_product_code",
+        "velocity_last_sold_date",
+        "velocity_days_since_last_sold",
+        "velocity_current_stock",
+        "velocity_movement_status"
+      ],
+      "displayColumns": [
+        "velocity_product_name",
+        "velocity_product_code",
+        "velocity_last_sold_date",
+        "velocity_days_since_last_sold",
+        "velocity_total_sold_quantity",
+        "velocity_current_stock",
+        "velocity_stock_value",
+        "velocity_movement_status"
       ]
     }
   ],
@@ -1947,6 +2006,63 @@
       "businessRules": [
         "Per-document return value (positive)."
       ]
+    },
+    {
+      "metricId": "max_days_since_last_sold",
+      "displayName": "Days Since Last Sold",
+      "datasetId": "item_velocity",
+      "expression": "MAX(days_since_last_sold)",
+      "aggregation": "max",
+      "dataType": "number",
+      "synonyms": [
+        "days since last sale",
+        "longest idle",
+        "days idle",
+        "days without sale"
+      ],
+      "defaultSortDirection": "desc"
+    },
+    {
+      "metricId": "velocity_sold_quantity",
+      "displayName": "Total Sold Quantity",
+      "datasetId": "item_velocity",
+      "expression": "SUM(total_sold_quantity)",
+      "aggregation": "sum",
+      "dataType": "number",
+      "synonyms": [
+        "lifetime sold quantity",
+        "total quantity sold"
+      ],
+      "defaultSortDirection": "desc"
+    },
+    {
+      "metricId": "velocity_stock_value",
+      "displayName": "Stock Value",
+      "datasetId": "item_velocity",
+      "expression": "SUM(stock_value)",
+      "aggregation": "sum",
+      "dataType": "currency",
+      "synonyms": [
+        "dead stock value",
+        "idle stock value",
+        "non moving stock value"
+      ],
+      "defaultSortDirection": "desc"
+    },
+    {
+      "metricId": "idle_item_count",
+      "displayName": "Item Count",
+      "datasetId": "item_velocity",
+      "expression": "COUNT(*)",
+      "aggregation": "count",
+      "dataType": "number",
+      "synonyms": [
+        "number of items",
+        "item count",
+        "how many items",
+        "count of products"
+      ],
+      "defaultSortDirection": "desc"
     }
   ],
   "dimensions": [
@@ -3067,6 +3183,68 @@
         "manufacturer",
         "marketer"
       ]
+    },
+    {
+      "dimensionId": "velocity_product",
+      "displayName": "Product",
+      "datasetId": "item_velocity",
+      "columns": [
+        "product_id",
+        "product_code",
+        "product_name"
+      ],
+      "labelColumn": "product_name",
+      "fallbackLabelColumn": "product_code",
+      "synonyms": [
+        "item",
+        "product",
+        "sku",
+        "medicine",
+        "goods"
+      ]
+    },
+    {
+      "dimensionId": "velocity_product_group",
+      "displayName": "Product Group",
+      "datasetId": "item_velocity",
+      "columns": [
+        "product_group"
+      ],
+      "labelColumn": "product_group",
+      "synonyms": [
+        "group",
+        "product group"
+      ]
+    },
+    {
+      "dimensionId": "velocity_product_company",
+      "displayName": "Manufacturer",
+      "datasetId": "item_velocity",
+      "columns": [
+        "product_company",
+        "product_company_name"
+      ],
+      "labelColumn": "product_company_name",
+      "fallbackLabelColumn": "product_company",
+      "synonyms": [
+        "manufacturer",
+        "company",
+        "brand"
+      ]
+    },
+    {
+      "dimensionId": "velocity_movement_status",
+      "displayName": "Movement Status",
+      "datasetId": "item_velocity",
+      "columns": [
+        "movement_status"
+      ],
+      "labelColumn": "movement_status",
+      "synonyms": [
+        "movement",
+        "stock movement",
+        "velocity status"
+      ]
     }
   ],
   "filters": [
@@ -3214,7 +3392,12 @@
         "stock_summary",
         "stock_batches",
         "stock_ledger",
-        "tax_register"
+        "tax_register",
+        "item_velocity",
+        "sales_net",
+        "purchase_net",
+        "sales_returns",
+        "purchase_returns"
       ],
       "columns": [
         "product_id",
@@ -3224,7 +3407,8 @@
       "operators": [
         "=",
         "IN",
-        "ILIKE"
+        "ILIKE",
+        "NOT ILIKE"
       ],
       "required": false,
       "securityFilter": false
@@ -3243,7 +3427,8 @@
       "operators": [
         "=",
         "IN",
-        "ILIKE"
+        "ILIKE",
+        "NOT ILIKE"
       ],
       "required": false,
       "securityFilter": false
@@ -3262,7 +3447,8 @@
       "operators": [
         "=",
         "IN",
-        "ILIKE"
+        "ILIKE",
+        "NOT ILIKE"
       ],
       "required": false,
       "securityFilter": false
@@ -3281,7 +3467,8 @@
       "operators": [
         "=",
         "IN",
-        "ILIKE"
+        "ILIKE",
+        "NOT ILIKE"
       ],
       "required": false,
       "securityFilter": false
@@ -3398,7 +3585,8 @@
       "operators": [
         "=",
         "IN",
-        "ILIKE"
+        "ILIKE",
+        "NOT ILIKE"
       ],
       "required": false,
       "securityFilter": false
@@ -3418,7 +3606,8 @@
       "operators": [
         "=",
         "IN",
-        "ILIKE"
+        "ILIKE",
+        "NOT ILIKE"
       ],
       "required": false,
       "securityFilter": false
@@ -3438,7 +3627,8 @@
       "operators": [
         "=",
         "IN",
-        "ILIKE"
+        "ILIKE",
+        "NOT ILIKE"
       ],
       "required": false,
       "securityFilter": false
@@ -3460,7 +3650,8 @@
       "operators": [
         "=",
         "IN",
-        "ILIKE"
+        "ILIKE",
+        "NOT ILIKE"
       ],
       "required": false,
       "securityFilter": false
@@ -3481,7 +3672,8 @@
       "operators": [
         "=",
         "IN",
-        "ILIKE"
+        "ILIKE",
+        "NOT ILIKE"
       ],
       "required": false,
       "securityFilter": false
@@ -3590,7 +3782,8 @@
       "operators": [
         "=",
         "IN",
-        "ILIKE"
+        "ILIKE",
+        "NOT ILIKE"
       ],
       "required": false,
       "securityFilter": false
@@ -3609,7 +3802,63 @@
       "operators": [
         "=",
         "IN",
-        "ILIKE"
+        "ILIKE",
+        "NOT ILIKE"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "days_since_last_sold_filter",
+      "displayName": "Days Since Last Sold",
+      "datasetIds": [
+        "item_velocity"
+      ],
+      "column": "days_idle",
+      "operators": [
+        ">=",
+        ">",
+        "<=",
+        "<",
+        "=",
+        "BETWEEN"
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "never_sold_filter",
+      "displayName": "Never Sold",
+      "datasetIds": [
+        "item_velocity"
+      ],
+      "column": "never_sold",
+      "operators": [
+        "="
+      ],
+      "allowedValues": [
+        true,
+        false
+      ],
+      "required": false,
+      "securityFilter": false
+    },
+    {
+      "filterId": "movement_status_filter",
+      "displayName": "Movement Status",
+      "datasetIds": [
+        "item_velocity"
+      ],
+      "column": "movement_status",
+      "operators": [
+        "=",
+        "IN"
+      ],
+      "allowedValues": [
+        "NEVER_SOLD",
+        "NON_MOVING",
+        "SLOW_MOVING",
+        "MOVING"
       ],
       "required": false,
       "securityFilter": false
@@ -3780,6 +4029,28 @@
       "synonyms": [
         "debit note date",
         "return date"
+      ]
+    },
+    {
+      "fieldId": "velocity_last_sold_date",
+      "datasetId": "item_velocity",
+      "column": "last_sold_date",
+      "default": false,
+      "synonyms": [
+        "last sold date",
+        "last sale date",
+        "last sold"
+      ]
+    },
+    {
+      "fieldId": "velocity_first_sold_date",
+      "datasetId": "item_velocity",
+      "column": "first_sold_date",
+      "default": false,
+      "synonyms": [
+        "first sold date",
+        "first sale date",
+        "introduced date"
       ]
     }
   ],
@@ -6925,6 +7196,84 @@
       "label": "Return Amount",
       "dataType": "currency",
       "defaultForDetail": true
+    },
+    {
+      "columnId": "velocity_product_name",
+      "datasetId": "item_velocity",
+      "column": "product_name",
+      "label": "Product",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "item",
+        "sku"
+      ]
+    },
+    {
+      "columnId": "velocity_product_code",
+      "datasetId": "item_velocity",
+      "column": "product_code",
+      "label": "Product Code",
+      "dataType": "string",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "velocity_last_sold_date",
+      "datasetId": "item_velocity",
+      "column": "last_sold_date",
+      "label": "Last Sold Date",
+      "dataType": "date",
+      "defaultForDetail": true,
+      "synonyms": [
+        "last sale date"
+      ]
+    },
+    {
+      "columnId": "velocity_days_since_last_sold",
+      "datasetId": "item_velocity",
+      "column": "days_since_last_sold",
+      "label": "Days Since Last Sold",
+      "dataType": "number",
+      "defaultForDetail": true,
+      "synonyms": [
+        "days idle",
+        "days without sale"
+      ]
+    },
+    {
+      "columnId": "velocity_total_sold_quantity",
+      "datasetId": "item_velocity",
+      "column": "total_sold_quantity",
+      "label": "Total Sold Quantity",
+      "dataType": "quantity",
+      "defaultForDetail": false
+    },
+    {
+      "columnId": "velocity_current_stock",
+      "datasetId": "item_velocity",
+      "column": "current_stock",
+      "label": "Current Stock",
+      "dataType": "quantity",
+      "defaultForDetail": true
+    },
+    {
+      "columnId": "velocity_stock_value",
+      "datasetId": "item_velocity",
+      "column": "stock_value",
+      "label": "Stock Value",
+      "dataType": "currency",
+      "defaultForDetail": false
+    },
+    {
+      "columnId": "velocity_movement_status",
+      "datasetId": "item_velocity",
+      "column": "movement_status",
+      "label": "Movement Status",
+      "dataType": "string",
+      "defaultForDetail": true,
+      "synonyms": [
+        "movement"
+      ]
     }
   ]
 }

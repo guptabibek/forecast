@@ -123,6 +123,31 @@ describe('SqlCompilerService', () => {
     expect(() => safety.validate(compiled)).not.toThrow();
   });
 
+  it('compiles equality filters carrying a list value as membership instead of varchar = text[]', () => {
+    const compiled = compiler.compile(query({
+      filters: [{ filterId: 'product_filter', operator: '=', value: ['TICAGRACE 90 10X14 TABS', 'AUGMENTIN 625 DUO'] }],
+      limit: 5,
+    }), security);
+
+    // `varchar = $n` with an array param raises Postgres 42883; coerced to ANY().
+    expect(compiled.sql).toMatch(/product_code = ANY\(\$\d+\)/);
+    expect(compiled.sql).toMatch(/product_name = ANY\(\$\d+\)/);
+    expect(compiled.sql).not.toMatch(/product_(code|name) = \$\d+\b(?!::)/);
+    expect(compiled.params).toContainEqual(['TICAGRACE 90 10X14 TABS', 'AUGMENTIN 625 DUO']);
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('compiles inequality filters carrying a list value as <> ALL membership', () => {
+    const compiled = compiler.compile(query({
+      filters: [{ filterId: 'product_filter', operator: '!=', value: ['TICAGRACE 90 10X14 TABS', 'AUGMENTIN 625 DUO'] }],
+      limit: 5,
+    }), security);
+
+    expect(compiled.sql).toMatch(/product_code <> ALL\(\$\d+\)/);
+    expect(compiled.sql).toMatch(/product_name <> ALL\(\$\d+\)/);
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
   it('compiles contribution percentage for top sold items', () => {
     const compiled = compiler.compile(query({
       metrics: ['sold_quantity', 'sales_contribution_pct'],
@@ -145,6 +170,100 @@ describe('SqlCompilerService', () => {
 
     expect(compiled.sql).toContain('invoice_id =');
     expect(compiled.sql).not.toContain('invoice_id = $4::uuid');
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('compiles item_velocity "not sold" reports with company-only scope and a NOT ILIKE name exclusion', () => {
+    const compiled = compiler.compile(query({
+      mode: 'detail',
+      datasetId: 'item_velocity',
+      analysisType: 'exception_list',
+      metrics: [],
+      dimensions: [],
+      displayColumns: ['velocity_product_name', 'velocity_last_sold_date', 'velocity_days_since_last_sold', 'velocity_current_stock'],
+      filters: [
+        { filterId: 'never_sold_filter', operator: '=', value: true },
+        { filterId: 'product_filter', operator: 'NOT ILIKE', value: 'LOCAL FREIGHT' },
+      ],
+      timeRange: undefined,
+      sort: [{ columnId: 'velocity_days_since_last_sold', direction: 'desc' }],
+      limit: 50,
+      visualization: { type: 'table' },
+    }), security);
+
+    expect(compiled.sql).toContain('FROM vw_ai_item_velocity');
+    expect(compiled.sql).toContain('tenant_id = $1::uuid');
+    expect(compiled.sql).toMatch(/company_id = ANY\(\$\d+::int\[\]\)/);
+    // company-grain master: no branch/warehouse scoping
+    expect(compiled.sql).not.toMatch(/\b(branch_id|warehouse_id)\b/);
+    expect(compiled.appliedSecurityFilters).not.toContain('branch_id');
+    expect(compiled.sql).toContain('never_sold =');
+    // name exclusion: COALESCE(...) NOT ILIKE across synonym columns, AND-joined
+    expect(compiled.sql).toMatch(/\(COALESCE\(product_code, ''\) NOT ILIKE \$\d+ AND COALESCE\(product_name, ''\) NOT ILIKE \$\d+\)/);
+    expect(compiled.sql).not.toMatch(/product_(code|name) = /);
+    expect(compiled.params).toContain('%LOCAL FREIGHT%');
+    expect(compiled.sql).toContain('ORDER BY days_since_last_sold DESC');
+    expect(compiled.sql).not.toContain('GROUP BY');
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('compiles item_velocity non-moving rankings by days since last sold', () => {
+    const compiled = compiler.compile(query({
+      datasetId: 'item_velocity',
+      analysisType: 'ranking',
+      metrics: ['max_days_since_last_sold'],
+      dimensions: ['velocity_product'],
+      filters: [{ filterId: 'days_since_last_sold_filter', operator: '>=', value: 90 }],
+      timeRange: undefined,
+      sort: [{ metricId: 'max_days_since_last_sold', direction: 'desc' }],
+      limit: 10,
+    }), security);
+
+    expect(compiled.sql).toContain('MAX(days_since_last_sold) AS max_days_since_last_sold');
+    // the days filter targets the non-null days_idle column (includes never-sold)
+    expect(compiled.sql).toMatch(/days_idle >= \$\d+/);
+    expect(compiled.sql).toContain('GROUP BY');
+    expect(compiled.sql).toContain('ORDER BY max_days_since_last_sold DESC');
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('resolves a {from,to} range object on a scalar date operator instead of casting jsonb to date', () => {
+    const compiled = compiler.compile(query({
+      mode: 'detail',
+      datasetId: 'stock_batches',
+      metrics: [],
+      dimensions: [],
+      displayColumns: ['batch_product_name', 'batch_expiry_date', 'batch_current_stock'],
+      filters: [{ filterId: 'expiry_filter', operator: '<=', value: { from: '2026-06-15', to: '2026-09-13' } }],
+      timeRange: undefined,
+      sort: [],
+      limit: 100,
+      visualization: { type: 'table' },
+    }), security);
+
+    // the {from,to} object must not reach a ::date cast (would be jsonb -> date, 42846)
+    expect(compiled.sql).toMatch(/expiry_date <= \$\d+::date/);
+    expect(compiled.params).toContain('2026-09-13');
+    expect(compiled.params.every((p) => typeof p !== 'object' || p === null || Array.isArray(p))).toBe(true);
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('does not emit a duplicate output column when a metric and display column share an alias', () => {
+    const compiled = compiler.compile(query({
+      mode: 'detail',
+      datasetId: 'tax_register',
+      metrics: ['tax_amount'],
+      dimensions: [],
+      displayColumns: ['tax_invoice_no', 'tax_amount_column'],
+      filters: [],
+      timeRange: { preset: 'this_month' },
+      sort: [{ metricId: 'tax_amount', direction: 'desc' }],
+      limit: 100,
+    }), security);
+
+    // only ONE `AS tax_amount` projection -> ORDER BY tax_amount is unambiguous (no 42702)
+    expect((compiled.sql.match(/ AS tax_amount\b/g) ?? []).length).toBe(1);
+    expect(compiled.sql).toContain('ORDER BY tax_amount DESC');
     expect(() => safety.validate(compiled)).not.toThrow();
   });
 

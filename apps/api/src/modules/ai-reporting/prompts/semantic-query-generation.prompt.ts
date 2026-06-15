@@ -51,7 +51,7 @@ Return only valid JSON in this format:
   "filters": [
     {
       "filterId": "string",
-      "operator": "= | != | > | >= | < | <= | in | not_in | contains | between",
+      "operator": "= | != | > | >= | < | <= | in | not_in | contains | not_contains | between",
       "value": "string | number | boolean | array | object"
     }
   ],
@@ -95,7 +95,7 @@ Return only valid JSON in this format:
 Rules:
 1. Use only IDs that exist in the catalog above. No invented IDs, no schema/column names from outside the catalog.
 2. Output JSON only - no prose, no markdown fences, no comments, no SQL.
-3. If a question cannot be answered with the catalog, set status="unsupported" and include unsupportedReason that names the missing metric, dimension, or dataset (for example: "Tried metric net_margin and dimension manufacturer - neither is in the catalog."). Preserve structured unsupported details in errorCode, missingCapabilities, availableAlternatives, and recommendedSchemaFix when applicable.
+3. If a question cannot be answered with the catalog, set status="unsupported" and include unsupportedReason that names the missing metric, dimension, or dataset (for example: "Tried metric net_margin and dimension manufacturer - neither is in the catalog."). Preserve structured unsupported details in errorCode, missingCapabilities, availableAlternatives, and recommendedSchemaFix when applicable. NEVER answer an absence/negation question ("not sold", "never sold", "no sales", "without X", "items that did not ...") by querying a transactional dataset for the POSITIVE case (e.g. filtering sales_items to a date returns items that DID sell - the opposite). Map it to a dataset that models absence (item_velocity) or return status="unsupported".
 4. If the question is ambiguous, set status="clarification_required" with one short clarifyingQuestion.
 5. For relative date ranges not represented by rangeType, use rangeType "custom" with concrete startDate and endDate in YYYY-MM-DD.
 6. If a report template exactly matches the question, you may align with its dataset/metrics/dimensions/sort as a shortcut, but still emit a complete semantic query JSON.
@@ -112,5 +112,7 @@ Rules:
 14. Expiry and due-date questions may use future dates when the catalog exposes a matching future-valid date field. Future sales/purchase transaction queries are unsupported unless the catalog exposes forecast/projection datasets and metrics.
 15. "How many" expiry questions are KPI/aggregate count reports, not detail/list reports. Product or batch expiry lists are detail reports with product, batch, expiry date, stock quantity, and stock value display columns when the catalog exposes them.
 16. Between filters must keep value as {"from": "...", "to": "..."}.
-17. Every assumption you make about ambiguous parts of the question MUST be listed in assumptions[] in one short sentence each.`;
+17. Every assumption you make about ambiguous parts of the question MUST be listed in assumptions[] in one short sentence each.
+18. Items that did NOT sell, never sold, are non-moving / dead stock / slow moving / idle / stale, or "days/time since last sold" MUST use dataset item_velocity (the per-product item master). For "not sold in/since a period" use a SINGLE days_since_last_sold_filter (operator ">=", value = the period length in days: yesterday/today=1, this week=7, this month=30, 60, 90 ...); it already includes items that never sold, so do NOT also add never_sold_filter (combining them returns nothing). Use never_sold_filter (value true) ONLY for "never sold". Use movement_status_filter (NEVER_SOLD/NON_MOVING/SLOW_MOVING/MOVING) for movement buckets. Show the count via velocity_days_since_last_sold display column. Never put a time range on item_velocity. ADD an assumptions[] line stating the interpretation.
+19. Use operator not_contains to EXCLUDE rows by text ("excluding/except/without items whose name starts with or contains X"). Never express text exclusion with "=", "!=", or "in".`;
 }

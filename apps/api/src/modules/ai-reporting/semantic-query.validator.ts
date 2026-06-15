@@ -21,7 +21,7 @@ import {
   SemanticVisualization,
 } from './semantic-query.types';
 
-const VALID_OPERATORS = new Set(['=', '!=', 'IN', 'NOT IN', 'ILIKE', 'BETWEEN', '>=', '<=', '>', '<', 'IS DISTINCT FROM']);
+const VALID_OPERATORS = new Set(['=', '!=', 'IN', 'NOT IN', 'ILIKE', 'NOT ILIKE', 'BETWEEN', '>=', '<=', '>', '<', 'IS DISTINCT FROM']);
 const VALID_QUERY_KINDS = new Set(['single_report', 'dashboard', 'clarification', 'unsupported', 'follow_up', 'explanation']);
 const FINANCIAL_DATASETS = new Set(['party_outstanding', 'ledger_entries', 'tax_register']);
 const DOMAIN_PERMISSIONS: Record<string, string> = {
@@ -142,6 +142,12 @@ export class SemanticQueryValidator {
     const dataset = this.requireDataset(normalizedDatasetId);
     this.assertDatasetPermission(dataset, security);
     timeRange = this.normalizeTimeFieldForDataset(timeRange, dataset);
+
+    // The LLM frequently lists a per-row display column (e.g. days_since_last_sold)
+    // or a dimension under metrics[]. Move those to the right bucket instead of
+    // failing the whole report with MISSING_METRIC; only truly unknown ids fall
+    // through to the validation loop below.
+    ({ metrics, dimensions, displayColumns } = this.reassignNonMetricSelections(metrics, dimensions, displayColumns, dataset));
 
     for (const metricId of metrics) {
       const metric = this.catalog.getMetric(metricId);
@@ -318,7 +324,7 @@ export class SemanticQueryValidator {
   }
 
   private validateFilter(filter: SemanticFilter, dataset: CatalogDataset): SemanticFilter | null {
-    let operator = String(filter.operator || '').toUpperCase();
+    let operator = this.canonicalizeOperator(filter.operator);
     if (!VALID_OPERATORS.has(operator)) {
       throw new AiReportingBadRequest('INVALID_SEMANTIC_QUERY', `Unsupported filter operator: ${filter.operator}`);
     }
@@ -343,6 +349,27 @@ export class SemanticQueryValidator {
     }
     this.validateValue(value);
     return { ...filter, operator, value };
+  }
+
+  /**
+   * Canonicalize operator spellings the LLM (or an upstream normalizer) may
+   * emit so they match VALID_OPERATORS regardless of which path produced them.
+   * Backstop for OPERATOR drift between NlqParserService and this validator —
+   * e.g. "not_contains" -> "NOT ILIKE", "NOT_IN" -> "NOT IN".
+   */
+  private canonicalizeOperator(raw: unknown): string {
+    const operator = String(raw || '').trim().toUpperCase().replace(/_/g, ' ');
+    const aliases: Record<string, string> = {
+      CONTAINS: 'ILIKE',
+      'NOT CONTAINS': 'NOT ILIKE',
+      'NOT ILIKE': 'NOT ILIKE',
+      LIKE: 'ILIKE',
+      'NOT LIKE': 'NOT ILIKE',
+      EQ: '=',
+      NEQ: '!=',
+      '<>': '!=',
+    };
+    return aliases[operator] ?? operator;
   }
 
   private dedupeFilters(filters: SemanticFilter[]): SemanticFilter[] {
@@ -383,6 +410,43 @@ export class SemanticQueryValidator {
     if (sort.column && !this.datasetColumns(dataset).has(sort.column)) {
       throw new AiReportingBadRequest('INVALID_SEMANTIC_QUERY', `Sort column is not allowed: ${sort.column}`);
     }
+  }
+
+  /**
+   * Reassign selections the LLM put in metrics[] that are actually a display
+   * column or dimension on the dataset (a recurring confusion for per-row
+   * numeric attributes such as days_since_last_sold). Valid metrics and truly
+   * unknown ids are left in metrics[] so the downstream MISSING_METRIC check
+   * still fires for genuine schema gaps.
+   */
+  private reassignNonMetricSelections(
+    metrics: string[],
+    dimensions: string[],
+    displayColumns: string[],
+    dataset: CatalogDataset,
+  ): { metrics: string[]; dimensions: string[]; displayColumns: string[] } {
+    const keptMetrics: string[] = [];
+    const nextDimensions = [...dimensions];
+    const nextDisplayColumns = [...displayColumns];
+    for (const metricId of metrics) {
+      const metric = this.catalog.getMetric(metricId);
+      if (metric && metric.datasetId === dataset.datasetId) {
+        keptMetrics.push(metricId);
+        continue;
+      }
+      const displayColumn = this.catalog.getDisplayColumn(metricId);
+      if (displayColumn?.datasetId === dataset.datasetId) {
+        if (!nextDisplayColumns.includes(metricId)) nextDisplayColumns.push(metricId);
+        continue;
+      }
+      const dimension = this.catalog.getDimension(metricId);
+      if (dimension && (dimension.datasetId === dataset.datasetId || dimension.datasetId === '*')) {
+        if (!nextDimensions.includes(metricId)) nextDimensions.push(metricId);
+        continue;
+      }
+      keptMetrics.push(metricId);
+    }
+    return { metrics: keptMetrics, dimensions: nextDimensions, displayColumns: nextDisplayColumns };
   }
 
   private normalizeSortReference(sort: SemanticSort, dataset: CatalogDataset, metrics: string[], dimensions: string[], displayColumns: string[]): SemanticSort {
@@ -662,11 +726,13 @@ export class SemanticQueryValidator {
         filterId: filter.filterId,
         operator: operator === 'contains'
           ? 'ILIKE'
-          : operator === 'in'
-            ? 'IN'
-            : operator === 'not_in'
-              ? 'NOT IN'
-              : operator.toUpperCase(),
+          : operator === 'not_contains'
+            ? 'NOT ILIKE'
+            : operator === 'in'
+              ? 'IN'
+              : operator === 'not_in'
+                ? 'NOT IN'
+                : operator.toUpperCase(),
         value,
       };
     });

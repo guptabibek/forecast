@@ -1,4 +1,4 @@
-import { CatalogDimension, SemanticCatalog, SemanticReportQuery } from './semantic-query.types';
+import { CatalogDimension, SemanticCatalog, SemanticFilter, SemanticQuery, SemanticReportQuery } from './semantic-query.types';
 
 /**
  * Deterministic grouping/ranking intent extraction — the backstop for the
@@ -251,6 +251,145 @@ export function repairChangeRankingIntent(
       ...(query.assumptions ?? []),
       `Ranking by ${intent.direction} in ${query.metrics[0]} versus the ${intent.comparisonType === 'previous_year' ? 'same period last year' : 'previous period'}.`,
     ],
+  };
+}
+
+// Absence / non-movement phrasing. These questions are answerable ONLY by the
+// item_velocity master dataset (transactional views can't express "did not
+// sell"). The LLM mostly routes them correctly, but occasionally returns
+// "unsupported" or degrades onto a sales dataset — this backstop forces the
+// right routing deterministically.
+const ABSENCE_PATTERN =
+  /\b(not (been )?(sold|selling|moving)|never (been )?sold|no sales|without (any )?sales|non[ -]?moving|dead stock|slow[ -]?moving|idle (item|items|stock|product|products)|stale stock|not been sold)\b/;
+
+export function detectAbsenceIntent(question: string): boolean {
+  return ABSENCE_PATTERN.test(normalize(question));
+}
+
+function parseNotSoldWindow(text: string): number | null {
+  const match = text.match(/\b(?:last|past|in|within|over)\s+(\d{1,4})\s+(day|days|week|weeks|month|months|year|years)\b/);
+  if (!match) return null;
+  const n = Number(match[1]);
+  if (!Number.isInteger(n) || n < 1) return null;
+  const unit = match[2];
+  if (unit.startsWith('day')) return n;
+  if (unit.startsWith('week')) return n * 7;
+  if (unit.startsWith('month')) return n * 30;
+  return n * 365;
+}
+
+// Named relative periods → an idle-days threshold (yesterday/today = 1 day).
+function namedPeriodDays(text: string): number | null {
+  if (/\b(yesterday|today)\b/.test(text)) return 1;
+  if (/\bthis week\b/.test(text)) return 7;
+  if (/\bthis month\b/.test(text)) return 30;
+  if (/\bthis quarter\b/.test(text)) return 90;
+  return null;
+}
+
+const ABSENCE_FILTER_IDS = new Set(['never_sold_filter', 'days_since_last_sold_filter', 'movement_status_filter']);
+
+/**
+ * The single, satisfiable absence predicate for the question:
+ *  - "never sold"                  → never_sold = true
+ *  - "not sold in N days /
+ *     yesterday / this month"      → days_since_last_sold_filter >= N (targets the
+ *                                    non-null days_idle column, so never-sold counts)
+ *  - "non-moving / dead / slow /
+ *     idle"                        → movement_status IN (NEVER_SOLD, NON_MOVING, SLOW_MOVING)
+ */
+function buildAbsenceFilter(text: string): SemanticFilter {
+  if (/\bnever\b|\bnot been sold\b|\bno sales\b/.test(text)) {
+    return { filterId: 'never_sold_filter', operator: '=', value: true };
+  }
+  const windowDays = parseNotSoldWindow(text) ?? namedPeriodDays(text);
+  if (windowDays != null) {
+    return { filterId: 'days_since_last_sold_filter', operator: '>=', value: windowDays };
+  }
+  return { filterId: 'movement_status_filter', operator: 'IN', value: ['NEVER_SOLD', 'NON_MOVING', 'SLOW_MOVING'] };
+}
+
+function absenceAssumption(filter: SemanticFilter): string {
+  if (filter.filterId === 'never_sold_filter') return 'Interpreted as items that have never been sold, from the item master.';
+  if (filter.filterId === 'days_since_last_sold_filter') return `Interpreted as items not sold in the last ${filter.value} day(s), from the item master.`;
+  return 'Interpreted as non-moving / not-recently-sold items, from the item master.';
+}
+
+/**
+ * Routes absence/non-movement questions ("items not sold this month", "never
+ * sold products", "dead stock") to item_velocity and enforces ONE correct,
+ * satisfiable absence predicate. The LLM frequently AND-s mutually exclusive
+ * predicates (e.g. never_sold + days/movement, which return nothing), gives up
+ * (unsupported), or degrades onto a transactional dataset. When it already
+ * chose item_velocity its presentation (mode/columns/limit) and any non-absence
+ * filters (e.g. product exclusions) are preserved. Non-absence questions and a
+ * catalog without item_velocity are left untouched.
+ */
+export function repairAbsenceIntent(
+  question: string,
+  query: SemanticQuery,
+  catalog: SemanticCatalog,
+): SemanticQuery {
+  if (!catalog.datasets.some((d) => d.datasetId === 'item_velocity' && d.allowedForNlq)) return query;
+  if (!detectAbsenceIntent(question)) return query;
+
+  const text = normalize(question);
+  const absenceFilter = buildAbsenceFilter(text);
+
+  if (query.queryKind === 'single_report' && query.datasetId === 'item_velocity') {
+    const existing = query.filters ?? [];
+    const nonAbsence = existing.filter((f) => !ABSENCE_FILTER_IDS.has(f.filterId ?? ''));
+    const absenceOk =
+      existing.length === nonAbsence.length + 1 &&
+      existing.some((f) => f.filterId === absenceFilter.filterId);
+    if (absenceOk) return query;
+    return {
+      ...query,
+      filters: [absenceFilter, ...nonAbsence],
+      assumptions: [...(query.assumptions ?? []), absenceAssumption(absenceFilter)],
+    };
+  }
+
+  const rescuable =
+    query.queryKind === 'unsupported' ||
+    (query.queryKind === 'single_report' && query.datasetId !== 'item_velocity');
+  if (!rescuable) return query;
+
+  const ranking = detectRankingIntent(question);
+  const isCount = /\b(how many|number of|count of|count)\b/.test(text);
+  const base = {
+    queryKind: 'single_report' as const,
+    title: (query as any).title ?? 'Item velocity',
+    datasetId: 'item_velocity',
+    comparison: { enabled: false, type: 'none' as const, startDate: null, endDate: null },
+    timeRange: { preset: 'unspecified' as const },
+    filters: [absenceFilter],
+    assumptions: [absenceAssumption(absenceFilter), 'Routed to the item velocity (non-moving) dataset.'],
+    followUpQuestions: [],
+  };
+
+  if (isCount) {
+    return {
+      ...base, mode: 'kpi', analysisType: 'grouped_summary',
+      metrics: ['idle_item_count'], dimensions: [], displayColumns: [],
+      sort: [{ metricId: 'idle_item_count', direction: 'desc' }],
+      limit: 1, visualization: { type: 'kpi' },
+    };
+  }
+  if (ranking?.noun || /\b(top|bottom|most|least|longest|highest|lowest)\b/.test(text)) {
+    return {
+      ...base, mode: 'ranking', analysisType: 'ranking',
+      metrics: ['max_days_since_last_sold'], dimensions: ['velocity_product'], displayColumns: [],
+      sort: [{ metricId: 'max_days_since_last_sold', direction: ranking?.direction ?? 'desc' }],
+      limit: ranking?.limit ?? 10, visualization: { type: 'bar' },
+    };
+  }
+  return {
+    ...base, mode: 'detail', analysisType: 'exception_list',
+    metrics: [], dimensions: [],
+    displayColumns: ['velocity_product_name', 'velocity_product_code', 'velocity_last_sold_date', 'velocity_days_since_last_sold', 'velocity_current_stock', 'velocity_movement_status'],
+    sort: [{ columnId: 'velocity_days_since_last_sold', direction: 'desc' }],
+    limit: 100, visualization: { type: 'table' },
   };
 }
 

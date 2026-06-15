@@ -4,7 +4,7 @@ import { CLARIFICATION_RESPONSE_RULES } from './prompts/clarification.prompt';
 import { buildDashboardPlannerPrompt } from './prompts/dashboard-planner.prompt';
 import { NLQ_PROMPT_VERSION, NLQ_SYSTEM_PROMPT } from './prompts/nlq-system.prompt';
 import { buildSemanticQueryGenerationPrompt } from './prompts/semantic-query-generation.prompt';
-import { repairChangeRankingIntent, repairDatasetCoherence, repairGroupingIntent } from './grouping-intent.util';
+import { repairAbsenceIntent, repairChangeRankingIntent, repairDatasetCoherence, repairGroupingIntent } from './grouping-intent.util';
 import { SemanticCatalogLoader } from './semantic-catalog.loader';
 import {
   AiReportAnalysisType,
@@ -31,10 +31,12 @@ const OPERATOR_MAP: Record<string, string> = {
   in: 'IN',
   not_in: 'NOT IN',
   contains: 'ILIKE',
+  not_contains: 'NOT ILIKE',
   between: 'BETWEEN',
   IN: 'IN',
   'NOT IN': 'NOT IN',
   ILIKE: 'ILIKE',
+  'NOT ILIKE': 'NOT ILIKE',
   BETWEEN: 'BETWEEN',
 };
 
@@ -150,8 +152,12 @@ export class NlqParserService {
    * the catalog cannot group by. Leaves every other query untouched.
    */
   private applyGroupingIntentGuard(question: string, query: SemanticQuery): SemanticQuery {
-    if (query.queryKind !== 'single_report') return query;
     const catalog = this.catalogLoader.getCatalog();
+    // Absence/non-movement rescue runs first and can promote an `unsupported`
+    // response into a proper item_velocity report, so it must run before the
+    // single_report-only guards below.
+    query = repairAbsenceIntent(question, query, catalog);
+    if (query.queryKind !== 'single_report') return query;
     // First normalize stray sibling-dataset IDs (dataset right, vocabulary
     // wrong), then shape change-ranking questions (delta vs previous period),
     // then repair dropped grouping intent.

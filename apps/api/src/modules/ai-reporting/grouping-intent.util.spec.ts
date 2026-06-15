@@ -3,11 +3,12 @@ import * as path from 'path';
 import {
   detectChangeRankingIntent,
   detectRankingIntent,
+  repairAbsenceIntent,
   repairChangeRankingIntent,
   repairDatasetCoherence,
   repairGroupingIntent,
 } from './grouping-intent.util';
-import { SemanticCatalog, SemanticReportQuery } from './semantic-query.types';
+import { SemanticCatalog, SemanticQuery, SemanticReportQuery } from './semantic-query.types';
 
 // Tests run against the REAL shipped catalog so they also prove the regional
 // dimensions and synonyms this layer depends on actually exist.
@@ -246,5 +247,106 @@ describe('repairDatasetCoherence', () => {
 
     const unknown = degradedQuery({ metrics: ['no_such_metric'] });
     expect(repairDatasetCoherence(unknown, catalog).metrics).toEqual(['no_such_metric']);
+  });
+});
+
+describe('repairAbsenceIntent', () => {
+  const unsupported = (): SemanticQuery => ({
+    queryKind: 'unsupported',
+    title: 'Unsupported report request',
+    reason: 'absence not supported',
+    followUpQuestions: [],
+    assumptions: [],
+    unsupportedReason: 'absence not supported',
+  });
+
+  it('promotes an unsupported "not sold this month" into an item_velocity report', () => {
+    const out = repairAbsenceIntent('Items not sold this month', unsupported(), catalog) as SemanticReportQuery;
+    expect(out.queryKind).toBe('single_report');
+    expect(out.datasetId).toBe('item_velocity');
+    // "this month" -> a 30-day idle threshold (includes never-sold via days_idle)
+    expect(out.filters?.[0]).toMatchObject({ filterId: 'days_since_last_sold_filter', operator: '>=', value: 30 });
+  });
+
+  it('uses the movement-status bucket for "dead stock" with no explicit period', () => {
+    const out = repairAbsenceIntent('Show me dead stock items', unsupported(), catalog) as SemanticReportQuery;
+    expect(out.filters?.[0]?.filterId).toBe('movement_status_filter');
+  });
+
+  it('maps "never sold" to the never_sold filter', () => {
+    const out = repairAbsenceIntent('Products that have never been sold', unsupported(), catalog) as SemanticReportQuery;
+    expect(out.datasetId).toBe('item_velocity');
+    expect(out.filters?.[0]?.filterId).toBe('never_sold_filter');
+    expect(out.filters?.[0]?.value).toBe(true);
+  });
+
+  it('maps "not sold in the last 60 days" to a days-since threshold', () => {
+    const out = repairAbsenceIntent('Which products have not sold in the last 60 days?', unsupported(), catalog) as SemanticReportQuery;
+    expect(out.filters?.[0]).toMatchObject({ filterId: 'days_since_last_sold_filter', operator: '>=', value: 60 });
+  });
+
+  it('routes "how many items never sold" to a KPI count', () => {
+    const out = repairAbsenceIntent('How many items have never been sold?', unsupported(), catalog) as SemanticReportQuery;
+    expect(out.mode).toBe('kpi');
+    expect(out.metrics).toEqual(['idle_item_count']);
+  });
+
+  it('ranks "top 10 slow moving items" by days since last sold', () => {
+    const degraded: SemanticReportQuery = {
+      queryKind: 'single_report', title: 'x', datasetId: 'sales_items',
+      mode: 'ranking', metrics: ['sold_quantity'], dimensions: [], displayColumns: [], limit: 10,
+    };
+    const out = repairAbsenceIntent('Top 10 slow moving items', degraded, catalog) as SemanticReportQuery;
+    expect(out.datasetId).toBe('item_velocity');
+    expect(out.mode).toBe('ranking');
+    expect(out.metrics).toEqual(['max_days_since_last_sold']);
+    expect(out.limit).toBe(10);
+  });
+
+  it('replaces a contradictory never_sold + days filter with one satisfiable absence filter', () => {
+    const contradictory: SemanticReportQuery = {
+      queryKind: 'single_report', title: 'x', datasetId: 'item_velocity',
+      mode: 'detail', metrics: [], dimensions: [], displayColumns: ['velocity_product_name'], limit: 100,
+      filters: [
+        { filterId: 'never_sold_filter', operator: '=', value: true },
+        { filterId: 'days_since_last_sold_filter', operator: '>=', value: 1 },
+      ],
+    };
+    const out = repairAbsenceIntent('items not sold yesterday', contradictory, catalog) as SemanticReportQuery;
+    expect(out.datasetId).toBe('item_velocity');
+    expect(out.filters?.map((f) => f.filterId)).toEqual(['days_since_last_sold_filter']);
+  });
+
+  it('fixes never_sold + movement contradiction while preserving a product exclusion', () => {
+    const messy: SemanticReportQuery = {
+      queryKind: 'single_report', title: 'x', datasetId: 'item_velocity',
+      mode: 'detail', metrics: [], dimensions: [], displayColumns: ['velocity_product_name'], limit: 100,
+      filters: [
+        { filterId: 'never_sold_filter', operator: '=', value: true },
+        { filterId: 'movement_status_filter', operator: '=', value: 'NON_MOVING' },
+        { filterId: 'product_filter', operator: 'NOT ILIKE', value: 'freight' },
+      ],
+    };
+    const out = repairAbsenceIntent('Items not sold this month excluding freight charges', messy, catalog) as SemanticReportQuery;
+    const ids = out.filters?.map((f) => f.filterId);
+    // exactly one absence predicate (days, for "this month"), plus the kept exclusion
+    expect(ids).toEqual(['days_since_last_sold_filter', 'product_filter']);
+  });
+
+  it('leaves a correctly-routed single-filter item_velocity query untouched', () => {
+    const good: SemanticReportQuery = {
+      queryKind: 'single_report', title: 'x', datasetId: 'item_velocity',
+      mode: 'detail', metrics: [], dimensions: [], displayColumns: ['velocity_product_name'], limit: 100,
+      filters: [{ filterId: 'days_since_last_sold_filter', operator: '>=', value: 30 }],
+    };
+    expect(repairAbsenceIntent('items not sold this month', good, catalog)).toBe(good);
+  });
+
+  it('leaves non-absence questions untouched', () => {
+    const sales: SemanticReportQuery = {
+      queryKind: 'single_report', title: 'x', datasetId: 'sales_items',
+      mode: 'ranking', metrics: ['sold_quantity'], dimensions: ['sales_product'], displayColumns: [], limit: 5,
+    };
+    expect(repairAbsenceIntent('Top 5 selling products this month', sales, catalog)).toBe(sales);
   });
 });
