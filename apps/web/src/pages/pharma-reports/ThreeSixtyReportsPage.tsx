@@ -771,6 +771,84 @@ function DimensionReport({ report, periodLabel }: { report: DimensionSalesReport
   );
 }
 
+function SalesTeamReport({ report, periodLabel }: { report: SalesTeam360Report; periodLabel: string }) {
+  const k = report.kpis;
+  const ageing = report.ageing ?? [];
+  const outstanding = report.tables.customerOutstanding ?? [];
+  const total = asNumber(k.outstandingAmount);
+  const overduePct = total > 0 ? asNumber(k.overdueAmount) / total * 100 : null;
+
+  return (
+    <>
+      <DimensionReport report={report} periodLabel={periodLabel} />
+
+      <div className="rounded-lg border border-secondary-200 bg-secondary-50/60 px-4 py-3">
+        <h2 className="text-lg font-bold text-secondary-950">Customer Outstanding (Salesman-wise)</h2>
+        <p className="text-sm text-secondary-500">
+          Receivables of customers assigned to this salesman (by customer-master MR), as of today. Independent of the selected period.
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <KpiTile
+          title="Customer Outstanding"
+          value={fmtCurrency(total)}
+          subtext={`${fmt(asNumber(k.outstandingCustomerCount))} customers with dues`}
+          tone={total > 0 ? 'warn' : 'good'}
+        />
+        <KpiTile
+          title="Overdue (31+ days)"
+          value={fmtCurrency(asNumber(k.overdueAmount))}
+          subtext={overduePct == null ? 'No dues' : `${fmtPct(overduePct)} of outstanding`}
+          tone={asNumber(k.overdueAmount) > 0 ? 'risk' : 'good'}
+        />
+        <KpiTile
+          title="Customers With Dues"
+          value={fmt(asNumber(k.outstandingCustomerCount))}
+          subtext="As of today"
+        />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <AgeingTable title="Outstanding Ageing" rows={ageing} countHeader="Bill Count" />
+        <Card>
+          <h3 className="text-base font-semibold text-secondary-950">Outstanding Ageing Chart</h3>
+          <div className="mt-3">
+            <BarChart
+              data={chartData(ageing)}
+              xAxisKey="bucket"
+              bars={[{ dataKey: 'amount', name: 'Outstanding', color: '#dc2626' }]}
+              height={280}
+              formatYAxis={fmtCurrency}
+              formatTooltip={fmtCurrency}
+            />
+          </div>
+        </Card>
+      </div>
+
+      <Card>
+        <h3 className="text-base font-semibold text-secondary-950">Customer Outstanding Detail</h3>
+        <DataTable
+          headers={['Rank', 'Customer', 'Code', '0-30', '31-60', '61-90', '91+', 'Outstanding', 'Bills', 'Max Days', 'Share']}
+          rows={outstanding.map((row) => [
+            fmt(row.rank),
+            row.name,
+            row.code || '-',
+            fmtCurrency(asNumber(row.bucket_0_30)),
+            fmtCurrency(asNumber(row.bucket_31_60)),
+            fmtCurrency(asNumber(row.bucket_61_90)),
+            fmtCurrency(asNumber(row.bucket_91_plus)),
+            fmtCurrency(asNumber(row.value)),
+            fmt(asNumber(row.open_bill_count)),
+            row.max_age_days == null ? '-' : fmt(asNumber(row.max_age_days)),
+            fmtPct(asNumber(row.share)),
+          ])}
+        />
+      </Card>
+    </>
+  );
+}
+
 function ScoreCard({ title, score }: { title: string; score: number }) {
   const label = score >= 85 ? 'A Grade' : score >= 70 ? 'Monitor' : 'High Risk';
   return (
@@ -924,7 +1002,7 @@ function AgeingTable({ title, rows, countHeader }: { title: string; rows: Array<
 }
 
 function DataTable({ headers, rows }: { headers: string[]; rows: ReactNode[][] }) {
-  const numericHeaders = new Set(['Rank', 'Qty', 'Value', 'Share', 'Lines', 'Amount', 'Count', 'Company', 'PID']);
+  const numericHeaders = new Set(['Rank', 'Qty', 'Value', 'Share', 'Lines', 'Amount', 'Count', 'Company', 'PID', '0-30', '31-60', '61-90', '91+', 'Outstanding', 'Bills', 'Max Days']);
   const isNumericColumn = (header: string) =>
     numericHeaders.has(header)
     || header.includes('%')
@@ -1128,8 +1206,11 @@ export default function ThreeSixtyReportsPage() {
           {activeTab === 'item' && <ItemReport report={report as Item360Report} periodLabel={periodShortLabels[period]} />}
           {activeTab === 'customer' && <CustomerReport report={report as Customer360Report} periodLabel={periodShortLabels[period]} />}
           {activeTab === 'supplier' && <SupplierReport report={report as Supplier360Report} periodLabel={periodShortLabels[period]} />}
-          {(activeTab === 'route' || activeTab === 'city' || activeTab === 'salesman') && (
+          {(activeTab === 'route' || activeTab === 'city') && (
             <DimensionReport report={report as DimensionSalesReport} periodLabel={periodShortLabels[period]} />
+          )}
+          {activeTab === 'salesman' && (
+            <SalesTeamReport report={report as SalesTeam360Report} periodLabel={periodShortLabels[period]} />
           )}
           <InsightCard insights={report.insights} />
         </>

@@ -100,7 +100,12 @@
       "Bash(echo \"BUILD3_DONE\")",
       "Bash(rm -f apps/api/__nlq_battery.cjs apps/api/__one.cjs apps/api/ai-reporting/__*.cjs apps/api/src/modules/ai-reporting/__repro0.spec.ts)",
       "Bash(rm -f /tmp/nlq_run*.txt /tmp/one.cjs /tmp/api_build*.log)",
-      "Bash(xargs grep -l \"new Date\\(.*,\\\\s*0\\\\s*,\\\\|new Date\\(.*,\\\\s*11\\\\s*,\")"
+      "Bash(xargs grep -l \"new Date\\(.*,\\\\s*0\\\\s*,\\\\|new Date\\(.*,\\\\s*11\\\\s*,\")",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,1\\)\\); console.log\\('workspaces', p.workspaces\\)\")",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./apps/api/package.json'\\).scripts,null,1\\)\\)\")",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./apps/web/package.json'\\).scripts,null,1\\)\\)\")",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\('has eslintConfig:', !!p.eslintConfig\\)\")",
+      "Bash(psql --version)"
     ]
   }
 }

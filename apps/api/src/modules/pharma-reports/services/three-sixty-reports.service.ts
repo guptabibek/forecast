@@ -1651,6 +1651,16 @@ export class ThreeSixtyReportsService {
     const salesmanFilter = isAll
       ? Prisma.sql`TRUE`
       : Prisma.sql`COALESCE(NULLIF(TRIM(mv.salesman), ''), NULLIF(TRIM(mv.mr), '')) = ${salesman.salesman_code}`;
+    // Customer-outstanding attribution is by the CUSTOMER MASTER's assigned rep
+    // (marg_parties.mr), not the per-bill voucher salesman: the whole party
+    // receivable belongs to that party's MR. This is a deliberately different
+    // lens from the sales attribution above (which keys off the voucher), so
+    // outstanding totals are NOT expected to reconcile bill-for-bill with the
+    // salesman's sales. A salesman whose code is not present as any party's MR
+    // simply has no attributed customers (empty outstanding), which is correct.
+    const salesmanPartyFilter = isAll
+      ? Prisma.sql`TRUE`
+      : Prisma.sql`NULLIF(TRIM(mp.mr), '') = ${salesman.salesman_code}`;
 
     const salesP = this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
@@ -1716,8 +1726,92 @@ export class ThreeSixtyReportsService {
       LIMIT 5
     `);
 
-    const [salesRows, monthlyTrend, topItems, topCustomers] = await Promise.all([salesP, monthlyTrendP, topItemsP, topCustomersP]);
+    // Customer outstanding (salesman-wise). Same open-AR snapshot the rest of
+    // the app reads: live (source_deleted = FALSE) debtor (group_code LIKE 'C%')
+    // rows with a non-zero balance, attributed to a salesman through the party
+    // master's MR (see salesmanPartyFilter). Exposure = GREATEST(balance, 0) so
+    // customer advances/credit notes never inflate dues; ageing uses Marg's
+    // stored `days` (falling back to invoice-date → today), identical to
+    // getOutstandingSnapshot and the Customer 360 ageing. This is a
+    // point-in-time snapshot as of today and is intentionally NOT scoped by the
+    // period selector — receivables are a balance, not a flow.
+    const outstandingSummaryP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH party_os AS (
+        SELECT
+          mo.company_id,
+          mo.ord,
+          GREATEST(COALESCE(mo.balance, 0), 0)::float8 AS exposure,
+          GREATEST(COALESCE(NULLIF(mo.days, 0), CURRENT_DATE - mo.date::date), 0)::int AS age_days
+        FROM marg_outstandings mo
+        JOIN marg_parties mp
+          ON mp.tenant_id = mo.tenant_id AND mp.company_id = mo.company_id AND mp.cid = mo.ord AND mp.is_deleted = false
+        WHERE mo.tenant_id = ${tenantId}::uuid
+          AND mo.source_deleted = false
+          AND COALESCE(mo.balance, 0) <> 0
+          AND COALESCE(mo.group_code, '') LIKE 'C%'
+          AND ${salesmanPartyFilter}
+      )
+      SELECT
+        COALESCE(SUM(exposure), 0)::float8 AS total_outstanding,
+        COALESCE(SUM(exposure) FILTER (WHERE age_days <= 30), 0)::float8 AS bucket_0_30,
+        COALESCE(SUM(exposure) FILTER (WHERE age_days > 30 AND age_days <= 60), 0)::float8 AS bucket_31_60,
+        COALESCE(SUM(exposure) FILTER (WHERE age_days > 60 AND age_days <= 90), 0)::float8 AS bucket_61_90,
+        COALESCE(SUM(exposure) FILTER (WHERE age_days > 90), 0)::float8 AS bucket_91_plus,
+        COUNT(*) FILTER (WHERE exposure > 0 AND age_days <= 30)::int AS count_0_30,
+        COUNT(*) FILTER (WHERE exposure > 0 AND age_days > 30 AND age_days <= 60)::int AS count_31_60,
+        COUNT(*) FILTER (WHERE exposure > 0 AND age_days > 60 AND age_days <= 90)::int AS count_61_90,
+        COUNT(*) FILTER (WHERE exposure > 0 AND age_days > 90)::int AS count_91_plus,
+        COUNT(DISTINCT (company_id::text || ':' || ord)) FILTER (WHERE exposure > 0)::int AS customer_count
+      FROM party_os
+    `);
+
+    const outstandingRowsP = this.prisma.$queryRaw<any[]>(Prisma.sql`
+      WITH party_os AS (
+        SELECT
+          mo.company_id,
+          mo.ord AS cid,
+          mp.customer_id,
+          mp.par_name,
+          GREATEST(COALESCE(mo.balance, 0), 0)::float8 AS exposure,
+          GREATEST(COALESCE(NULLIF(mo.days, 0), CURRENT_DATE - mo.date::date), 0)::int AS age_days
+        FROM marg_outstandings mo
+        JOIN marg_parties mp
+          ON mp.tenant_id = mo.tenant_id AND mp.company_id = mo.company_id AND mp.cid = mo.ord AND mp.is_deleted = false
+        WHERE mo.tenant_id = ${tenantId}::uuid
+          AND mo.source_deleted = false
+          AND COALESCE(mo.balance, 0) <> 0
+          AND COALESCE(mo.group_code, '') LIKE 'C%'
+          AND ${salesmanPartyFilter}
+      )
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY SUM(po.exposure) DESC)::int AS rank,
+        COALESCE(c.name, po.par_name, po.cid) AS name,
+        po.cid AS code,
+        COALESCE(SUM(po.exposure), 0)::float8 AS value,
+        COALESCE(SUM(po.exposure) FILTER (WHERE po.age_days <= 30), 0)::float8 AS bucket_0_30,
+        COALESCE(SUM(po.exposure) FILTER (WHERE po.age_days > 30 AND po.age_days <= 60), 0)::float8 AS bucket_31_60,
+        COALESCE(SUM(po.exposure) FILTER (WHERE po.age_days > 60 AND po.age_days <= 90), 0)::float8 AS bucket_61_90,
+        COALESCE(SUM(po.exposure) FILTER (WHERE po.age_days > 90), 0)::float8 AS bucket_91_plus,
+        MAX(po.age_days)::int AS max_age_days,
+        COUNT(*) FILTER (WHERE po.exposure > 0)::int AS open_bill_count
+      FROM party_os po
+      LEFT JOIN customers c ON c.id = po.customer_id
+      GROUP BY po.company_id, po.cid, COALESCE(c.name, po.par_name, po.cid)
+      HAVING SUM(po.exposure) > 0
+      ORDER BY value DESC
+      LIMIT 50
+    `);
+
+    const [salesRows, monthlyTrend, topItems, topCustomers, outstandingSummaryRows, outstandingRows] = await Promise.all([
+      salesP,
+      monthlyTrendP,
+      topItemsP,
+      topCustomersP,
+      outstandingSummaryP,
+      outstandingRowsP,
+    ]);
     const [sales] = salesRows;
+    const [outstandingSummary] = outstandingSummaryRows;
     const currentMonthSales = Number(sales.current_month_sales ?? 0);
     const lastMonthSales = Number(sales.last_month_sales ?? 0);
     const currentPeriodSales = Number(sales.current_period_sales ?? 0);
@@ -1726,10 +1820,20 @@ export class ThreeSixtyReportsService {
     const customerCount = Number(sales.customer_count ?? 0);
     const yoyChange = this.pctChange(currentPeriodSales, priorPeriodSales);
 
+    const totalOutstanding = Number(outstandingSummary?.total_outstanding ?? 0);
+    const overdueOutstanding =
+      Number(outstandingSummary?.bucket_31_60 ?? 0) +
+      Number(outstandingSummary?.bucket_61_90 ?? 0) +
+      Number(outstandingSummary?.bucket_91_plus ?? 0);
+    const outstandingCustomerCount = Number(outstandingSummary?.customer_count ?? 0);
+
     const insights: string[] = [];
     if (yoyChange != null && yoyChange < -10) insights.push('Salesman sales are down more than 10% versus the prior period. Review target achievement and customer coverage.');
     if (customerCount === 0) insights.push('No customers billed by this salesman in the selected period.');
     if (yoyChange != null && yoyChange >= 10) insights.push(`Salesman is growing ${yoyChange.toFixed(1)}% versus the prior period.`);
+    if (totalOutstanding > 0 && overdueOutstanding / totalOutstanding > 0.4) {
+      insights.push(`Over 40% of attributed customer receivables (${(overdueOutstanding / totalOutstanding * 100).toFixed(1)}%) are overdue beyond 30 days. Prioritise collection follow-up.`);
+    }
     if (!insights.length) insights.push('Salesman sales signals are within normal control limits.');
 
     return {
@@ -1745,11 +1849,19 @@ export class ThreeSixtyReportsService {
         billCount,
         customerCount,
         avgBillValue: billCount > 0 ? currentPeriodSales / billCount : null,
+        outstandingAmount: totalOutstanding,
+        overdueAmount: overdueOutstanding,
+        outstandingCustomerCount,
       },
       charts: { monthlyTrend },
+      // Ageing of the salesman's attributed customer receivables (as of today).
+      // count = number of open bills in each bucket; matches the Customer 360
+      // ageing card structure so the same frontend table renders it.
+      ageing: this.ageingRows(outstandingSummary ?? {}, 'Bill'),
       tables: {
         topItems: this.addShare(topItems),
         topCustomers: this.addShare(topCustomers),
+        customerOutstanding: this.addShare(outstandingRows),
       },
       insights,
     };

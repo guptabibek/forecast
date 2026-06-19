@@ -981,7 +981,35 @@ export interface DimensionSalesReport {
 }
 export type Route360Report = DimensionSalesReport;
 export type City360Report = DimensionSalesReport;
-export type SalesTeam360Report = DimensionSalesReport;
+
+export interface SalesmanCustomerOutstandingRow {
+  rank: number;
+  name: string;
+  code: string | null;
+  value: number;
+  bucket_0_30: number;
+  bucket_31_60: number;
+  bucket_61_90: number;
+  bucket_91_plus: number;
+  max_age_days: number | null;
+  open_bill_count: number;
+  share: number;
+}
+
+// Sales Team 360 extends the shared dimension report with a customer-outstanding
+// section (salesman-wise receivables, attributed by the customer master's MR).
+// Route/City 360 stay on the base DimensionSalesReport — they have no outstanding.
+export interface SalesTeam360Report extends DimensionSalesReport {
+  kpis: DimensionSalesReport['kpis'] & {
+    outstandingAmount: number;
+    overdueAmount: number;
+    outstandingCustomerCount: number;
+  };
+  ageing: ThreeSixtyAgeingRow[];
+  tables: DimensionSalesReport['tables'] & {
+    customerOutstanding: SalesmanCustomerOutstandingRow[];
+  };
+}
 
 // ── Sales/Purchase analytics extensions ────────────────────────────────────
 
