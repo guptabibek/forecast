@@ -2,8 +2,10 @@ import type { ScenarioType } from '@/types';
 import { ArrowLeftIcon, ExclamationCircleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { planService, scenarioService } from '@services/api';
+import { useSettings } from '@hooks/useSettings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { addMonths, endOfYear, format, isAfter, parseISO, startOfYear } from 'date-fns';
+import { format, isAfter, parseISO } from 'date-fns';
+import { startOfFiscalYear, endOfFiscalYear } from '@/utils/date-presets';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
@@ -28,8 +30,9 @@ type PlanTemplate = {
   description: string;
   planType: 'BUDGET' | 'FORECAST' | 'STRATEGIC' | 'WHAT_IF';
   periodType: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
-  // Horizon resolver returns the [start, end] dates given the chosen fiscal year.
-  range: (fiscalYear: number) => { start: Date; end: Date };
+  // Horizon resolver: fiscalYear = start year of the FY, fyStartMonth = 1-indexed month (4=Apr).
+  // JS Date handles month overflow so new Date(2025, 15, 0) == Mar 31 2026.
+  range: (fiscalYear: number, fyStartMonth: number) => { start: Date; end: Date };
   nameSuffix: string;
 };
 
@@ -40,7 +43,10 @@ const PLAN_TEMPLATES: PlanTemplate[] = [
     description: 'Monthly budget across one fiscal year',
     planType: 'BUDGET',
     periodType: 'MONTHLY',
-    range: (fy) => ({ start: new Date(fy, 0, 1), end: new Date(fy, 11, 31) }),
+    range: (fy, fys) => ({
+      start: new Date(fy, fys - 1, 1),
+      end: new Date(fy, fys - 1 + 12, 0),
+    }),
     nameSuffix: 'Annual Operating Plan',
   },
   {
@@ -63,7 +69,10 @@ const PLAN_TEMPLATES: PlanTemplate[] = [
     description: 'Quarterly sales & operations plan over a fiscal year',
     planType: 'FORECAST',
     periodType: 'QUARTERLY',
-    range: (fy) => ({ start: new Date(fy, 0, 1), end: new Date(fy, 11, 31) }),
+    range: (fy, fys) => ({
+      start: new Date(fy, fys - 1, 1),
+      end: new Date(fy, fys - 1 + 12, 0),
+    }),
     nameSuffix: 'Quarterly S&OP',
   },
   {
@@ -72,7 +81,10 @@ const PLAN_TEMPLATES: PlanTemplate[] = [
     description: 'Yearly long-range plan across three fiscal years',
     planType: 'STRATEGIC',
     periodType: 'YEARLY',
-    range: (fy) => ({ start: new Date(fy, 0, 1), end: new Date(fy + 2, 11, 31) }),
+    range: (fy, fys) => ({
+      start: new Date(fy, fys - 1, 1),
+      end: new Date(fy + 3, fys - 1, 0), // last day before the 4th FY starts
+    }),
     nameSuffix: 'Strategic 3-Year Plan',
   },
 ];
@@ -119,7 +131,15 @@ export default function CreatePlan() {
   const [isCreatingScenarios, setIsCreatingScenarios] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
 
-  const currentYear = new Date().getFullYear();
+  const { data: settings } = useSettings();
+  // 1-indexed month when the FY begins (4 = April, India default).
+  const fyStartMonth = settings?.fiscalYearStart ?? 4;
+  const fyStartMonth0 = fyStartMonth - 1; // 0-indexed for Date constructor
+
+  const today = new Date();
+  // Start year of the fiscal year that contains today.
+  const currentFiscalYear = today.getMonth() >= fyStartMonth0 ? today.getFullYear() : today.getFullYear() - 1;
+  const currentYear = currentFiscalYear;
 
   const {
     register,
@@ -132,9 +152,9 @@ export default function CreatePlan() {
     resolver: zodResolver(createPlanSchema),
     mode: 'onChange',
     defaultValues: {
-      fiscalYear: currentYear,
-      startDate: format(startOfYear(new Date()), 'yyyy-MM-dd'),
-      endDate: format(endOfYear(new Date()), 'yyyy-MM-dd'),
+      fiscalYear: currentFiscalYear,
+      startDate: format(startOfFiscalYear(today, fyStartMonth), 'yyyy-MM-dd'),
+      endDate: format(endOfFiscalYear(today, fyStartMonth), 'yyyy-MM-dd'),
       planType: 'FORECAST',
       periodType: 'MONTHLY',
       copyFromId: '', // Explicitly set empty string for "Start Fresh" default
@@ -266,7 +286,7 @@ export default function CreatePlan() {
 
   const applyTemplate = (template: PlanTemplate) => {
     setSelectedTemplate(template.id);
-    const { start, end } = template.range(fiscalYear);
+    const { start, end } = template.range(fiscalYear, fyStartMonth);
     setValue('planType', template.planType);
     setValue('periodType', template.periodType);
     setValue('startDate', format(start, 'yyyy-MM-dd'));
@@ -280,9 +300,11 @@ export default function CreatePlan() {
 
   const handleFiscalYearChange = (year: number) => {
     setValue('fiscalYear', year);
-    setValue('startDate', format(new Date(year, 0, 1), 'yyyy-MM-dd'));
-    setValue('endDate', format(new Date(year, 11, 31), 'yyyy-MM-dd'));
-    trigger(['startDate', 'endDate']); // Re-validate dates
+    // FY starts on fyStartMonth/1 of `year` and ends on the last day before
+    // fyStartMonth/1 of year+1. JS Date month overflow handles the arithmetic.
+    setValue('startDate', format(new Date(year, fyStartMonth0, 1), 'yyyy-MM-dd'));
+    setValue('endDate', format(new Date(year, fyStartMonth0 + 12, 0), 'yyyy-MM-dd'));
+    trigger(['startDate', 'endDate']);
   };
 
   return (
@@ -489,14 +511,9 @@ export default function CreatePlan() {
                   <button
                     type="button"
                     onClick={() => {
-                      setValue(
-                        'startDate',
-                        format(new Date(fiscalYear, 0, 1), 'yyyy-MM-dd'),
-                      );
-                      setValue(
-                        'endDate',
-                        format(new Date(fiscalYear, 11, 31), 'yyyy-MM-dd'),
-                      );
+                      // Full fiscal year: fyStartMonth/1/fiscalYear → (fyStartMonth-1)/last/fiscalYear+1
+                      setValue('startDate', format(new Date(fiscalYear, fyStartMonth0, 1), 'yyyy-MM-dd'));
+                      setValue('endDate', format(new Date(fiscalYear, fyStartMonth0 + 12, 0), 'yyyy-MM-dd'));
                     }}
                     className="btn-secondary btn-sm"
                   >
@@ -505,14 +522,9 @@ export default function CreatePlan() {
                   <button
                     type="button"
                     onClick={() => {
-                      setValue(
-                        'startDate',
-                        format(new Date(fiscalYear, 0, 1), 'yyyy-MM-dd'),
-                      );
-                      setValue(
-                        'endDate',
-                        format(new Date(fiscalYear, 5, 30), 'yyyy-MM-dd'),
-                      );
+                      // H1: first 6 months of FY (e.g. Apr–Sep for April start)
+                      setValue('startDate', format(new Date(fiscalYear, fyStartMonth0, 1), 'yyyy-MM-dd'));
+                      setValue('endDate', format(new Date(fiscalYear, fyStartMonth0 + 6, 0), 'yyyy-MM-dd'));
                     }}
                     className="btn-secondary btn-sm"
                   >
@@ -521,14 +533,9 @@ export default function CreatePlan() {
                   <button
                     type="button"
                     onClick={() => {
-                      setValue(
-                        'startDate',
-                        format(new Date(fiscalYear, 6, 1), 'yyyy-MM-dd'),
-                      );
-                      setValue(
-                        'endDate',
-                        format(new Date(fiscalYear, 11, 31), 'yyyy-MM-dd'),
-                      );
+                      // H2: last 6 months of FY (e.g. Oct–Mar for April start)
+                      setValue('startDate', format(new Date(fiscalYear, fyStartMonth0 + 6, 1), 'yyyy-MM-dd'));
+                      setValue('endDate', format(new Date(fiscalYear, fyStartMonth0 + 12, 0), 'yyyy-MM-dd'));
                     }}
                     className="btn-secondary btn-sm"
                   >
@@ -539,18 +546,11 @@ export default function CreatePlan() {
                       key={q}
                       type="button"
                       onClick={() => {
-                        const startMonth = (q - 1) * 3;
-                        setValue(
-                          'startDate',
-                          format(new Date(fiscalYear, startMonth, 1), 'yyyy-MM-dd'),
-                        );
-                        setValue(
-                          'endDate',
-                          format(
-                            addMonths(new Date(fiscalYear, startMonth, 1), 3),
-                            'yyyy-MM-dd',
-                          ),
-                        );
+                        // Fiscal Qn: 3-month window starting at fyStartMonth + (q-1)*3
+                        // JS Date overflow: month 12 → Jan next year, etc.
+                        const qStartMonth = fyStartMonth0 + (q - 1) * 3;
+                        setValue('startDate', format(new Date(fiscalYear, qStartMonth, 1), 'yyyy-MM-dd'));
+                        setValue('endDate', format(new Date(fiscalYear, qStartMonth + 3, 0), 'yyyy-MM-dd'));
                       }}
                       className="btn-secondary btn-sm"
                     >

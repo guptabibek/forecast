@@ -637,15 +637,22 @@ export class SqlCompilerService {
         endDate: iso(new Date(today.getFullYear(), today.getMonth(), 0)),
       };
     }
-    if (preset === 'this_quarter') {
-      const quarterStartMonth = Math.floor(today.getMonth() / 3) * 3;
-      return { startDate: iso(new Date(today.getFullYear(), quarterStartMonth, 1)), endDate: iso(today) };
-    }
-    if (preset === 'last_quarter') {
-      const currentQuarterStartMonth = Math.floor(today.getMonth() / 3) * 3;
-      const start = new Date(today.getFullYear(), currentQuarterStartMonth - 3, 1);
-      const end = new Date(today.getFullYear(), currentQuarterStartMonth, 0);
-      return { startDate: iso(start), endDate: iso(end) };
+    if (preset === 'this_quarter' || preset === 'last_quarter') {
+      // Derive fiscal year start month from the security context (default April=3, 0-indexed).
+      // security.fiscalYear.startDate is 'YYYY-MM-DD'; month is the 5th/6th chars.
+      const fyMonth0 = security.fiscalYear
+        ? new Date(`${security.fiscalYear.startDate}T00:00:00`).getMonth()
+        : 3;
+      const fyYear = today.getMonth() >= fyMonth0 ? today.getFullYear() : today.getFullYear() - 1;
+      const monthsIntoFY = ((today.getMonth() - fyMonth0) + 12) % 12;
+      const fiscalQIndex = Math.floor(monthsIntoFY / 3);
+      const thisQStart = new Date(fyYear, fyMonth0 + fiscalQIndex * 3, 1);
+      if (preset === 'this_quarter') {
+        return { startDate: iso(thisQStart), endDate: iso(today) };
+      }
+      const lastQStart = new Date(fyYear, fyMonth0 + fiscalQIndex * 3 - 3, 1);
+      const lastQEnd = new Date(fyYear, fyMonth0 + fiscalQIndex * 3, 0);
+      return { startDate: iso(lastQStart), endDate: iso(lastQEnd) };
     }
     if (preset === 'last_financial_year' && security.fiscalYear) {
       const start = new Date(`${security.fiscalYear.startDate}T00:00:00`);

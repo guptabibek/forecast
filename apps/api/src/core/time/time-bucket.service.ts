@@ -42,7 +42,7 @@ export class TimeBucketService {
     periodKey: string,
   ) {
     const year = periodDate.getUTCFullYear();
-    const month = periodDate.getUTCMonth();
+    const month = periodDate.getUTCMonth(); // 0-indexed
 
     let bucketStart: Date;
     let bucketEnd: Date;
@@ -51,24 +51,49 @@ export class TimeBucketService {
     let fiscalMonth: number | undefined;
     let fiscalWeek: number | undefined;
 
+    // Fetch fiscal year start month (0-indexed) for period types that need it.
+    // India default: April = 3 (0-indexed). JS Date handles month overflow so
+    // new Date(UTC(2026, 15, 0)) correctly resolves to March 31, 2027.
+    let fyStartMonth0 = 3;
+    if (periodType === 'YEARLY' || periodType === 'QUARTERLY' || periodType === 'MONTHLY') {
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { fiscalYearStart: true },
+      });
+      fyStartMonth0 = (tenant?.fiscalYearStart ?? 4) - 1;
+    }
+
     switch (periodType) {
-      case 'YEARLY':
-        bucketStart = new Date(Date.UTC(year, 0, 1));
-        bucketEnd = new Date(Date.UTC(year, 11, 31));
-        break;
-      case 'QUARTERLY': {
-        const q = Math.floor(month / 3);
-        fiscalQuarter = q + 1;
-        bucketStart = new Date(Date.UTC(year, q * 3, 1));
-        bucketEnd = new Date(Date.UTC(year, q * 3 + 3, 0));
+      case 'YEARLY': {
+        // Fiscal year begins at fyStartMonth0/1 of fyYear and ends 12 months later.
+        const fyYear = month >= fyStartMonth0 ? year : year - 1;
+        fiscalYear = fyYear;
+        bucketStart = new Date(Date.UTC(fyYear, fyStartMonth0, 1));
+        bucketEnd = new Date(Date.UTC(fyYear, fyStartMonth0 + 12, 0));
         break;
       }
-      case 'MONTHLY':
-        fiscalQuarter = Math.floor(month / 3) + 1;
-        fiscalMonth = month + 1;
+      case 'QUARTERLY': {
+        // Fiscal quarter: 3-month window from FY start.
+        // qIndex 0=Q1, 1=Q2, 2=Q3, 3=Q4 relative to fiscal year.
+        const fyYear = month >= fyStartMonth0 ? year : year - 1;
+        fiscalYear = fyYear;
+        const monthsIntoFY = ((month - fyStartMonth0) + 12) % 12;
+        const qIndex = Math.floor(monthsIntoFY / 3);
+        fiscalQuarter = qIndex + 1;
+        bucketStart = new Date(Date.UTC(fyYear, fyStartMonth0 + qIndex * 3, 1));
+        bucketEnd = new Date(Date.UTC(fyYear, fyStartMonth0 + qIndex * 3 + 3, 0));
+        break;
+      }
+      case 'MONTHLY': {
+        const fyYear = month >= fyStartMonth0 ? year : year - 1;
+        fiscalYear = fyYear;
+        const monthsIntoFY = ((month - fyStartMonth0) + 12) % 12;
+        fiscalQuarter = Math.floor(monthsIntoFY / 3) + 1;
+        fiscalMonth = month + 1; // 1-indexed calendar month
         bucketStart = new Date(Date.UTC(year, month, 1));
         bucketEnd = new Date(Date.UTC(year, month + 1, 0));
         break;
+      }
       case 'WEEKLY': {
         const dayOfWeek = periodDate.getUTCDay();
         const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;

@@ -102,7 +102,7 @@ export class ReportsService {
     return `${year}-${month}-${day}`;
   }
 
-  private normalizeDashboardPeriod(date: Date, granularity: DashboardGranularity): string {
+  private normalizeDashboardPeriod(date: Date, granularity: DashboardGranularity, fiscalYearStart = 4): string {
     switch (granularity) {
       case 'daily':
         return this.dashboardDateKey(date);
@@ -111,8 +111,15 @@ export class ReportsService {
         weekStart.setDate(date.getDate() - date.getDay());
         return `W${this.dashboardDateKey(weekStart)}`;
       }
-      case 'quarterly':
-        return `${date.getFullYear()}-Q${Math.floor(date.getMonth() / 3) + 1}`;
+      case 'quarterly': {
+        // Fiscal quarter: Q1 starts at fiscalYearStart, quarters are 3-month windows.
+        // fyYear is the calendar year in which this fiscal year began.
+        const fyMonth0 = fiscalYearStart - 1;
+        const fyYear = date.getMonth() >= fyMonth0 ? date.getFullYear() : date.getFullYear() - 1;
+        const monthsIntoFY = ((date.getMonth() - fyMonth0) + 12) % 12;
+        const quarterNum = Math.floor(monthsIntoFY / 3) + 1;
+        return `${fyYear}-Q${quarterNum}`;
+      }
       case 'monthly':
       default:
         return this.dashboardDateKey(date).substring(0, 7);
@@ -581,7 +588,15 @@ export class ReportsService {
     const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastYearMonthStart = new Date(now.getFullYear() - 1, now.getMonth(), 1);
     const lastYearMonthEnd = new Date(now.getFullYear() - 1, now.getMonth() + 1, 0, 23, 59, 59, 999);
-    const ytdStart = new Date(now.getFullYear(), 0, 1);
+
+    // YTD starts at the beginning of the current fiscal year, not January 1.
+    const tenantSettings = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { fiscalYearStart: true },
+    });
+    const fyStartMonth0 = (tenantSettings?.fiscalYearStart ?? 4) - 1;
+    const fyYear = now.getMonth() >= fyStartMonth0 ? now.getFullYear() : now.getFullYear() - 1;
+    const ytdStart = new Date(fyYear, fyStartMonth0, 1);
     const dimensionFilters = buildDimensionFilters(filters);
 
     const [currentMonthRevenue, lastMonthRevenue, sameMonthLYRevenue, ytdRevenue, ytdForecasts] = await Promise.all([
@@ -902,6 +917,16 @@ export class ReportsService {
     const { granularity, periods, startDate, endDate } = options;
     const now = new Date();
     const dimensionFilters = buildDimensionFilters(filters);
+
+    // Fetch fiscalYearStart only when it will actually affect the output.
+    let fiscalYearStart = 4; // India default (April)
+    if (granularity === 'quarterly') {
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { fiscalYearStart: true },
+      });
+      fiscalYearStart = tenant?.fiscalYearStart ?? 4;
+    }
     
     // Calculate date range
     let rangeStart: Date;
@@ -950,14 +975,14 @@ export class ReportsService {
     const periodData = new Map<string, { actual: number; forecast: number }>();
 
     for (const a of actualRows) {
-      const key = this.normalizeDashboardPeriod(a.period_date, granularity);
+      const key = this.normalizeDashboardPeriod(a.period_date, granularity, fiscalYearStart);
       const existing = periodData.get(key) || { actual: 0, forecast: 0 };
       existing.actual += Number(a.amount || 0);
       periodData.set(key, existing);
     }
 
     for (const f of forecasts) {
-      const key = this.normalizeDashboardPeriod(f.periodDate, granularity);
+      const key = this.normalizeDashboardPeriod(f.periodDate, granularity, fiscalYearStart);
       const existing = periodData.get(key) || { actual: 0, forecast: 0 };
       existing.forecast += Number(f._sum.forecastAmount || 0);
       periodData.set(key, existing);

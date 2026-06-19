@@ -98,7 +98,7 @@ function MetricCard({
 }
 
 export default function GrowthAnalysisPage() {
-  const { isPharma } = useTenantConfig();
+  const { isPharma, fiscalYearStart } = useTenantConfig();
   const [kind, setKind] = useState<SalesPurchaseAnalysisKind>('sales');
   const DIMENSION_OPTIONS = useMemo(
     () => ALL_DIMENSION_OPTIONS.filter((d) => (!d.pharmaOnly || isPharma) && (!d.purchaseOnly || kind === 'purchase')),
@@ -108,7 +108,7 @@ export default function GrowthAnalysisPage() {
   // Default windows resolve through the comparison-preset helper so users land
   // on a sensible "last-30-vs-prior-30" view; switching presets recomputes all
   // four dates atomically.
-  const initial = resolveComparisonRange(DEFAULT_PRESET);
+  const initial = resolveComparisonRange(DEFAULT_PRESET, new Date(), fiscalYearStart);
   const [presetId, setPresetId] = useState<ComparisonPresetId>(DEFAULT_PRESET);
   const [startDate, setStartDate] = useState<string>(initial?.current.startDate ?? '');
   const [endDate, setEndDate] = useState<string>(initial?.current.endDate ?? '');
@@ -125,14 +125,14 @@ export default function GrowthAnalysisPage() {
   // When user picks a non-custom preset, push all four dates atomically.
   useEffect(() => {
     if (presetId === 'custom') return;
-    const r = resolveComparisonRange(presetId);
+    const r = resolveComparisonRange(presetId, new Date(), fiscalYearStart);
     if (r) {
       setStartDate(r.current.startDate);
       setEndDate(r.current.endDate);
       setCompareStartDate(r.compare.startDate);
       setCompareEndDate(r.compare.endDate);
     }
-  }, [presetId]);
+  }, [presetId, fiscalYearStart]);
 
   // Reset purchase-only dimensions when switching to sales.
   useEffect(() => {

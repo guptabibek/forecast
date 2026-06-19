@@ -99,7 +99,8 @@
       "Bash(node -e \"console.log\\('CRLF:', require\\('fs'\\).readFileSync\\('semantic-catalog.json','utf8'\\).includes\\('\\\\r\\\\n'\\), '| parses:', !!require\\('./semantic-catalog.json'\\)\\)\")",
       "Bash(echo \"BUILD3_DONE\")",
       "Bash(rm -f apps/api/__nlq_battery.cjs apps/api/__one.cjs apps/api/ai-reporting/__*.cjs apps/api/src/modules/ai-reporting/__repro0.spec.ts)",
-      "Bash(rm -f /tmp/nlq_run*.txt /tmp/one.cjs /tmp/api_build*.log)"
+      "Bash(rm -f /tmp/nlq_run*.txt /tmp/one.cjs /tmp/api_build*.log)",
+      "Bash(xargs grep -l \"new Date\\(.*,\\\\s*0\\\\s*,\\\\|new Date\\(.*,\\\\s*11\\\\s*,\")"
     ]
   }
 }

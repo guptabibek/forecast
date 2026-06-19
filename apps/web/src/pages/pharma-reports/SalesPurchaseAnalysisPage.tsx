@@ -92,7 +92,7 @@ const SCOPE_TABS: Array<{ key: ScopeKey; label: string; hint: string }> = [
 ];
 
 export default function SalesPurchaseAnalysisPage() {
-  const { isPharma } = useTenantConfig();
+  const { isPharma, fiscalYearStart } = useTenantConfig();
   const [kind, setKind] = useState<SalesPurchaseAnalysisKind>('sales');
   // Customer is a sales-only dimension; Supplier is purchase-only. Everything
   // else is shared. The list is kind-aware so the irrelevant party dimension
@@ -137,7 +137,7 @@ export default function SalesPurchaseAnalysisPage() {
   const grid = usePharmaGrid({ initialSortBy: 'date', initialSortOrder: 'desc', initialPageSize: 25 });
 
   // Date range — defaults to last 30 days. Drives every query on this page.
-  const initialRange = resolveSingleRange('last30');
+  const initialRange = resolveSingleRange('last30', new Date(), fiscalYearStart);
   const [presetId, setPresetId] = useState<SingleRangePresetId>('last30');
   const [startDate, setStartDate] = useState<string>(initialRange?.startDate ?? '');
   const [endDate, setEndDate] = useState<string>(initialRange?.endDate ?? '');
@@ -150,7 +150,7 @@ export default function SalesPurchaseAnalysisPage() {
   const onPresetChange = (id: SingleRangePresetId) => {
     setPresetId(id);
     if (id === 'custom') return;
-    const r = resolveSingleRange(id);
+    const r = resolveSingleRange(id, new Date(), fiscalYearStart);
     if (r) {
       setStartDate(r.startDate);
       setEndDate(r.endDate);

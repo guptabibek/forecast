@@ -1781,10 +1781,15 @@ export class ThreeSixtyReportsService {
     const lastWeekStart = new Date(Date.UTC(Y, M, D - mondayOffset - 7));
     const lastWeekEnd = new Date(Date.UTC(Y, M, D - mondayOffset - 1));
 
-    const quarterStartMonth = Math.floor(M / 3) * 3;
-    const thisQuarterStart = new Date(Date.UTC(Y, quarterStartMonth, 1));
-    const lastQuarterStart = new Date(Date.UTC(Y, quarterStartMonth - 3, 1));
-    const lastQuarterEnd = new Date(Date.UTC(Y, quarterStartMonth, 0)); // day before this quarter
+    // Fiscal quarter boundaries. fiscalYear/fiscalMonth are already computed above.
+    // monthsIntoFY: how far into the current fiscal year today falls (0-11).
+    // qIndex: 0=Q1, 1=Q2, 2=Q3, 3=Q4. Offsets are relative to fiscalYear start;
+    // JS Date handles month overflow (e.g. month 13 → Feb next year) correctly.
+    const monthsIntoFY = ((M - fiscalMonth) + 12) % 12;
+    const fiscalQIndex = Math.floor(monthsIntoFY / 3);
+    const thisQuarterStart = new Date(Date.UTC(fiscalYear, fiscalMonth + fiscalQIndex * 3, 1));
+    const lastQuarterStart = new Date(Date.UTC(fiscalYear, fiscalMonth + fiscalQIndex * 3 - 3, 1));
+    const lastQuarterEnd = new Date(Date.UTC(fiscalYear, fiscalMonth + fiscalQIndex * 3, 0)); // day before this quarter
 
     const fiscalStart = new Date(Date.UTC(fiscalYear, fiscalMonth, 1));
     const lastFiscalStart = new Date(Date.UTC(fiscalYear - 1, fiscalMonth, 1));

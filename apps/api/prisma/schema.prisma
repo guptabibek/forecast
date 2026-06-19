@@ -24,7 +24,7 @@ model Tenant {
   logoUrl              String?              @db.VarChar(500)
   primaryColor         String?              @db.VarChar(7)
   timezone             String               @default("UTC") @db.VarChar(50)
-  fiscalYearStart      Int                  @default(1)
+  fiscalYearStart      Int                  @default(4)
   defaultCurrency      String               @default("USD") @db.VarChar(3)
   dataRetentionDays    Int                  @default(2555)
   createdAt            DateTime             @default(now()) @map("created_at")
