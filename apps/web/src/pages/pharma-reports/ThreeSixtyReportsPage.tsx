@@ -1,6 +1,6 @@
 import { ArrowPathIcon, ChevronUpDownIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { useQuery } from '@tanstack/react-query';
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTenantConfig } from '../../hooks/useTenantConfig';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { AreaChart } from '../../components/charts/AreaChart';
@@ -106,6 +106,8 @@ function EntitySearchSelect({
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const listId = useId();
+  const optionId = (index: number) => `${listId}-opt-${index}`;
 
   useEffect(() => {
     const handle = window.setTimeout(() => setDebouncedValue(value), 250);
@@ -180,6 +182,12 @@ function EntitySearchSelect({
       <input
         ref={inputRef}
         className="input w-full pl-10 pr-20"
+        role="combobox"
+        aria-label={placeholder}
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? listId : undefined}
+        aria-autocomplete="list"
+        aria-activedescendant={isOpen && options.length ? optionId(highlightIndex) : undefined}
         value={value}
         onChange={(event) => {
           onInputChange(event.target.value);
@@ -195,25 +203,30 @@ function EntitySearchSelect({
         {value && (
           <button
             type="button"
-            className="rounded p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-700"
+            className="rounded p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
             onClick={() => {
               onInputChange('');
               inputRef.current?.focus();
               setIsOpen(true);
             }}
             title="Clear"
+            aria-label="Clear search"
           >
             <XMarkIcon className="h-4 w-4" />
           </button>
         )}
         <button
           type="button"
-          className="rounded p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-700"
+          className="rounded p-1 text-secondary-400 hover:bg-secondary-100 hover:text-secondary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
           onClick={() => {
             setIsOpen((open) => !open);
             inputRef.current?.focus();
           }}
           title="Open"
+          aria-label="Toggle options"
+          aria-expanded={isOpen}
+          aria-controls={isOpen ? listId : undefined}
+          tabIndex={-1}
         >
           <ChevronUpDownIcon className="h-4 w-4" />
         </button>
@@ -222,12 +235,18 @@ function EntitySearchSelect({
       {isOpen && (
         <ul
           ref={listRef}
+          id={listId}
+          role="listbox"
+          aria-label={placeholder}
           className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-secondary-200 bg-white py-1 shadow-lg"
         >
           {options.map((option, index) => (
             <li key={`${option.source}-${option.value || 'all'}-${index}`}>
               <button
                 type="button"
+                id={optionId(index)}
+                role="option"
+                aria-selected={index === highlightIndex}
                 className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${
                   index === highlightIndex ? 'bg-primary-50 text-primary-800' : 'text-secondary-800 hover:bg-secondary-50'
                 }`}
@@ -723,7 +742,7 @@ function MetricTable({ rows }: { rows: Array<[string, ReactNode]> }) {
           {rows.map(([label, value]) => (
             <tr key={label} className="border-b border-secondary-100 last:border-0">
               <td className="bg-secondary-50 px-3 py-2 font-medium text-secondary-600">{label}</td>
-              <td className="px-3 py-2 text-right font-semibold text-secondary-950">{value}</td>
+              <td className="px-3 py-2 text-right font-semibold tabular-nums text-secondary-950">{value}</td>
             </tr>
           ))}
         </tbody>
@@ -829,6 +848,8 @@ function SalesTeamReport({ report, periodLabel }: { report: SalesTeam360Report; 
       <Card>
         <h3 className="text-base font-semibold text-secondary-950">Customer Outstanding Detail</h3>
         <DataTable
+          minWidthClass="min-w-[920px]"
+          maxHeightClass="max-h-[32rem]"
           headers={['Rank', 'Customer', 'Code', '0-30', '31-60', '61-90', '91+', 'Outstanding', 'Bills', 'Max Days', 'Share']}
           rows={outstanding.map((row) => [
             fmt(row.rank),
@@ -1001,7 +1022,17 @@ function AgeingTable({ title, rows, countHeader }: { title: string; rows: Array<
   );
 }
 
-function DataTable({ headers, rows }: { headers: string[]; rows: ReactNode[][] }) {
+function DataTable({
+  headers,
+  rows,
+  minWidthClass = 'min-w-[560px]',
+  maxHeightClass,
+}: {
+  headers: string[];
+  rows: ReactNode[][];
+  minWidthClass?: string;
+  maxHeightClass?: string;
+}) {
   const numericHeaders = new Set(['Rank', 'Qty', 'Value', 'Share', 'Lines', 'Amount', 'Count', 'Company', 'PID', '0-30', '31-60', '61-90', '91+', 'Outstanding', 'Bills', 'Max Days']);
   const isNumericColumn = (header: string) =>
     numericHeaders.has(header)
@@ -1010,14 +1041,14 @@ function DataTable({ headers, rows }: { headers: string[]; rows: ReactNode[][] }
     || header.toLowerCase().includes('amount');
 
   return (
-    <div className="mt-3 overflow-auto rounded-lg border border-secondary-200">
-      <table className="w-full min-w-[560px] text-sm">
-        <thead className="bg-secondary-50">
+    <div className={`mt-3 overflow-auto rounded-lg border border-secondary-200 ${maxHeightClass ?? ''}`}>
+      <table className={`w-full ${minWidthClass} text-sm`}>
+        <thead className="sticky top-0 z-10 bg-secondary-50">
           <tr>
             {headers.map((header) => (
               <th
                 key={header}
-                className={`px-3 py-2 text-xs font-semibold uppercase tracking-wide text-secondary-500 ${
+                className={`bg-secondary-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-secondary-500 ${
                   isNumericColumn(header) ? 'text-right' : 'text-left'
                 }`}
               >
@@ -1114,6 +1145,29 @@ export default function ThreeSixtyReportsPage() {
     setLocationId('');
   }
 
+  function selectTab(key: Tab) {
+    setActiveTab(key);
+    setDraftSearch('');
+    setSelectedSearchValue('');
+    setSearch('');
+  }
+
+  // Roving tab navigation (WAI-ARIA tabs pattern): Arrow keys move and activate
+  // the next/previous tab, Home/End jump to the ends.
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const last = tabs.length - 1;
+    let next = index;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = index === last ? 0 : index + 1;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = index === 0 ? last : index - 1;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = last;
+    else return;
+    event.preventDefault();
+    const nextTab = tabs[next];
+    selectTab(nextTab.key);
+    requestAnimationFrame(() => document.getElementById(`threesixty-tab-${nextTab.key}`)?.focus());
+  }
+
   return (
     <div className="space-y-4 lg:space-y-6">
       <div className="rounded-lg border border-primary-200 bg-white p-5 shadow-sm">
@@ -1122,18 +1176,19 @@ export default function ThreeSixtyReportsPage() {
             <h1 className="text-2xl font-bold text-secondary-950">360 Reports</h1>
             <p className="mt-1 text-sm text-secondary-500">Entity-wise intelligence for items, customers, suppliers, routes, cities, and sales team from Marg EDE and operational data.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {tabs.map((tab) => (
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label="360 report entity">
+            {tabs.map((tab, index) => (
               <button
                 key={tab.key}
                 type="button"
-                onClick={() => {
-                  setActiveTab(tab.key);
-                  setDraftSearch('');
-                  setSelectedSearchValue('');
-                  setSearch('');
-                }}
-                className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                role="tab"
+                id={`threesixty-tab-${tab.key}`}
+                aria-selected={activeTab === tab.key}
+                aria-controls="threesixty-panel"
+                tabIndex={activeTab === tab.key ? 0 : -1}
+                onClick={() => selectTab(tab.key)}
+                onKeyDown={(event) => onTabKeyDown(event, index)}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1 ${
                   activeTab === tab.key
                     ? 'bg-primary-600 text-white'
                     : 'bg-secondary-100 text-secondary-700 hover:bg-secondary-200'
@@ -1195,13 +1250,36 @@ export default function ThreeSixtyReportsPage() {
       {activeQuery.isError && <QueryErrorBanner error={activeQuery.error} onRetry={() => activeQuery.refetch()} />}
 
       {activeQuery.isLoading && (
-        <Card>
-          <div className="flex h-48 items-center justify-center text-sm text-secondary-500">Loading 360 report...</div>
-        </Card>
+        <div className="space-y-4 lg:space-y-6" aria-busy="true" aria-live="polite">
+          <span className="sr-only">Loading 360 report…</span>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-lg border border-secondary-200 bg-white p-4">
+                <div className="h-3 w-24 rounded bg-secondary-100 motion-safe:animate-pulse" />
+                <div className="mt-3 h-7 w-32 rounded bg-secondary-100 motion-safe:animate-pulse" />
+                <div className="mt-2 h-3 w-20 rounded bg-secondary-100 motion-safe:animate-pulse" />
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-4 xl:grid-cols-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="rounded-lg border border-secondary-200 bg-white p-4">
+                <div className="h-4 w-40 rounded bg-secondary-100 motion-safe:animate-pulse" />
+                <div className="mt-4 h-64 w-full rounded bg-secondary-50 motion-safe:animate-pulse" />
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {report && !activeQuery.isLoading && (
-        <>
+        <div
+          id="threesixty-panel"
+          role="tabpanel"
+          aria-labelledby={`threesixty-tab-${activeTab}`}
+          tabIndex={0}
+          className="space-y-4 focus:outline-none lg:space-y-6"
+        >
           <ProfileCard activeTab={activeTab} report={report} />
           {activeTab === 'item' && <ItemReport report={report as Item360Report} periodLabel={periodShortLabels[period]} />}
           {activeTab === 'customer' && <CustomerReport report={report as Customer360Report} periodLabel={periodShortLabels[period]} />}
@@ -1213,7 +1291,7 @@ export default function ThreeSixtyReportsPage() {
             <SalesTeamReport report={report as SalesTeam360Report} periodLabel={periodShortLabels[period]} />
           )}
           <InsightCard insights={report.insights} />
-        </>
+        </div>
       )}
     </div>
   );

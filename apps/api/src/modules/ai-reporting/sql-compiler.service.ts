@@ -29,6 +29,18 @@ const DATE_FILTER_DATASETS = new Set([
   'tax_register',
   'ledger_entries',
 ]);
+// Balance / snapshot datasets carry a date column (e.g. invoice_date) for
+// display and explicit filtering, but they represent a point-in-time balance —
+// every open bill as of today — NOT a flow within a date range. Applying the
+// query's time range as an `invoice_date BETWEEN ...` silently undercounts the
+// balance: "total outstanding for customer X" collapses to just the bills
+// raised in the (often implicitly-attached) current period. These datasets are
+// therefore never auto-date-filtered by the time range; an explicit
+// invoice_date column filter is still honoured when a bounded slice is truly
+// wanted. This mirrors the "never put a time range on item_velocity" rule —
+// item_velocity simply has no default date column to trip on, whereas
+// party_outstanding does, so it needs an explicit guard.
+export const BALANCE_SNAPSHOT_DATASETS = new Set(['party_outstanding']);
 const UUID_FILTER_COLUMNS = new Set([
   'tenant_id',
   'branch_id',
@@ -567,6 +579,9 @@ export class SqlCompilerService {
   }
 
   private shouldApplyDateFilter(dataset: CatalogDataset, timeRange: SemanticTimeRange | undefined): boolean {
+    // Outstanding/receivable/payable is a balance, not a flow — never scope it
+    // to a period via the time range (see BALANCE_SNAPSHOT_DATASETS).
+    if (BALANCE_SNAPSHOT_DATASETS.has(dataset.datasetId)) return false;
     if (DATE_FILTER_DATASETS.has(dataset.datasetId)) return true;
     if (!timeRange || !this.defaultDateColumn(dataset, timeRange.fieldId)) return false;
     if (timeRange.preset === 'custom') return true;

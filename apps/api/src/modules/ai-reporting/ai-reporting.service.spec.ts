@@ -191,6 +191,53 @@ describe('AiReportingService', () => {
     expect(result.chart?.data[0]).toEqual(expect.objectContaining({ product_name: 'SKU-001' }));
   });
 
+  it('labels outstanding as an as-of balance and does not duplicate a single-row total', async () => {
+    const outstandingQuery: SemanticReportQuery = {
+      queryKind: 'single_report',
+      title: 'Total Outstanding',
+      datasetId: 'party_outstanding',
+      metrics: ['customer_outstanding'],
+      dimensions: [],
+      filters: [],
+      // Even though the default range is a financial year, outstanding is a
+      // balance: the period must read "As of <today>", not "Financial Year".
+      timeRange: { preset: 'current_financial_year' },
+      sort: [{ metricId: 'customer_outstanding', direction: 'desc' }],
+      limit: 1,
+      visualization: { type: 'kpi' },
+    };
+    const { service } = createService({
+      parser: { parseQuestion: jest.fn().mockResolvedValue(outstandingQuery) },
+      semanticValidator: { validate: jest.fn().mockReturnValue(outstandingQuery) },
+      compiler: {
+        compile: jest.fn().mockReturnValue({
+          sql: 'SELECT SUM(outstanding_amount) AS customer_outstanding FROM vw_ai_party_outstanding WHERE tenant_id = $1::uuid LIMIT $2',
+          params: [tenantId, 1],
+          datasetId: 'party_outstanding',
+          viewName: 'vw_ai_party_outstanding',
+          expectsRowsLimit: true,
+          appliedSecurityFilters: ['tenant_id'],
+          selectedColumns: ['customer_outstanding'],
+        }),
+      },
+      executor: {
+        execute: jest.fn().mockResolvedValue({
+          columns: [{ key: 'customer_outstanding', label: 'Outstanding Amount', dataType: 'currency' }],
+          rows: [{ customer_outstanding: 25060043 }],
+          rowCount: 1,
+          executionTimeMs: 5,
+        }),
+      },
+    });
+
+    const result = await service.query(user, { question: 'total outstanding for JANATHA PHARMA NEW', includeSummary: false });
+
+    expect((result as any).metadata.periodLabel).toMatch(/^As of /);
+    expect((result as any).metadata.periodLabel).not.toContain('Financial Year');
+    // single aggregate row → no totals footer that just repeats the value
+    expect((result as any).grid.totals).toEqual({});
+  });
+
   it('preserves unsupported capability details in the API response', async () => {
     const unsupported = {
       queryKind: 'unsupported' as const,

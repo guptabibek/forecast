@@ -465,6 +465,79 @@ describe('SqlCompilerService', () => {
     expect(() => safety.validate(compiled)).not.toThrow();
   });
 
+  it('never date-filters party_outstanding (a balance), even when a period is attached', () => {
+    const compiled = compiler.compile(query({
+      mode: 'kpi',
+      datasetId: 'party_outstanding',
+      analysisType: 'grouped_summary',
+      metrics: ['customer_outstanding'],
+      dimensions: [],
+      displayColumns: [],
+      filters: [{ filterId: 'party_filter', operator: 'ILIKE', value: 'JANATHA PHARMA NEW' }],
+      // The LLM frequently over-attaches the current period; outstanding is a
+      // point-in-time balance, so this must NOT scope by invoice_date.
+      timeRange: { preset: 'this_month', fieldId: 'invoice_date' },
+      sort: [{ metricId: 'customer_outstanding', direction: 'desc' }],
+      limit: 1,
+      visualization: { type: 'kpi' },
+    }), security);
+
+    expect(compiled.sql).toContain('FROM vw_ai_party_outstanding');
+    expect(compiled.sql).toContain('SUM(outstanding_amount) AS customer_outstanding');
+    // the balance must span ALL open bills — no invoice_date window
+    expect(compiled.sql).not.toContain('invoice_date BETWEEN');
+    expect(compiled.params).not.toContain('2026-06-01');
+    // tenant/company/branch scoping is still enforced
+    expect(compiled.sql).toContain('tenant_id = $1::uuid');
+    expect(compiled.sql).toMatch(/company_id = ANY\(\$\d+::int\[\]\)/);
+    expect(compiled.sql).toMatch(/branch_id = ANY\(\$\d+::uuid\[\]\)/);
+    // the party name match still applies across synonym columns
+    expect(compiled.sql).toMatch(/\(party_code ILIKE \$\d+ OR party_name ILIKE \$\d+\)/);
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('does not date-filter party_outstanding under the default (financial-year) range either', () => {
+    const compiled = compiler.compile(query({
+      mode: 'kpi',
+      datasetId: 'party_outstanding',
+      analysisType: 'grouped_summary',
+      metrics: ['customer_outstanding'],
+      dimensions: [],
+      displayColumns: [],
+      filters: [],
+      timeRange: undefined,
+      sort: [{ metricId: 'customer_outstanding', direction: 'desc' }],
+      limit: 1,
+    }), security);
+
+    expect(compiled.sql).not.toContain('invoice_date BETWEEN');
+    expect(compiled.params).not.toContain('2026-04-01');
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
+  it('groups outstanding branch-wise without date-scoping the balance', () => {
+    const compiled = compiler.compile(query({
+      mode: 'ranking',
+      datasetId: 'party_outstanding',
+      analysisType: 'ranking',
+      metrics: ['customer_outstanding'],
+      dimensions: ['outstanding_branch'],
+      displayColumns: [],
+      filters: [],
+      timeRange: { preset: 'this_month', fieldId: 'invoice_date' },
+      sort: [{ metricId: 'customer_outstanding', direction: 'desc' }],
+      limit: 50,
+    }), security);
+
+    expect(compiled.sql).toContain('FROM vw_ai_party_outstanding');
+    expect(compiled.sql).toContain('branch_name AS branch_name');
+    expect(compiled.sql).toMatch(/GROUP BY branch_id, branch_code, branch_name/);
+    // still a balance: no invoice_date window
+    expect(compiled.sql).not.toContain('invoice_date BETWEEN');
+    expect(compiled.sql).toContain('ORDER BY customer_outstanding DESC');
+    expect(() => safety.validate(compiled)).not.toThrow();
+  });
+
   it('rejects scoped datasets when no allowed branch is available', () => {
     expect(() => compiler.compile(query({}), { ...security, requestedBranchIds: [], allowedBranchIds: [] })).toThrow(ForbiddenException);
   });

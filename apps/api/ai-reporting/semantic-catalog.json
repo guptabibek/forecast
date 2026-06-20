@@ -2822,6 +2822,26 @@
       ]
     },
     {
+      "dimensionId": "outstanding_branch",
+      "displayName": "Branch",
+      "datasetId": "party_outstanding",
+      "columns": [
+        "branch_id",
+        "branch_code",
+        "branch_name"
+      ],
+      "labelColumn": "branch_name",
+      "synonyms": [
+        "branch",
+        "branch wise",
+        "branchwise",
+        "warehouse",
+        "location",
+        "store",
+        "company"
+      ]
+    },
+    {
       "dimensionId": "tax_domain",
       "displayName": "Tax Domain",
       "datasetId": "tax_register",

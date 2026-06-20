@@ -85,7 +85,17 @@
       "Bash(npm run *)",
       "Bash(DATABASE_URL=\"postgres://postgres:123456@127.0.0.1:5433/forecast\" npx prisma migrate status)",
       "Bash(DATABASE_URL=\"postgres://postgres:123456@127.0.0.1:5433/forecast\" npx prisma migrate resolve --rolled-back 20260525210000_ai_purchase_invoice_rollup_view)",
-      "Bash(DATABASE_URL=\"postgres://postgres:123456@127.0.0.1:5433/forecast\" npx prisma migrate deploy)"
+      "Bash(DATABASE_URL=\"postgres://postgres:123456@127.0.0.1:5433/forecast\" npx prisma migrate deploy)",
+      "Read(//c/Users/Bibek Gupta/.claude/plugins/cache/ui-ux-pro-max-skill/**)",
+      "Bash(python scripts/search.py \"SaaS admin dashboard analytics data-dense pharma\" --design-system)",
+      "Bash(python scripts/search.py \"data table loading empty-state accessibility sortable sticky header\" --domain ux -n 14)",
+      "Bash(python scripts/search.py \"dashboard chart responsive empty-state tooltip number-formatting\" --domain chart -n 10)",
+      "Bash(node -e \"try{require.resolve\\('pg'\\);console.log\\('pg OK'\\)}catch\\(e\\){console.log\\('pg MISSING'\\)}\")",
+      "Bash(node -e \"try{require.resolve\\('@prisma/client'\\);console.log\\('prisma OK'\\)}catch\\(e\\){console.log\\('prisma MISSING'\\)}\")",
+      "Bash(node _diag_outstanding.js)",
+      "Bash(find . -maxdepth 3 -name \".env.docker\" -not -path \"*/node_modules/*\")",
+      "Bash(find . -maxdepth 3 -name \".env*\" -not -path \"*/node_modules/*\")",
+      "Bash(xargs grep -l \"AiKpiCard\\\\|AiReportTable\\\\|periodLabel\\\\|As of\")"
     ]
   }
 }

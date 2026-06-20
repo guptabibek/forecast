@@ -19,7 +19,7 @@ import {
   SemanticReportQuery,
   SemanticTimeRange,
 } from './semantic-query.types';
-import { SqlCompilerService } from './sql-compiler.service';
+import { BALANCE_SNAPSHOT_DATASETS, SqlCompilerService } from './sql-compiler.service';
 import { SqlSafetyValidator } from './sql-safety.validator';
 
 export interface AiReportRequest {
@@ -695,7 +695,7 @@ export class AiReportingService {
       metadata: {
         metricLabel: this.metricLabel(query),
         groupedBy: this.groupedByLabel(query),
-        periodLabel: this.describePeriodLabel(query.timeRange),
+        periodLabel: this.describePeriodLabel(query.timeRange, query.datasetId),
       },
       kpis,
       grid,
@@ -770,6 +770,9 @@ export class AiReportingService {
 
   private calculateTotals(columns: CanonicalGridColumn[], rows: Record<string, unknown>[]) {
     const totals: Record<string, number> = {};
+    // A totals row over zero or one data rows just repeats that row — skip it
+    // so single-value (KPI/aggregate) results don't render the figure twice.
+    if (rows.length <= 1) return totals;
     for (const column of columns) {
       if (!['currency', 'number', 'quantity'].includes(column.dataType ?? '') && !this.isNumericField(column.field)) continue;
       let sum = 0;
@@ -1116,7 +1119,14 @@ export class AiReportingService {
     return query.mode === 'detail' ? 'Detail Rows' : 'Overall';
   }
 
-  private describePeriodLabel(range: SemanticTimeRange | undefined) {
+  private describePeriodLabel(range: SemanticTimeRange | undefined, datasetId?: string) {
+    // Balance/snapshot datasets (e.g. outstanding) are point-in-time, not
+    // period-scoped — the time range is intentionally ignored when compiling
+    // (see BALANCE_SNAPSHOT_DATASETS), so labelling it "Current Financial Year"
+    // misrepresents the figure. Report it as an as-of-today balance instead.
+    if (datasetId && BALANCE_SNAPSHOT_DATASETS.has(datasetId)) {
+      return `As of ${this.formatDayLabel(new Date())}`;
+    }
     if (!range || !range.preset || range.preset === 'unspecified') return 'Unspecified Period';
     if (range.preset === 'custom') return this.customPeriodLabel(range.startDate, range.endDate);
     if (range.preset === 'current_financial_year') return 'Current Financial Year';
