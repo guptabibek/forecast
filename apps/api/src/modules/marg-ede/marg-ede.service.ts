@@ -14,9 +14,8 @@ import {
   MargReconciliationStatus,
   MargReconciliationType,
   NormalBalance,
-  PeriodType,
   Prisma,
-  PurchaseOrderStatus,
+  PurchaseOrderStatus
 } from '@prisma/client';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { inflateRawSync } from 'zlib';
@@ -3285,7 +3284,7 @@ export class MargEdeService {
       if (!this.isWithinDateWindow(parsedDate, dateWindow)) continue;
 
       const sourceKey = this.buildSourceKey(d);
-      const dedupKey = `${companyId} ${sourceKey}`;
+      const dedupKey = `${companyId}${sourceKey}`;
       if (seen.has(dedupKey)) continue;
       seen.add(dedupKey);
 
