@@ -472,7 +472,7 @@ export class SalesPurchaseAnalysisService {
 
     if (!header) throw new NotFoundException('Bill not found');
 
-    const lines = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+    const fetchedLines = await this.prisma.$queryRaw<any[]>(Prisma.sql`
       SELECT
         mt.id,
         COALESCE(p.code, mprod.code, mt.pid) AS item_code,
@@ -524,7 +524,8 @@ export class SalesPurchaseAnalysisService {
           THEN (((ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))) - ABS(COALESCE(mt.qty, 0)) * COALESCE(ms.p_rate, ms.lp_rate, p.standard_cost, 0)) / (ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0))) * 100)::float8
           ELSE NULL::float8
         END AS margin_pct,
-        (ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0)))::float8 AS line_total
+        (ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0)))::float8 AS line_total,
+        mt.is_cancelled AS is_cancelled
       FROM marg_transactions mt
       LEFT JOIN marg_products mprod ON mprod.tenant_id = mt.tenant_id AND mprod.company_id = mt.company_id AND mprod.pid = mt.pid
       LEFT JOIN products p ON p.id = mprod.product_id AND p.tenant_id = mt.tenant_id
@@ -542,17 +543,39 @@ export class SalesPurchaseAnalysisService {
         AND mt.company_id = ${parsed.companyId}
         AND mt.voucher = ${parsed.voucher}
         AND mt.type = ANY(${this.lineTypesForHeader(header.type)}::text[])
-        -- Exclude cancelled / superseded lines. Marg can cancel a single line
-        -- inside a live invoice, and a re-issued voucher leaves its prior line
-        -- generation in place (each carries is_cancelled = TRUE, set either by
-        -- the Marg AddField cancellation token at staging or by the stale-
-        -- generation prune in marg-ede). EVERY other aggregation path already
-        -- filters this (compatibleLineTypeSql, refreshMargBillRollup); without
-        -- it the drilldown summed ghost lines, inflating gross/discount/tax/
-        -- cost/profit and blowing up the round-off (final_amt - Σ line_total).
-        AND mt.is_cancelled = FALSE
-      ORDER BY mt.id
+      ORDER BY mt.is_cancelled, mt.id
     `);
+
+    // Choose WHICH lines to display by reconciling against the header's
+    // authoritative final_amt — do NOT blanket-exclude is_cancelled lines.
+    // Two different things set is_cancelled, with OPPOSITE reconciliation
+    // semantics:
+    //   • Stale / superseded generations — a re-issued voucher leaves its
+    //     prior line generation behind; the stale-generation prune in marg-ede
+    //     marks it is_cancelled. final_amt holds the NEW generation only, so
+    //     these must be EXCLUDED (otherwise Σ lines over-counts → negative
+    //     round-off).
+    //   • Marg single-line cancellation (AddField "CANCELLED:1") — a minority
+    //     of live invoices flag a line cancelled YET still carry its value in
+    //     final_amt (the line is billed; the customer's Marg ledger / party
+    //     outstanding reflect it, same generation/created_at as the live
+    //     lines). These must be INCLUDED, or Σ lines under-counts and the whole
+    //     amount lands in round-off (the STR26-07857 ₹1,474.57 bug).
+    // Rule: show live-only UNLESS live-only misses final_amt AND adding the
+    // cancelled lines hits it (within tolerance). On real data no voucher
+    // reconciles to both sets, so this is unambiguous; when neither reconciles
+    // (genuinely missing lines, or un-pruned duplicates) we keep live-only and
+    // the residual surfaces as round-off exactly as before — no regression.
+    const RECONCILIATION_TOLERANCE = 1.0;
+    const sumLineTotal = (rows: any[]) =>
+      rows.reduce((sum, line) => sum + Number(line.line_total ?? 0), 0);
+    const liveLines = fetchedLines.filter((line) => !line.is_cancelled);
+    const finalAmt = Number(header.net_amount ?? 0);
+    const includeCancelled =
+      finalAmt > 0 &&
+      Math.abs(finalAmt - sumLineTotal(liveLines)) > RECONCILIATION_TOLERANCE &&
+      Math.abs(finalAmt - sumLineTotal(fetchedLines)) <= RECONCILIATION_TOLERANCE;
+    const lines = includeCancelled ? fetchedLines : liveLines;
 
     const totals = lines.reduce(
       (acc, line) => {
@@ -568,7 +591,7 @@ export class SalesPurchaseAnalysisService {
       { quantity: 0, gross: 0, discount: 0, lineTotal: 0, tax: 0, cost: 0, profit: 0 },
     );
 
-    const netAmount = Number(header.net_amount ?? 0) || totals.lineTotal;
+    const netAmount = finalAmt || totals.lineTotal;
     const roundOff = netAmount - totals.lineTotal;
     const invoiceProfit = kind === 'sales' ? netAmount - totals.cost : totals.profit;
     const enrichedHeader = {
