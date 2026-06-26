@@ -11560,6 +11560,17 @@ export class MargEdeService {
       // the migration; the
       // `refreshMargBillRollup produces totals matching live aggregation`
       // test asserts that.
+      //
+      // The DELETE + INSERT…SELECT is a single heavy statement: on the
+      // production tenant it rebuilds ~10k rollup rows by aggregating
+      // 130k+ staging lines with a LATERAL cost join, which takes ~24s
+      // against the remote DB. Prisma's DEFAULT interactive-transaction
+      // timeout is only 5s, so without an explicit timeout this refresh
+      // ALWAYS aborts ("Transaction already closed … 5000 ms") and the
+      // rollup is left empty — every rollup-backed report section
+      // (top customers, trend, salesman/route/city, payment mode) then
+      // shows "no data" even though staging is fully synced. Use the
+      // dedicated heavy-tx budget (MARG_DB_TX_TIMEOUT_MS, default 5 min).
       const result: number = await tx.$executeRaw(Prisma.sql`
         INSERT INTO marg_bill_rollup (
           tenant_id, company_id, voucher, type, vcn, family, date, cid,
@@ -11630,6 +11641,9 @@ export class MargEdeService {
           mv.final_amt
       `);
       inserted = result ?? 0;
+    }, {
+      maxWait: MARG_ACCOUNTING_PROJECTION_TX_MAX_WAIT_MS,
+      timeout: this.dbTxTimeoutMs,
     });
 
     const elapsedMs = Date.now() - startedAt;

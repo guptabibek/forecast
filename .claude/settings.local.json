@@ -115,7 +115,9 @@
       "Bash(node verify.js)",
       "Bash(grep -nE '\\\\\\\\set|:tolerance|^\\\\\\\\|[^:]:[a-z]+' apps/api/scripts/prune_stale_voucher_line_generations.sql)",
       "Bash(node diag-batch.js)",
-      "Bash(timeout 25 node -e ' *)"
+      "Bash(timeout 25 node -e ' *)",
+      "Bash(ls -1 apps/api/.env*)",
+      "Bash(ls -1 .env*)"
     ]
   }
 }
