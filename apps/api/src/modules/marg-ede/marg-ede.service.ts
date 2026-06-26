@@ -1898,6 +1898,24 @@ export class MargEdeService {
       // consistency window for users). Failure is non-fatal and logged;
       // the rollup still has the PRIOR sync's data so reports stay
       // available, and the next sync will retry the refresh.
+      // Void stale line generations from re-issued vouchers BEFORE the rollup
+      // refresh, so the rollup (and every line-summing report) materialises
+      // only the live generation. Non-fatal: on failure the rollup still
+      // rebuilds from whatever is staged and the next sync retries the prune.
+      try {
+        await this.touchSyncHeartbeat(configId, shouldRunInventory);
+        const prune = await this.pruneStaleVoucherLineGenerations(tenantId);
+        if (prune.rowsMarked > 0) {
+          this.syncLog.info(
+            `pruneStaleVoucherLineGenerations: tenant=${tenantId} ` +
+            `vouchers=${prune.vouchersPruned} rowsMarked=${prune.rowsMarked}`,
+          );
+        }
+      } catch (err) {
+        errors.push({ step: 'prune_stale_voucher_lines', error: String(err) });
+        this.logger.warn('Stale voucher-line prune failed (non-fatal)', err);
+      }
+
       try {
         await this.touchSyncHeartbeat(configId, shouldRunInventory);
         await this.refreshMargBillRollup(tenantId);
@@ -4914,15 +4932,94 @@ export class MargEdeService {
       `sweepMargLegacyPidProducts: merging ${pairs.length} legacy placeholder product(s) into canonical.`,
     );
     for (const { legacy_id, canonical_id } of pairs) {
-      // Re-use the existing per-pair merge — these are rare so the loop is fine.
-      await this.prisma.inventoryLevel.deleteMany({ where: { tenantId, productId: legacy_id } });
-      await this.prisma.batch.updateMany({
-        where: { tenantId, productId: legacy_id },
-        data: { productId: canonical_id },
-      }).catch(() => {/* batch unique conflicts get swept on next sync */});
-      await this.prisma.actual.updateMany({ where: { tenantId, productId: legacy_id }, data: { productId: canonical_id } });
-      await this.prisma.inventoryTransaction.updateMany({ where: { tenantId, productId: legacy_id }, data: { productId: canonical_id } });
-      await this.prisma.inventoryLedger.updateMany({ where: { tenantId, productId: legacy_id }, data: { productId: canonical_id } });
+      await this.mergeLegacyProductIntoCanonical(tenantId, legacy_id, canonical_id);
+    }
+  }
+
+  /**
+   * Fully merge a legacy `MARG-{pid}` placeholder product into its canonical
+   * `MARG-{code}` product and remove the placeholder, so the legacy-pid sweep
+   * stops recurring.
+   *
+   * The hard part is batches. Marg rebuilds stock onto the canonical product
+   * every sync, so a legacy batch that duplicates a canonical
+   * (location, batch_number) is STALE — we cannot simply re-point it
+   * (`UNIQUE (tenant_id, product_id, location_id, batch_number)` would fire,
+   * which is exactly the error that was being swallowed and never resolved).
+   * Instead, for colliding batches we re-point their child movements
+   * (inventory_transactions / inventory_ledger carry batch_id) onto the
+   * surviving canonical batch, then delete the stale legacy batch; the
+   * non-colliding legacy batches are re-pointed normally.
+   *
+   * Idempotent and NON-FATAL: wrapped so a residual FK (e.g. an unexpected
+   * reservation) can never abort the sync — worst case it logs and leaves the
+   * placeholder for a later run, exactly the old behaviour, but without the
+   * recurring unique-violation error.
+   */
+  private async mergeLegacyProductIntoCanonical(
+    tenantId: string,
+    legacyId: string,
+    canonicalId: string,
+  ): Promise<void> {
+    if (!legacyId || !canonicalId || legacyId === canonicalId) return;
+    try {
+      await this.prisma.$transaction(async (tx: any) => {
+        // 1) Re-point child movements off colliding legacy batches onto the
+        //    canonical batch sharing the same (location_id, batch_number).
+        for (const childTable of ['inventory_transactions', 'inventory_ledger']) {
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE ${Prisma.raw(childTable)} ch
+            SET batch_id = cc.id
+            FROM batches l
+            JOIN batches cc
+              ON cc.tenant_id = l.tenant_id
+             AND cc.product_id = ${canonicalId}::uuid
+             AND cc.location_id = l.location_id
+             AND cc.batch_number = l.batch_number
+            WHERE l.tenant_id = ${tenantId}::uuid
+              AND l.product_id = ${legacyId}::uuid
+              AND ch.batch_id = l.id
+          `);
+        }
+        // 2) Delete the now-orphaned, stale colliding legacy batches.
+        await tx.$executeRaw(Prisma.sql`
+          DELETE FROM batches l
+          USING batches cc
+          WHERE l.tenant_id = ${tenantId}::uuid
+            AND l.product_id = ${legacyId}::uuid
+            AND cc.tenant_id = l.tenant_id
+            AND cc.product_id = ${canonicalId}::uuid
+            AND cc.location_id = l.location_id
+            AND cc.batch_number = l.batch_number
+        `);
+        // 3) Re-point the remaining (non-colliding) legacy batches.
+        await tx.$executeRaw(Prisma.sql`
+          UPDATE batches SET product_id = ${canonicalId}::uuid
+          WHERE tenant_id = ${tenantId}::uuid AND product_id = ${legacyId}::uuid
+        `);
+        // 4) Product-level references. inventory_levels are rebuilt from the
+        //    stock snapshot, so the legacy ones are just dropped.
+        await tx.$executeRaw(Prisma.sql`DELETE FROM inventory_levels WHERE tenant_id = ${tenantId}::uuid AND product_id = ${legacyId}::uuid`);
+        await tx.$executeRaw(Prisma.sql`UPDATE actuals SET product_id = ${canonicalId}::uuid WHERE tenant_id = ${tenantId}::uuid AND product_id = ${legacyId}::uuid`);
+        await tx.$executeRaw(Prisma.sql`UPDATE inventory_transactions SET product_id = ${canonicalId}::uuid WHERE tenant_id = ${tenantId}::uuid AND product_id = ${legacyId}::uuid`);
+        await tx.$executeRaw(Prisma.sql`UPDATE inventory_ledger SET product_id = ${canonicalId}::uuid WHERE tenant_id = ${tenantId}::uuid AND product_id = ${legacyId}::uuid`);
+        // 5) Re-link the staged Marg product master off the placeholder so the
+        //    sweep's (legacy, canonical) pair stops matching next sync.
+        await tx.$executeRaw(Prisma.sql`UPDATE marg_products SET product_id = ${canonicalId}::uuid WHERE tenant_id = ${tenantId}::uuid AND product_id = ${legacyId}::uuid`);
+      });
+
+      // 6) Drop the now-orphan placeholder product. Best-effort: if some
+      //    out-of-scope FK still references it, keep it (harmless — its split
+      //    stock and the batch error are already resolved above).
+      await this.prisma.product.delete({ where: { id: legacyId } }).catch(() => {
+        this.syncLog.warn(
+          `mergeLegacyProductIntoCanonical: merged references but could not delete placeholder product ${legacyId} (residual FK); it is now inert.`,
+        );
+      });
+    } catch (err) {
+      this.syncLog.warn(
+        `mergeLegacyProductIntoCanonical failed for legacy=${legacyId} canonical=${canonicalId} (non-fatal): ${String(err)}`,
+      );
     }
   }
 
@@ -6951,29 +7048,10 @@ export class MargEdeService {
     });
     if (!legacy || legacy.id === canonicalProductId) return;
 
-    // Re-point dependent rows to the canonical product. We use `updateMany`
-    // with conflict avoidance (skipping rows where the canonical already has a
-    // value) so we never violate composite uniques on inventory_levels /
-    // batches.
-    await this.prisma.inventoryLevel.deleteMany({
-      where: { tenantId, productId: legacy.id },
-    });
-    await this.prisma.batch.updateMany({
-      where: { tenantId, productId: legacy.id },
-      data: { productId: canonicalProductId },
-    }).catch(() => {/* batch unique conflicts get swept on next sync */});
-    await this.prisma.actual.updateMany({
-      where: { tenantId, productId: legacy.id },
-      data: { productId: canonicalProductId },
-    });
-    await this.prisma.inventoryTransaction.updateMany({
-      where: { tenantId, productId: legacy.id },
-      data: { productId: canonicalProductId },
-    });
-    await this.prisma.inventoryLedger.updateMany({
-      where: { tenantId, productId: legacy.id },
-      data: { productId: canonicalProductId },
-    });
+    // Re-point all dependent rows to the canonical product, consolidating
+    // colliding batches and dropping the placeholder. See
+    // mergeLegacyProductIntoCanonical for the batch-collision handling.
+    await this.mergeLegacyProductIntoCanonical(tenantId, legacy.id, canonicalProductId);
   }
 
   /** Resolve or create a core Customer for a Marg CID */
@@ -11285,6 +11363,186 @@ export class MargEdeService {
    * sibling closure / bootstrap helpers so the orchestrator can call this
    * unconditionally.
    */
+  /**
+   * Mark stale (superseded) Marg transaction-line generations as cancelled.
+   *
+   * ROOT-CAUSE FIX for inflated drilldown / rollup line totals.
+   *
+   * When a voucher is edited / re-issued in Marg, Marg re-creates its Dis
+   * lines with BRAND-NEW marg_ids. Our sync upserts on
+   * `source_key = marg:{companyId}:{margId}` (see buildSourceKey), so the new
+   * lines land as NEW rows while the previous generation's rows survive —
+   * nothing in the sync ever deletes them. The header upserts in place
+   * (unique on tenant,company,voucher,type) and its `final_amt` reflects the
+   * LATEST version, but the table now holds TWO line generations. Every path
+   * that sums lines (drilldown, rollup gross/discount/tax/cost) then
+   * double-counts, and the drilldown round-off (`final_amt − Σ line_total`)
+   * explodes into a large negative number.
+   *
+   * The current generation is the one written most recently: Postgres NOW()
+   * is constant within a statement, so all lines inserted by one sync share a
+   * created_at, and a re-issue produces a strictly-later created_at group.
+   * We therefore treat distinct created_at values as generations.
+   *
+   * Safety — RECONCILIATION GATE: we only ever void OLDER generations, and
+   * ONLY when the LATEST generation's Σ(amount+gst) reconciles to the
+   * voucher's final_amt within `toleranceRupees`. Marg's contract is
+   * final_amt ≈ Σ(Dis.Amount + Dis.GSTAmount) (the same identity the
+   * voucher-total adjustment relies on), so a latest generation that hits
+   * final_amt IS the live invoice; anything older is the ghost. If the latest
+   * generation does NOT reconcile (partial sync, an unusually large genuine
+   * round-off, or a generation split across batches), we leave the voucher
+   * untouched — a no-op is always safe, a wrong delete is not.
+   *
+   * We mark `is_cancelled = TRUE` rather than DELETE: it is reversible, it is
+   * already the exclusion every aggregation path honours
+   * (compatibleLineTypeSql, refreshMargBillRollup, and the drilldown), and it
+   * deliberately does NOT touch the Actuals projection (which derives
+   * cancellation from the AddField token, not this column) so forecasting
+   * totals — already self-corrected by the voucher-total adjustment — are
+   * left exactly as they are.
+   *
+   * Two duplication patterns are handled, each with its own reconciliation
+   * gate; we never void a line unless what REMAINS for that voucher reconciles
+   * to final_amt and at least one line is actually being removed:
+   *
+   *   PASS 1 — exact duplicates (same logical line staged ≥2× with distinct
+   *   marg_ids, e.g. an overlapping page re-fetch within one run). Collapse by
+   *   line content (pid, batch, qty, rate, amount, gst_amount) keeping the
+   *   highest marg_id; void the rest IF keeping one-per-content reconciles.
+   *
+   *   PASS 2 — re-issued voucher (Marg re-created every line with new marg_ids
+   *   in a later run; content differs, e.g. qty changed). Group by created_at
+   *   (one sync statement shares NOW()); keep the latest generation, void
+   *   older ones IF the latest generation reconciles.
+   *
+   * Anything that does NOT reconcile under either pass (genuine round-off,
+   * partial sync, missing lines, or pathological multi-duplication) is left
+   * untouched for manual review — a no-op is always safe, a wrong delete is
+   * not.
+   *
+   * Idempotent. Returns the number of voucher generations voided and rows
+   * marked so the caller can log / surface it.
+   */
+  private async pruneStaleVoucherLineGenerations(
+    tenantId: string,
+    toleranceRupees = 1.0,
+  ): Promise<{ vouchersPruned: number; rowsMarked: number }> {
+    if (!this.prisma?.$queryRaw) {
+      return { vouchersPruned: 0, rowsMarked: 0 };
+    }
+
+    // PASS 1 — exact-duplicate collapse (gated on keep-one reconciling).
+    const [pass1] = await this.prisma.$queryRaw<Array<{ rows_marked: number; vouchers_pruned: number }>>(Prisma.sql`
+      WITH ranked AS (
+        SELECT mt.id, mt.company_id, mt.voucher,
+               (ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0)))::float8 AS net,
+               ROW_NUMBER() OVER (
+                 PARTITION BY mt.company_id, mt.voucher, mt.pid, mt.batch,
+                              mt.qty, mt.rate, mt.amount, mt.gst_amount
+                 ORDER BY mt.marg_id DESC, mt.id DESC
+               ) AS rn
+        FROM marg_transactions mt
+        WHERE mt.tenant_id = ${tenantId}::uuid
+          AND mt.is_cancelled = FALSE
+      ),
+      per_voucher AS (
+        SELECT company_id, voucher,
+               COALESCE(SUM(net) FILTER (WHERE rn = 1), 0)::float8 AS kept_sum,
+               COUNT(*) FILTER (WHERE rn > 1) AS dup_count
+        FROM ranked
+        GROUP BY company_id, voucher
+      ),
+      headers AS (
+        SELECT company_id, voucher, MAX(final_amt)::float8 AS final_amt
+        FROM marg_vouchers
+        WHERE tenant_id = ${tenantId}::uuid AND is_cancelled = FALSE AND final_amt IS NOT NULL
+        GROUP BY company_id, voucher
+      ),
+      target AS (
+        SELECT pv.company_id, pv.voucher
+        FROM per_voucher pv
+        JOIN headers h ON h.company_id = pv.company_id AND h.voucher = pv.voucher
+        WHERE pv.dup_count > 0 AND ABS(pv.kept_sum - h.final_amt) <= ${toleranceRupees}
+      ),
+      upd AS (
+        UPDATE marg_transactions mt
+        SET is_cancelled = TRUE, cancelled_on = COALESCE(mt.cancelled_on, NOW()), updated_at = NOW()
+        FROM ranked r
+        JOIN target t ON t.company_id = r.company_id AND t.voucher = r.voucher
+        WHERE mt.id = r.id AND r.rn > 1
+          AND mt.tenant_id = ${tenantId}::uuid AND mt.is_cancelled = FALSE
+        RETURNING mt.company_id, mt.voucher
+      )
+      SELECT COUNT(*)::int AS rows_marked,
+             COUNT(DISTINCT (company_id::text || ':' || voucher))::int AS vouchers_pruned
+      FROM upd
+    `);
+
+    // PASS 2 — superseded-generation collapse. Runs after PASS 1 so any
+    // voucher already fixed by exact-duplicate collapse no longer qualifies.
+    //
+    // A re-issue's current generation can be SPLIT across several created_at
+    // values (one sync writes a big voucher in multiple bind-size batches, each
+    // its own NOW()). So we cannot just keep the single latest created_at — we
+    // accumulate generations newest-first and keep the shallowest prefix whose
+    // running total reconciles to final_amt; everything older than that prefix
+    // is the stale generation and gets voided. cum_sum is monotonically
+    // increasing (ABS magnitudes), so it crosses final_amt at one point; if it
+    // never reconciles, recon yields no row and nothing is touched (safe).
+    const [pass2] = await this.prisma.$queryRaw<Array<{ rows_marked: number; vouchers_pruned: number }>>(Prisma.sql`
+      WITH live AS (
+        SELECT mt.company_id, mt.voucher, mt.created_at,
+               SUM(ABS(COALESCE(mt.amount, 0)) + ABS(COALESCE(mt.gst_amount, 0)))::float8 AS gen_sum
+        FROM marg_transactions mt
+        WHERE mt.tenant_id = ${tenantId}::uuid
+          AND mt.is_cancelled = FALSE
+        GROUP BY mt.company_id, mt.voucher, mt.created_at
+      ),
+      cum AS (
+        SELECT company_id, voucher, created_at,
+               SUM(gen_sum) OVER (
+                 PARTITION BY company_id, voucher
+                 ORDER BY created_at DESC
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+               ) AS cum_sum
+        FROM live
+      ),
+      headers AS (
+        SELECT company_id, voucher, MAX(final_amt)::float8 AS final_amt
+        FROM marg_vouchers
+        WHERE tenant_id = ${tenantId}::uuid AND is_cancelled = FALSE AND final_amt IS NOT NULL
+        GROUP BY company_id, voucher
+      ),
+      recon AS (
+        SELECT c.company_id, c.voucher, MIN(c.created_at) AS keep_from
+        FROM cum c
+        JOIN headers h ON h.company_id = c.company_id AND h.voucher = c.voucher
+        WHERE ABS(c.cum_sum - h.final_amt) <= ${toleranceRupees}
+        GROUP BY c.company_id, c.voucher
+      ),
+      upd AS (
+        UPDATE marg_transactions mt
+        SET is_cancelled = TRUE, cancelled_on = COALESCE(mt.cancelled_on, NOW()), updated_at = NOW()
+        FROM recon r
+        WHERE mt.tenant_id = ${tenantId}::uuid
+          AND mt.company_id = r.company_id
+          AND mt.voucher = r.voucher
+          AND mt.is_cancelled = FALSE
+          AND mt.created_at < r.keep_from
+        RETURNING mt.company_id, mt.voucher
+      )
+      SELECT COUNT(*)::int AS rows_marked,
+             COUNT(DISTINCT (company_id::text || ':' || voucher))::int AS vouchers_pruned
+      FROM upd
+    `);
+
+    return {
+      vouchersPruned: Number(pass1?.vouchers_pruned ?? 0) + Number(pass2?.vouchers_pruned ?? 0),
+      rowsMarked: Number(pass1?.rows_marked ?? 0) + Number(pass2?.rows_marked ?? 0),
+    };
+  }
+
   private async refreshMargBillRollup(tenantId: string): Promise<number> {
     const delegate = this.prisma?.margBillRollup;
     if (!delegate?.deleteMany || !this.prisma?.$executeRaw) {

@@ -542,6 +542,15 @@ export class SalesPurchaseAnalysisService {
         AND mt.company_id = ${parsed.companyId}
         AND mt.voucher = ${parsed.voucher}
         AND mt.type = ANY(${this.lineTypesForHeader(header.type)}::text[])
+        -- Exclude cancelled / superseded lines. Marg can cancel a single line
+        -- inside a live invoice, and a re-issued voucher leaves its prior line
+        -- generation in place (each carries is_cancelled = TRUE, set either by
+        -- the Marg AddField cancellation token at staging or by the stale-
+        -- generation prune in marg-ede). EVERY other aggregation path already
+        -- filters this (compatibleLineTypeSql, refreshMargBillRollup); without
+        -- it the drilldown summed ghost lines, inflating gross/discount/tax/
+        -- cost/profit and blowing up the round-off (final_amt - Σ line_total).
+        AND mt.is_cancelled = FALSE
       ORDER BY mt.id
     `);
 

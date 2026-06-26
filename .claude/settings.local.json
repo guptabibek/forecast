@@ -95,7 +95,27 @@
       "Bash(node _diag_outstanding.js)",
       "Bash(find . -maxdepth 3 -name \".env.docker\" -not -path \"*/node_modules/*\")",
       "Bash(find . -maxdepth 3 -name \".env*\" -not -path \"*/node_modules/*\")",
-      "Bash(xargs grep -l \"AiKpiCard\\\\|AiReportTable\\\\|periodLabel\\\\|As of\")"
+      "Bash(xargs grep -l \"AiKpiCard\\\\|AiReportTable\\\\|periodLabel\\\\|As of\")",
+      "Bash(grep -rIl \"DATABASE_URL\" --include=\"*.env*\" .)",
+      "Bash(find . -maxdepth 3 -name \"*.env*\" -not -path \"*/node_modules/*\")",
+      "Bash(node -v)",
+      "Bash(ls apps/api/node_modules/@prisma/client)",
+      "Bash(ls apps/api/node_modules/pg)",
+      "Bash(node diag.js)",
+      "Bash(node diag2.js)",
+      "Bash(node diag3.js)",
+      "Bash(grep -iA1 -E \"MargTransaction|MargBranch|UnitOfMeasure|MargStock|MargProduct\")",
+      "Bash(node diag4.js)",
+      "Bash(node diag5.js)",
+      "Bash(node diag6.js)",
+      "Bash(node dryrun.js)",
+      "Bash(node diag7.js)",
+      "Bash(node diag8.js)",
+      "Bash(node diag9.js)",
+      "Bash(node verify.js)",
+      "Bash(grep -nE '\\\\\\\\set|:tolerance|^\\\\\\\\|[^:]:[a-z]+' apps/api/scripts/prune_stale_voucher_line_generations.sql)",
+      "Bash(node diag-batch.js)",
+      "Bash(timeout 25 node -e ' *)"
     ]
   }
 }
