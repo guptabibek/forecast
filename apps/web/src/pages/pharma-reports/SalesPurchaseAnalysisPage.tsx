@@ -255,6 +255,15 @@ export default function SalesPurchaseAnalysisPage() {
     exportMode: 'current-page',
   });
 
+  const trendLines = useMemo(() => [
+    { dataKey: 'amount', name: 'Amount', color: '#2563EB' },
+    { dataKey: 'quantity', name: 'Quantity', color: '#059669' }
+  ], []);
+
+  const pieChartData = useMemo(() => {
+    return (overview.data?.paymentModeSummary ?? []).map((row) => ({ name: row.payment_mode, value: row.amount }));
+  }, [overview.data?.paymentModeSummary]);
+
   return (
     <div className="space-y-4 lg:space-y-6">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
@@ -404,7 +413,7 @@ export default function SalesPurchaseAnalysisPage() {
         <LineChart
           data={overview.data?.trend ?? []}
           xAxisKey="period"
-          lines={[{ dataKey: 'amount', name: 'Amount', color: '#2563EB' }, { dataKey: 'quantity', name: 'Quantity', color: '#059669' }]}
+          lines={trendLines}
           height={260}
         />
       </Card>
@@ -557,7 +566,7 @@ export default function SalesPurchaseAnalysisPage() {
         <Card>
           <CardHeader title="Payment Mode Summary" />
           <PieChart
-            data={(overview.data?.paymentModeSummary ?? []).map((row) => ({ name: row.payment_mode, value: row.amount }))}
+            data={pieChartData}
             height={260}
           />
         </Card>

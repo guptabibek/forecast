@@ -1,3 +1,4 @@
+import React from 'react';
 import {
     Cell,
     Legend,
@@ -35,7 +36,7 @@ const defaultColors = [
   '#84CC16',
 ];
 
-export function PieChart({
+export const PieChart = React.memo(function PieChart({
   data,
   height = 300,
   innerRadius = 0,
@@ -133,14 +134,14 @@ export function PieChart({
       </RechartsPieChart>
     </ResponsiveContainer>
   );
-}
+});
 
 interface DonutChartProps extends Omit<PieChartProps, 'innerRadius'> {
   centerLabel?: string;
   centerValue?: string | number;
 }
 
-export function DonutChart({
+export const DonutChart = React.memo(function DonutChart({
   data,
   height = 300,
   outerRadius = 100,
@@ -178,4 +179,4 @@ export function DonutChart({
       )}
     </div>
   );
-}
+});

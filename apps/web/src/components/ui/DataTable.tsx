@@ -10,6 +10,7 @@ import {
 } from '@heroicons/react/20/solid';
 import { TableCellsIcon } from '@heroicons/react/24/outline';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import type { ColumnFilter, FilterOperator } from '../../hooks/useTableFilters';
 import { TableSkeleton } from './TableSkeleton';
 
@@ -121,6 +122,30 @@ const FilterCell = React.memo(function FilterCellInner<T>({ column, activeFilter
       onFilterChange(field, op, val);
     }
   }, [field, operator, onFilterChange, onClearFilter]);
+
+  const isTypingTextRef = useRef(false);
+  useEffect(() => {
+    if (!isTypingTextRef.current) return;
+    const timer = setTimeout(() => {
+      emitSingle(textValue);
+      isTypingTextRef.current = false;
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [textValue, emitSingle]);
+
+  const isTypingRangeRef = useRef(false);
+  useEffect(() => {
+    if (!isTypingRangeRef.current) return;
+    const timer = setTimeout(() => {
+      if (rangeFrom && rangeTo) {
+        onFilterChange(field, 'between', [rangeFrom, rangeTo]);
+      } else if (!rangeFrom && !rangeTo) {
+        onClearFilter(field);
+      }
+      isTypingRangeRef.current = false;
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [rangeFrom, rangeTo, field, onFilterChange, onClearFilter]);
 
   const emitRange = useCallback((from: string, to: string) => {
     if (from && to) {
@@ -243,7 +268,7 @@ const FilterCell = React.memo(function FilterCellInner<T>({ column, activeFilter
           <input
             type="text"
             value={textValue}
-            onChange={(e) => { setTextValue(e.target.value); emitSingle(e.target.value); }}
+            onChange={(e) => { setTextValue(e.target.value); isTypingTextRef.current = true; }}
             placeholder="Filter…"
             className={inputBase}
             aria-label={`Filter ${column.header}`}
@@ -271,7 +296,7 @@ const FilterCell = React.memo(function FilterCellInner<T>({ column, activeFilter
             <input
               type="number"
               value={rangeFrom}
-              onChange={(e) => { setRangeFrom(e.target.value); if (e.target.value && rangeTo) onFilterChange(field, 'between', [e.target.value, rangeTo]); else onClearFilter(field); }}
+              onChange={(e) => { setRangeFrom(e.target.value); isTypingRangeRef.current = true; }}
               placeholder="from"
               className={inputBase}
               aria-label={`${column.header} from value`}
@@ -280,7 +305,7 @@ const FilterCell = React.memo(function FilterCellInner<T>({ column, activeFilter
             <input
               type="number"
               value={rangeTo}
-              onChange={(e) => { setRangeTo(e.target.value); if (rangeFrom && e.target.value) onFilterChange(field, 'between', [rangeFrom, e.target.value]); else onClearFilter(field); }}
+              onChange={(e) => { setRangeTo(e.target.value); isTypingRangeRef.current = true; }}
               placeholder="to"
               className={inputBase}
               aria-label={`${column.header} to value`}
@@ -292,7 +317,7 @@ const FilterCell = React.memo(function FilterCellInner<T>({ column, activeFilter
             <input
               type="number"
               value={textValue}
-              onChange={(e) => { setTextValue(e.target.value); emitSingle(e.target.value); }}
+              onChange={(e) => { setTextValue(e.target.value); isTypingTextRef.current = true; }}
               placeholder="Value"
               className={inputBase}
               aria-label={`Filter ${column.header}`}
@@ -437,8 +462,25 @@ export const DataTable = React.memo(function DataTableInner<T>({
     [activePagination?.total, activePagination?.pageSize]
   );
 
+  const tableWrapperRef = useRef<HTMLDivElement>(null);
+  
+  // Enable virtualization if rendering more than 50 rows in the DOM
+  const isVirtual = currentData.length > 50;
+
+  const rowVirtualizer = useWindowVirtualizer({
+    count: currentData.length,
+    estimateSize: () => 48, // approx row height
+    overscan: 10,
+    scrollMargin: tableWrapperRef.current?.offsetTop ?? 0,
+  });
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+  const paddingBottom = virtualItems.length > 0 ? rowVirtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end : 0;
+
   return (
     <div
+      ref={tableWrapperRef}
       className="overflow-hidden border border-secondary-200 dark:border-secondary-700 bg-white dark:bg-secondary-900"
       style={{ borderRadius: 'var(--radius)' }}
       role="region"
@@ -583,50 +625,65 @@ export const DataTable = React.memo(function DataTableInner<T>({
                 </td>
               </tr>
             ) : (
-              currentData.map((row) => {
-                const rowId = keyExtractor(row);
-                const isSelected = internalSelectedRows.has(rowId);
-                return (
-                  <tr
-                    key={rowId}
-                    role="row"
-                    aria-selected={onSelectionChange ? isSelected : undefined}
-                    className={`transition-colors duration-150 ${onRowClick ? 'cursor-pointer hover:bg-secondary-50 dark:hover:bg-secondary-800' : ''} ${
-                      isSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''
-                    }`}
-                    onClick={() => onRowClick?.(row)}
-                    tabIndex={onRowClick ? 0 : undefined}
-                    onKeyDown={onRowClick ? (e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        onRowClick(row);
-                      }
-                    } : undefined}
-                  >
-                    {onSelectionChange && (
-                      <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleSelectRow(rowId)}
-                          className="h-4 w-4 rounded border-secondary-300 dark:border-secondary-600 text-primary-600 focus:ring-primary-500"
-                          aria-label={`Select row ${rowId}`}
-                        />
-                      </td>
-                    )}
-                    {columns.map((column) => (
-                      <td
-                        key={column.key}
-                        className={`whitespace-nowrap px-2 py-1.5 lg:px-3 lg:py-2 text-xs text-secondary-900 dark:text-secondary-100 ${
-                          alignClasses[column.align || 'left']
-                        } ${column.className || ''}`}
-                      >
-                        {getCellValue(row, column.accessor)}
-                      </td>
-                    ))}
+              <>
+                {isVirtual && paddingTop > 0 && (
+                  <tr>
+                    <td style={{ height: `${paddingTop}px` }} colSpan={totalCols} />
                   </tr>
-                );
-              })
+                )}
+                {(isVirtual ? virtualItems : currentData.map((_, i) => ({ index: i }))).map((virtualRow) => {
+                  const row = currentData[virtualRow.index];
+                  const rowId = keyExtractor(row);
+                  const isSelected = internalSelectedRows.has(rowId);
+                  return (
+                    <tr
+                      key={rowId}
+                      ref={isVirtual ? rowVirtualizer.measureElement : null}
+                      data-index={virtualRow.index}
+                      role="row"
+                      aria-selected={onSelectionChange ? isSelected : undefined}
+                      className={`transition-colors duration-150 ${onRowClick ? 'cursor-pointer hover:bg-secondary-50 dark:hover:bg-secondary-800' : ''} ${
+                        isSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''
+                      }`}
+                      onClick={() => onRowClick?.(row)}
+                      tabIndex={onRowClick ? 0 : undefined}
+                      onKeyDown={onRowClick ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onRowClick(row);
+                        }
+                      } : undefined}
+                    >
+                      {onSelectionChange && (
+                        <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleSelectRow(rowId)}
+                            className="h-4 w-4 rounded border-secondary-300 dark:border-secondary-600 text-primary-600 focus:ring-primary-500"
+                            aria-label={`Select row ${rowId}`}
+                          />
+                        </td>
+                      )}
+                      {columns.map((column) => (
+                        <td
+                          key={column.key}
+                          className={`whitespace-nowrap px-2 py-1.5 lg:px-3 lg:py-2 text-xs text-secondary-900 dark:text-secondary-100 ${
+                            alignClasses[column.align || 'left']
+                          } ${column.className || ''}`}
+                        >
+                          {getCellValue(row, column.accessor)}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+                {isVirtual && paddingBottom > 0 && (
+                  <tr>
+                    <td style={{ height: `${paddingBottom}px` }} colSpan={totalCols} />
+                  </tr>
+                )}
+              </>
             )}
           </tbody>
         </table>

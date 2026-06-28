@@ -1,6 +1,6 @@
 import { ArrowPathIcon, ChevronUpDownIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { useQuery } from '@tanstack/react-query';
-import { FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTenantConfig } from '../../hooks/useTenantConfig';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { AreaChart } from '../../components/charts/AreaChart';
@@ -58,8 +58,6 @@ const periodOptions: { value: ThreeSixtyPeriod; label: string }[] = [
   { value: 'last12', label: 'Last 12 Months' },
 ];
 
-// Short labels used inside KPI tiles/rows so the period-scoped figures read
-// correctly (e.g. "This Week Sales" instead of a fixed "Current Year Sales").
 const periodShortLabels: Record<ThreeSixtyPeriod, string> = {
   today: 'Today',
   yesterday: 'Yesterday',
@@ -87,7 +85,7 @@ const allEntityLabels: Record<Tab, string> = {
 const chartData = <T extends object>(value: T[] | null | undefined): ChartDatum[] =>
   (value ?? []) as ChartDatum[];
 
-function EntitySearchSelect({
+const EntitySearchSelect = React.memo(function EntitySearchSelect({
   type,
   value,
   placeholder,
@@ -274,7 +272,7 @@ function EntitySearchSelect({
       )}
     </div>
   );
-}
+});
 
 function asText(value: unknown, fallback = '-') {
   if (value === null || value === undefined || value === '') return fallback;
@@ -300,7 +298,7 @@ function trendText(value: number | null | undefined) {
   return `${value >= 0 ? '+' : ''}${fmtPct(value)} vs prior period`;
 }
 
-function KpiTile({
+const KpiTile = React.memo(function KpiTile({
   title,
   value,
   subtext,
@@ -324,9 +322,9 @@ function KpiTile({
       {subtext && <p className="mt-1 text-xs text-secondary-500">{subtext}</p>}
     </div>
   );
-}
+});
 
-function ProfileCard({ activeTab, report }: { activeTab: Tab; report: Report }) {
+const ProfileCard = React.memo(function ProfileCard({ activeTab, report }: { activeTab: Tab; report: Report }) {
   const { showSaltColumn } = useTenantConfig();
   const profile = report.profile;
   const title = asText(profile.name);
@@ -343,79 +341,152 @@ function ProfileCard({ activeTab, report }: { activeTab: Tab; report: Report }) 
     activeTab === 'supplier' ? 'S' :
     activeTab === 'route' ? 'R' :
     activeTab === 'city' ? 'A' : 'T';
-  const fields: Array<[string, unknown]> =
-    activeTab === 'item'
-      ? [
+
+  type FieldGroup = { title: string; fields: Array<[string, unknown]> };
+  let groups: FieldGroup[] = [];
+
+  if (activeTab === 'item') {
+    groups = [
+      {
+        title: 'General',
+        fields: [
           ['Category', profile.category],
           ['Brand', profile.brand],
           ['Company', profile.companyDisplay ?? profile.company],
-          ...(showSaltColumn ? [['Salt', profile.saltDisplay ?? profile.salt] as [string, unknown]] : []),
+        ],
+      },
+      {
+        title: 'Classification',
+        fields: [
           ['Group', profile.productGroupDisplay ?? profile.productGroup],
           ['HSN Code', profile.hsnCode],
-          ['UOM', profile.uomDisplay ?? profile.uom],
+          ...(showSaltColumn ? [['Salt', profile.saltDisplay ?? profile.salt] as [string, unknown]] : []),
+        ],
+      },
+      {
+        title: 'Pricing',
+        fields: [
           ['MRP', fmtCurrency(asNumber(profile.mrp))],
           ['Selling Price', fmtCurrency(asNumber(profile.sellingPrice))],
+        ],
+      },
+      {
+        title: 'Inventory',
+        fields: [
+          ['UOM', profile.uomDisplay ?? profile.uom],
           ['Last Purchase', fmtDate(profile.lastPurchaseDate as string | null | undefined)],
-        ]
-      : activeTab === 'customer'
-        ? [
-            ['Customer Type', profile.type],
-            ['GST No', profile.gstNo],
-            ['Credit Limit', fmtCurrency(asNumber(profile.creditLimit))],
-            ['Credit Days', profile.creditDays ? `${profile.creditDays} Days` : '-'],
-            ['Sales Person', profile.salesPerson],
-            ['Last Invoice', fmtDate(profile.lastInvoiceDate as string | null | undefined)],
-          ]
-        : activeTab === 'supplier'
-          ? [
-              ['Supplier Type', profile.type],
-              ['GST No', profile.gstNo],
-              ['Payment Terms', profile.paymentTerms],
-              ['Avg Lead Time', profile.avgLeadTimeDays ? `${fmt(asNumber(profile.avgLeadTimeDays), 1)} Days` : '-'],
-              ['Contact Person', profile.contactPerson],
-              ['Last Purchase', fmtDate(profile.lastPurchaseDate as string | null | undefined)],
-            ]
-          : [];
+        ],
+      },
+    ];
+  } else if (activeTab === 'customer') {
+    groups = [
+      {
+        title: 'General',
+        fields: [
+          ['Customer Type', profile.type],
+          ['GST No', profile.gstNo],
+          ['Sales Person', profile.salesPerson],
+        ],
+      },
+      {
+        title: 'Financial',
+        fields: [
+          ['Credit Limit', fmtCurrency(asNumber(profile.creditLimit))],
+          ['Credit Days', profile.creditDays ? `${profile.creditDays} Days` : '-'],
+        ],
+      },
+      {
+        title: 'Activity',
+        fields: [
+          ['Last Invoice', fmtDate(profile.lastInvoiceDate as string | null | undefined)],
+        ],
+      },
+    ];
+  } else if (activeTab === 'supplier') {
+    groups = [
+      {
+        title: 'General',
+        fields: [
+          ['Supplier Type', profile.type],
+          ['GST No', profile.gstNo],
+          ['Contact Person', profile.contactPerson],
+        ],
+      },
+      {
+        title: 'Commercial',
+        fields: [
+          ['Payment Terms', profile.paymentTerms],
+          ['Avg Lead Time', profile.avgLeadTimeDays ? `${fmt(asNumber(profile.avgLeadTimeDays), 1)} Days` : '-'],
+        ],
+      },
+      {
+        title: 'Activity',
+        fields: [
+          ['Last Purchase', fmtDate(profile.lastPurchaseDate as string | null | undefined)],
+        ],
+      },
+    ];
+  }
 
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_2fr]">
       <Card>
         <div className="flex items-center gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-primary-50 text-2xl font-bold text-primary-700">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-2xl font-bold text-primary-700">
             {tabIcon}
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-secondary-950">{title}</h2>
-            <p className="text-sm text-secondary-500">
+          <div className="min-w-0">
+            <h2 className="truncate text-xl font-bold text-secondary-950" title={title}>{title}</h2>
+            <p className="truncate text-sm text-secondary-500">
               {codeLabel}: <span className="font-semibold text-secondary-800">{asText(profile.code)}</span>
             </p>
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap gap-2">
               <Badge variant="default" size="sm">360 View</Badge>
               <Badge variant="success" size="sm">Marg-backed</Badge>
             </div>
           </div>
         </div>
       </Card>
-      <Card>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {fields.map(([label, value]) => (
-            <div key={String(label)} className="rounded-lg bg-secondary-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-secondary-500">{label}</p>
-              <p className="mt-1 text-sm font-semibold text-secondary-900">{asText(value)}</p>
+      
+      <div className="grid gap-4 md:grid-cols-2">
+        {groups.map((group) => (
+          <Card key={group.title} padding="sm">
+            <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">{group.title}</h3>
+            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+              {group.fields.map(([label, value]) => (
+                <div key={String(label)}>
+                  <p className="text-xs font-medium text-secondary-500">{label}</p>
+                  <p className="truncate text-sm font-semibold text-secondary-900" title={asText(value)}>{asText(value)}</p>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </Card>
+          </Card>
+        ))}
+        {groups.length === 0 && (
+          <Card className="col-span-full flex items-center justify-center py-8">
+            <p className="text-sm text-secondary-500">No additional metadata available</p>
+          </Card>
+        )}
+      </div>
     </div>
   );
-}
+});
 
-function ItemReport({ report, periodLabel }: { report: Item360Report; periodLabel: string }) {
+const ItemReport = React.memo(function ItemReport({ report, periodLabel }: { report: Item360Report; periodLabel: string }) {
   const k = report.kpis;
   const stockAgeing = report.tables.stockAgeing ?? [];
   const openPurchaseOrders = report.tables.openPurchaseOrders ?? [];
+  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'ageing' | 'buyers'>('overview');
+
+  const tabs = [
+    { key: 'overview', label: 'Overview & Charts' },
+    { key: 'orders', label: 'Open Purchase Orders' },
+    { key: 'ageing', label: 'Ageing & Expiry' },
+    { key: 'buyers', label: 'Top Buyers' },
+  ] as const;
+
   return (
-    <>
+    <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiTile title="Current Stock" value={fmt(k.currentStock)} subtext={`Cover: ${k.daysStockCover == null ? '-' : `${fmt(k.daysStockCover, 1)} days`}`} />
         <KpiTile title={`${periodLabel} Sales`} value={fmtCurrency(k.currentYearSalesValue)} subtext={trendText(k.yoySalesChangePct)} tone={(k.yoySalesChangePct ?? 0) >= 0 ? 'good' : 'warn'} />
@@ -424,24 +495,24 @@ function ItemReport({ report, periodLabel }: { report: Item360Report; periodLabe
       </div>
 
       <div className="grid gap-4 xl:grid-cols-3">
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Sales Insight</h3>
+        <Card padding="sm">
+          <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Sales Insight</h3>
           <MetricTable rows={[
             [`${periodLabel} Qty`, fmt(k.currentYearSalesQty)],
             [`${periodLabel} Value`, fmtCurrency(k.currentYearSalesValue)],
             ['YoY Change', <span className={trendClass(k.yoySalesChangePct)}>{trendText(k.yoySalesChangePct)}</span>],
           ]} />
         </Card>
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Purchase Insight</h3>
+        <Card padding="sm">
+          <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Purchase Insight</h3>
           <MetricTable rows={[
             [`${periodLabel} Qty`, fmt(k.currentYearPurchaseQty)],
             [`${periodLabel} Value`, fmtCurrency(k.currentYearPurchaseValue)],
             ['Open PO Count', fmt(k.openPoCount)],
           ]} />
         </Card>
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Stock Insight</h3>
+        <Card padding="sm">
+          <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Stock Insight</h3>
           <MetricTable rows={[
             ['Stock Value', fmtCurrency(k.stockValue)],
             ['Days Stock Cover', k.daysStockCover == null ? '-' : `${fmt(k.daysStockCover, 1)} Days`],
@@ -453,95 +524,134 @@ function ItemReport({ report, periodLabel }: { report: Item360Report; periodLabe
         </Card>
       </div>
 
-      <SimpleTable
-        title="Open Purchase Orders"
-        headers={['PO No', 'PO Date', 'Supplier', 'Ordered', 'Received', 'Pending', 'Expected', 'Status']}
-        rows={openPurchaseOrders.map((row) => [
-          asText(row.order_number),
-          fmtDate(row.order_date as string | null | undefined),
-          asText(row.supplier_name),
-          fmt(asNumber(row.ordered_qty)),
-          fmt(asNumber(row.received_qty)),
-          fmt(asNumber(row.pending_qty)),
-          fmtDate(row.expected_date as string | null | undefined),
-          asText(row.status),
-        ])}
-      />
+      <div className="mt-8">
+        <div className="border-b border-secondary-200">
+          <nav className="-mb-px flex gap-6" aria-label="Item Tabs">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors ${
+                  activeTab === tab.key
+                    ? 'border-primary-500 text-primary-600'
+                    : 'border-transparent text-secondary-500 hover:border-secondary-300 hover:text-secondary-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
 
-      <ChartGrid
-        leftTitle="Monthly Sales Trend"
-        left={<AreaChart data={chartData(report.charts.monthlyTrend)} xAxisKey="month" areas={[
-          { dataKey: 'sales_value', name: 'Sales', color: '#2563eb' },
-        ]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
-        rightTitle="Purchase vs Sales"
-        right={<AreaChart data={chartData(report.charts.monthlyTrend)} xAxisKey="month" areas={[
-          { dataKey: 'purchase_value', name: 'Purchase', color: '#f97316' },
-          { dataKey: 'sales_value', name: 'Sales', color: '#2563eb' },
-        ]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
-      />
+        <div className="pt-6">
+          {activeTab === 'overview' && (
+            <div className="space-y-6">
+              <ChartGrid
+                leftTitle="Monthly Sales Trend"
+                left={<AreaChart data={chartData(report.charts.monthlyTrend)} xAxisKey="month" areas={[
+                  { dataKey: 'sales_value', name: 'Sales', color: '#2563eb' },
+                ]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
+                rightTitle="Purchase vs Sales"
+                right={<AreaChart data={chartData(report.charts.monthlyTrend)} xAxisKey="month" areas={[
+                  { dataKey: 'purchase_value', name: 'Purchase', color: '#f97316' },
+                  { dataKey: 'sales_value', name: 'Sales', color: '#2563eb' },
+                ]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
+              />
+              <ChartGrid
+                leftTitle="Stock Movement"
+                left={<BarChart data={chartData(report.charts.stockMovement)} xAxisKey="month" bars={[
+                  { dataKey: 'receipt_qty', name: 'Receipts', color: '#16a34a' },
+                  { dataKey: 'issue_qty', name: 'Issues', color: '#dc2626' },
+                ]} height={280} formatYAxis={fmt} formatTooltip={fmt} />}
+                rightTitle="Location Wise Sales"
+                right={<BarChart data={chartData(report.charts.locationSales)} xAxisKey="location" bars={[{ dataKey: 'sales_value', name: 'Sales', color: '#0f766e' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
+              />
+            </div>
+          )}
 
-      <ChartGrid
-        leftTitle="Stock Movement"
-        left={<BarChart data={chartData(report.charts.stockMovement)} xAxisKey="month" bars={[
-          { dataKey: 'receipt_qty', name: 'Receipts', color: '#16a34a' },
-          { dataKey: 'issue_qty', name: 'Issues', color: '#dc2626' },
-        ]} height={280} formatYAxis={fmt} formatTooltip={fmt} />}
-        rightTitle="Location Wise Sales"
-        right={<BarChart data={chartData(report.charts.locationSales)} xAxisKey="location" bars={[{ dataKey: 'sales_value', name: 'Sales', color: '#0f766e' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
-      />
+          {activeTab === 'orders' && (
+            <SimpleTable
+              title="Open Purchase Orders"
+              headers={['PO No', 'PO Date', 'Supplier', 'Ordered', 'Received', 'Pending', 'Expected', 'Status']}
+              rows={openPurchaseOrders.map((row) => [
+                asText(row.order_number),
+                fmtDate(row.order_date as string | null | undefined),
+                asText(row.supplier_name),
+                fmt(asNumber(row.ordered_qty)),
+                fmt(asNumber(row.received_qty)),
+                fmt(asNumber(row.pending_qty)),
+                fmtDate(row.expected_date as string | null | undefined),
+                asText(row.status),
+              ])}
+            />
+          )}
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <SimpleTable
-          title="Stock Ageing Analysis"
-          headers={['Age Bucket', 'Qty', 'Share', 'Value', 'Status']}
-          rows={stockAgeing.map((row) => [
-            asText(row.bucket),
-            fmt(asNumber(row.quantity)),
-            fmtPct(asNumber(row.share)),
-            fmtCurrency(asNumber(row.value)),
-            asText(row.status),
-          ])}
-        />
-        <SimpleTable
-          title="Near Expiry Stock"
-          headers={['Batch No', 'Qty', 'Expiry Date', 'Days Left', 'Status']}
-          rows={report.tables.batches.map((row) => [
-            asText(row.batch_number),
-            fmt(asNumber(row.quantity)),
-            fmtDate(row.expiry_date as string | null | undefined),
-            row.days_left == null ? '-' : fmt(asNumber(row.days_left)),
-            row.days_left != null && asNumber(row.days_left) <= 30 ? 'Critical' : 'Monitor',
-          ])}
-        />
+          {activeTab === 'ageing' && (
+            <div className="grid gap-6 xl:grid-cols-2">
+              <SimpleTable
+                title="Stock Ageing Analysis"
+                headers={['Age Bucket', 'Qty', 'Share', 'Value', 'Status']}
+                rows={stockAgeing.map((row) => [
+                  asText(row.bucket),
+                  fmt(asNumber(row.quantity)),
+                  fmtPct(asNumber(row.share)),
+                  fmtCurrency(asNumber(row.value)),
+                  asText(row.status),
+                ])}
+              />
+              <SimpleTable
+                title="Near Expiry Stock"
+                headers={['Batch No', 'Qty', 'Expiry Date', 'Days Left', 'Status']}
+                rows={report.tables.batches.map((row) => [
+                  asText(row.batch_number),
+                  fmt(asNumber(row.quantity)),
+                  fmtDate(row.expiry_date as string | null | undefined),
+                  row.days_left == null ? '-' : fmt(asNumber(row.days_left)),
+                  row.days_left != null && asNumber(row.days_left) <= 30 ? 'Critical' : 'Monitor',
+                ])}
+              />
+            </div>
+          )}
+
+          {activeTab === 'buyers' && (
+            <ChartGrid
+              leftTitle="Top Buyers Contribution"
+              left={<BarChart data={chartData(report.tables.topBuyers)} xAxisKey="name" bars={[{ dataKey: 'value', name: 'Sale Value', color: '#7c3aed' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
+              rightTitle="Top Buyers - Current Month"
+              right={<div className="-m-4"><ContributionTable title="Top Buyers - Current Month" rows={report.tables.topBuyers} compact /></div>}
+            />
+          )}
+        </div>
       </div>
-
-      <ChartGrid
-        leftTitle="Top Buyers Contribution"
-        left={<BarChart data={chartData(report.tables.topBuyers)} xAxisKey="name" bars={[{ dataKey: 'value', name: 'Sale Value', color: '#7c3aed' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
-        rightTitle="Top Buyers - Current Month"
-        right={<div className="-m-4"><ContributionTable title="Top Buyers - Current Month" rows={report.tables.topBuyers} compact /></div>}
-      />
-
-    </>
+    </div>
   );
-}
+});
 
-function CustomerReport({ report, periodLabel }: { report: Customer360Report; periodLabel: string }) {
+const CustomerReport = React.memo(function CustomerReport({ report, periodLabel }: { report: Customer360Report; periodLabel: string }) {
   const k = report.kpis;
   const returnInsight = asRecord(report.tables.returnInsight);
   const profitability = asRecord(report.tables.profitability);
   const loyalty = asRecord(report.tables.loyalty);
+  const [activeTab, setActiveTab] = useState<'overview' | 'ageing' | 'items'>('overview');
+
+  const tabs = [
+    { key: 'overview', label: 'Overview & Charts' },
+    { key: 'ageing', label: 'Outstanding Ageing' },
+    { key: 'items', label: 'Top Items' },
+  ] as const;
+
   return (
-    <>
+    <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiTile title={`${periodLabel} Sales`} value={fmtCurrency(k.currentYearSales)} subtext={trendText(k.yoySalesChangePct)} tone={(k.yoySalesChangePct ?? 0) >= 0 ? 'good' : 'warn'} />
         <KpiTile title="Outstanding Amount" value={fmtCurrency(k.outstandingAmount)} subtext={`Overdue: ${fmtCurrency(k.overdueAmount)}`} tone={asNumber(k.overdueAmount) > 0 ? 'risk' : 'good'} />
         <KpiTile title={`${periodLabel} Invoices`} value={fmt(k.invoiceCount)} subtext={asNumber(k.invoiceCount) > 0 ? `Avg ${fmtCurrency(asNumber(k.currentYearSales) / asNumber(k.invoiceCount))}` : 'No invoices in period'} />
         <KpiTile title="Average Payment Days" value={fmt(k.averagePaymentDays)} subtext={k.lastPaymentAmount == null ? 'No recent payment' : `Last payment ${fmtCurrency(k.lastPaymentAmount)}`} tone={asNumber(k.averagePaymentDays) <= 45 ? 'good' : 'warn'} />
       </div>
+      
       <div className="grid gap-4 xl:grid-cols-3">
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Sales Growth Insight</h3>
+        <Card padding="sm">
+          <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Sales Growth Insight</h3>
           <MetricTable rows={[
             [`${periodLabel} Sales`, fmtCurrency(k.currentYearSales)],
             ['vs Prior Period', <span className={trendClass(k.yoySalesChangePct)}>{trendText(k.yoySalesChangePct)}</span>],
@@ -549,8 +659,8 @@ function CustomerReport({ report, periodLabel }: { report: Customer360Report; pe
             ['Avg Order Value', asNumber(k.invoiceCount) > 0 ? fmtCurrency(asNumber(k.currentYearSales) / asNumber(k.invoiceCount)) : '-'],
           ]} />
         </Card>
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Outstanding & Payment Insight</h3>
+        <Card padding="sm">
+          <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Outstanding & Payment Insight</h3>
           <MetricTable rows={[
             ['Total Outstanding', fmtCurrency(k.outstandingAmount)],
             ['Not Due', fmtCurrency(k.notDueAmount)],
@@ -563,82 +673,125 @@ function CustomerReport({ report, periodLabel }: { report: Customer360Report; pe
         </Card>
         <ScoreCard title="Customer Risk Score" score={asNumber(k.riskScore)} />
       </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <AgeingTable title="Outstanding Ageing" rows={report.ageing} countHeader="Invoice Count" />
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Outstanding Ageing Chart</h3>
-          <div className="mt-3">
-            <BarChart data={chartData(report.ageing)} xAxisKey="bucket" bars={[{ dataKey: 'amount', name: 'Outstanding', color: '#dc2626' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />
-          </div>
-        </Card>
-      </div>
-      <ChartGrid
-        leftTitle="Monthly Sales Trend"
-        left={<AreaChart data={chartData(report.charts.monthlyTrend)} xAxisKey="month" areas={[{ dataKey: 'sales_value', name: 'Sales', color: '#2563eb' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
-        rightTitle="Payment Delay Trend"
-        right={<AreaChart data={chartData(report.charts.paymentDelayTrend)} xAxisKey="month" areas={[{ dataKey: 'delay_days', name: 'Delay Days', color: '#f97316' }]} height={280} formatYAxis={fmt} formatTooltip={fmt} />}
-      />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <ContributionTable title="Top Purchased Items" rows={report.tables.topItems} showItemDetails />
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Top Items Contribution</h3>
-          <div className="mt-3">
-            <BarChart data={chartData(report.tables.topItems)} xAxisKey="name" bars={[{ dataKey: 'value', name: 'Sale Value', color: '#7c3aed' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />
-          </div>
-        </Card>
-      </div>
-      <MappingDiagnostics diagnostics={report.diagnostics?.unmappedItems ?? []} />
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Return Insight</h3>
-          <MetricTable rows={[
-            ['Return Value', fmtCurrency(asNumber(returnInsight.returnValue))],
-            ['Return Qty', fmt(asNumber(returnInsight.returnQty))],
-            ['Return Count', fmt(asNumber(returnInsight.returnCount))],
-            ['Return %', returnInsight.returnPct == null ? '-' : fmtPct(asNumber(returnInsight.returnPct))],
-          ]} />
-        </Card>
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Profitability Insight</h3>
-          <MetricTable rows={[
-            ['Sales Value', fmtCurrency(asNumber(profitability.salesValue))],
-            ['Estimated Cost', fmtCurrency(asNumber(profitability.estimatedCost))],
-            ['Gross Margin', fmtCurrency(asNumber(profitability.grossMargin))],
-            ['Margin %', profitability.marginPct == null ? '-' : fmtPct(asNumber(profitability.marginPct))],
-          ]} />
-        </Card>
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Loyalty Insight</h3>
-          <MetricTable rows={[
-            ['Invoice Count', fmt(asNumber(loyalty.invoiceCount))],
-            ['Purchase Frequency', `${fmt(asNumber(loyalty.purchaseFrequency), 3)} / day`],
-            ['Inactive Days', loyalty.inactiveDays == null ? '-' : fmt(asNumber(loyalty.inactiveDays))],
-            ['Last Invoice', fmtDate(loyalty.lastInvoiceDate as string | null | undefined)],
-            ['Last Payment', fmtDate(loyalty.lastPaymentDate as string | null | undefined)],
-            ['Average Payment Days', fmt(asNumber(loyalty.averagePaymentDays))],
-          ]} />
-        </Card>
-      </div>
-    </>
-  );
-}
 
-function SupplierReport({ report, periodLabel }: { report: Supplier360Report; periodLabel: string }) {
+      <div className="mt-8">
+        <div className="border-b border-secondary-200">
+          <nav className="-mb-px flex gap-6" aria-label="Customer Tabs">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors ${
+                  activeTab === tab.key
+                    ? 'border-primary-500 text-primary-600'
+                    : 'border-transparent text-secondary-500 hover:border-secondary-300 hover:text-secondary-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        <div className="pt-6">
+          {activeTab === 'overview' && (
+            <div className="space-y-6">
+              <ChartGrid
+                leftTitle="Monthly Sales Trend"
+                left={<AreaChart data={chartData(report.charts.monthlyTrend)} xAxisKey="month" areas={[{ dataKey: 'sales_value', name: 'Sales', color: '#2563eb' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
+                rightTitle="Payment Delay Trend"
+                right={<AreaChart data={chartData(report.charts.paymentDelayTrend)} xAxisKey="month" areas={[{ dataKey: 'delay_days', name: 'Delay Days', color: '#f97316' }]} height={280} formatYAxis={fmt} formatTooltip={fmt} />}
+              />
+              <div className="grid gap-4 xl:grid-cols-3">
+                <Card padding="sm">
+                  <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Return Insight</h3>
+                  <MetricTable rows={[
+                    ['Return Value', fmtCurrency(asNumber(returnInsight.returnValue))],
+                    ['Return Qty', fmt(asNumber(returnInsight.returnQty))],
+                    ['Return Count', fmt(asNumber(returnInsight.returnCount))],
+                    ['Return %', returnInsight.returnPct == null ? '-' : fmtPct(asNumber(returnInsight.returnPct))],
+                  ]} />
+                </Card>
+                <Card padding="sm">
+                  <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Profitability Insight</h3>
+                  <MetricTable rows={[
+                    ['Sales Value', fmtCurrency(asNumber(profitability.salesValue))],
+                    ['Estimated Cost', fmtCurrency(asNumber(profitability.estimatedCost))],
+                    ['Gross Margin', fmtCurrency(asNumber(profitability.grossMargin))],
+                    ['Margin %', profitability.marginPct == null ? '-' : fmtPct(asNumber(profitability.marginPct))],
+                  ]} />
+                </Card>
+                <Card padding="sm">
+                  <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Loyalty Insight</h3>
+                  <MetricTable rows={[
+                    ['Invoice Count', fmt(asNumber(loyalty.invoiceCount))],
+                    ['Purchase Frequency', `${fmt(asNumber(loyalty.purchaseFrequency), 3)} / day`],
+                    ['Inactive Days', loyalty.inactiveDays == null ? '-' : fmt(asNumber(loyalty.inactiveDays))],
+                    ['Last Invoice', fmtDate(loyalty.lastInvoiceDate as string | null | undefined)],
+                    ['Last Payment', fmtDate(loyalty.lastPaymentDate as string | null | undefined)],
+                    ['Average Payment Days', fmt(asNumber(loyalty.averagePaymentDays))],
+                  ]} />
+                </Card>
+              </div>
+              <MappingDiagnostics diagnostics={report.diagnostics?.unmappedItems ?? []} />
+            </div>
+          )}
+
+          {activeTab === 'ageing' && (
+            <div className="grid gap-4 xl:grid-cols-2">
+              <AgeingTable title="Outstanding Ageing" rows={report.ageing} countHeader="Invoice Count" />
+              <Card>
+                <h3 className="text-base font-semibold text-secondary-950">Outstanding Ageing Chart</h3>
+                <div className="mt-3">
+                  <BarChart data={chartData(report.ageing)} xAxisKey="bucket" bars={[{ dataKey: 'amount', name: 'Outstanding', color: '#dc2626' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeTab === 'items' && (
+            <div className="grid gap-4 xl:grid-cols-2">
+              <ContributionTable title="Top Purchased Items" rows={report.tables.topItems} showItemDetails />
+              <Card>
+                <h3 className="text-base font-semibold text-secondary-950">Top Items Contribution</h3>
+                <div className="mt-3">
+                  <BarChart data={chartData(report.tables.topItems)} xAxisKey="name" bars={[{ dataKey: 'value', name: 'Sale Value', color: '#7c3aed' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />
+                </div>
+              </Card>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const SupplierReport = React.memo(function SupplierReport({ report, periodLabel }: { report: Supplier360Report; periodLabel: string }) {
   const k = report.kpis;
   const delivery = asRecord(report.tables.deliveryPerformance);
   const quality = asRecord(report.tables.quality);
   const priceVariance = asRecord(report.tables.priceVariance);
+  const [activeTab, setActiveTab] = useState<'overview' | 'ageing' | 'items' | 'orders'>('overview');
+
+  const tabs = [
+    { key: 'overview', label: 'Overview & Charts' },
+    { key: 'ageing', label: 'Payable Ageing' },
+    { key: 'items', label: 'Top Items Supplied' },
+    { key: 'orders', label: 'Open Purchase Orders' },
+  ] as const;
+
   return (
-    <>
+    <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiTile title={`${periodLabel} Purchase`} value={fmtCurrency(k.currentYearPurchase)} subtext={trendText(k.yoyPurchaseChangePct)} tone={(k.yoyPurchaseChangePct ?? 0) >= 0 ? 'good' : 'warn'} />
         <KpiTile title="Payable Amount" value={fmtCurrency(k.payableAmount)} subtext={`Overdue: ${fmtCurrency(k.overduePayable)}`} tone={asNumber(k.overduePayable) > 0 ? 'risk' : 'good'} />
         <KpiTile title="Open PO Value" value={fmtCurrency(k.openPoValue)} subtext={`${fmt(k.openPoCount)} open orders`} tone={asNumber(k.openPoValue) > 0 ? 'warn' : 'good'} />
         <KpiTile title="On-time Delivery" value={k.onTimeDeliveryPct == null ? '-' : fmtPct(k.onTimeDeliveryPct)} subtext={`Score: ${fmt(k.score)}`} tone={asNumber(k.score) >= 75 ? 'good' : 'warn'} />
       </div>
+
       <div className="grid gap-4 xl:grid-cols-3">
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Purchase Growth Insight</h3>
+        <Card padding="sm">
+          <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Purchase Growth Insight</h3>
           <MetricTable rows={[
             [`${periodLabel} Purchase`, fmtCurrency(k.currentYearPurchase)],
             ['vs Prior Period', <span className={trendClass(k.yoyPurchaseChangePct)}>{trendText(k.yoyPurchaseChangePct)}</span>],
@@ -646,8 +799,8 @@ function SupplierReport({ report, periodLabel }: { report: Supplier360Report; pe
             ['Avg Invoice Value', asNumber(k.purchaseInvoiceCount) > 0 ? fmtCurrency(asNumber(k.currentYearPurchase) / asNumber(k.purchaseInvoiceCount)) : '-'],
           ]} />
         </Card>
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Payable Insight</h3>
+        <Card padding="sm">
+          <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Payable Insight</h3>
           <MetricTable rows={[
             ['Total Payable', fmtCurrency(k.payableAmount)],
             ['Overdue', fmtCurrency(k.overduePayable)],
@@ -658,81 +811,115 @@ function SupplierReport({ report, periodLabel }: { report: Supplier360Report; pe
         </Card>
         <ScoreCard title="Supplier Performance Score" score={asNumber(k.score)} />
       </div>
-      <ChartGrid
-        leftTitle="Payable Ageing Chart"
-        left={<BarChart data={chartData(report.ageing)} xAxisKey="bucket" bars={[{ dataKey: 'amount', name: 'Payable', color: '#f97316' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
-        rightTitle="Monthly Purchase Trend"
-        right={<AreaChart data={chartData(report.charts.monthlyTrend)} xAxisKey="month" areas={[{ dataKey: 'purchase_value', name: 'Purchase', color: '#0f766e' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
-      />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <AgeingTable title="Payable Ageing" rows={report.ageing} countHeader="Bill Count" />
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">On-time Delivery Trend</h3>
-          <div className="mt-3">
-            <AreaChart data={chartData(report.charts.deliveryTrend)} xAxisKey="month" areas={[{ dataKey: 'on_time_delivery_pct', name: 'On-time %', color: '#2563eb' }]} height={280} formatYAxis={fmtPct} formatTooltip={fmtPct} />
-          </div>
-        </Card>
+
+      <div className="mt-8">
+        <div className="border-b border-secondary-200">
+          <nav className="-mb-px flex gap-6" aria-label="Supplier Tabs">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors ${
+                  activeTab === tab.key
+                    ? 'border-primary-500 text-primary-600'
+                    : 'border-transparent text-secondary-500 hover:border-secondary-300 hover:text-secondary-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        <div className="pt-6">
+          {activeTab === 'overview' && (
+            <div className="space-y-6">
+              <ChartGrid
+                leftTitle="Monthly Purchase Trend"
+                left={<AreaChart data={chartData(report.charts.monthlyTrend)} xAxisKey="month" areas={[{ dataKey: 'purchase_value', name: 'Purchase', color: '#0f766e' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />}
+                rightTitle="On-time Delivery Trend"
+                right={<AreaChart data={chartData(report.charts.deliveryTrend)} xAxisKey="month" areas={[{ dataKey: 'on_time_delivery_pct', name: 'On-time %', color: '#2563eb' }]} height={280} formatYAxis={fmtPct} formatTooltip={fmtPct} />}
+              />
+              <div className="grid gap-4 xl:grid-cols-3">
+                <Card padding="sm">
+                  <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Delivery Performance</h3>
+                  <MetricTable rows={[
+                    ['On-time Delivery', delivery.onTimeDeliveryPct == null ? '-' : fmtPct(asNumber(delivery.onTimeDeliveryPct))],
+                    ['Delayed Deliveries', fmt(asNumber(delivery.delayedDeliveries))],
+                    ['Average Lead Time', delivery.averageLeadTimeDays == null ? '-' : `${fmt(asNumber(delivery.averageLeadTimeDays), 1)} Days`],
+                    ['Best Delivery Time', delivery.bestDeliveryTimeDays == null ? '-' : `${fmt(asNumber(delivery.bestDeliveryTimeDays), 1)} Days`],
+                    ['Short Supply %', delivery.shortSupplyPct == null ? '-' : fmtPct(asNumber(delivery.shortSupplyPct))],
+                    ['Status', asText(delivery.status)],
+                  ]} />
+                </Card>
+                <Card padding="sm">
+                  <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Quality & Rejection</h3>
+                  <MetricTable rows={[
+                    ['Rejection Rate', quality.rejectionRatePct == null ? '-' : fmtPct(asNumber(quality.rejectionRatePct))],
+                    ['Short Supply Cases', fmt(asNumber(quality.shortSupplyCases))],
+                    ['Damaged Qty', fmt(asNumber(quality.damagedQty))],
+                    ['Last QC Issue', fmtDate(quality.lastQcIssueDate as string | null | undefined)],
+                    ['Status', asText(quality.status)],
+                  ]} />
+                </Card>
+                <Card padding="sm">
+                  <h3 className="mb-3 text-sm font-bold text-secondary-900 border-b border-secondary-100 pb-2">Price Variance</h3>
+                  <MetricTable rows={[
+                    ['Avg Rate Increase', priceVariance.avgRateIncreasePct == null ? '-' : fmtPct(asNumber(priceVariance.avgRateIncreasePct))],
+                    ['Items With Price Increase', fmt(asNumber(priceVariance.itemsWithPriceIncrease))],
+                    ['Highest Variance Item', asText(priceVariance.highestVarianceItem)],
+                    ['Variance Amount', fmtCurrency(asNumber(priceVariance.varianceAmount))],
+                    ['Status', asText(priceVariance.status)],
+                  ]} />
+                </Card>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'ageing' && (
+            <div className="grid gap-4 xl:grid-cols-2">
+              <AgeingTable title="Payable Ageing" rows={report.ageing} countHeader="Bill Count" />
+              <Card>
+                <h3 className="text-base font-semibold text-secondary-950">Payable Ageing Chart</h3>
+                <div className="mt-3">
+                  <BarChart data={chartData(report.ageing)} xAxisKey="bucket" bars={[{ dataKey: 'amount', name: 'Payable', color: '#f97316' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeTab === 'items' && (
+            <div className="grid gap-4 xl:grid-cols-2">
+              <ContributionTable title="Top Items Supplied" rows={report.tables.topItems} showItemDetails />
+              <Card>
+                <h3 className="text-base font-semibold text-secondary-950">Top Items Purchase Contribution</h3>
+                <div className="mt-3">
+                  <BarChart data={chartData(report.tables.topItems)} xAxisKey="name" bars={[{ dataKey: 'value', name: 'Purchase Value', color: '#7c3aed' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeTab === 'orders' && (
+            <SimpleTable
+              title="Open Purchase Orders"
+              headers={['PO No', 'PO Date', 'PO Value', 'Received', 'Pending', 'Expected Date', 'Status']}
+              rows={report.tables.openOrders.map((row) => [
+                asText(row.order_number),
+                fmtDate(row.order_date as string | null | undefined),
+                fmtCurrency(asNumber(row.po_value)),
+                row.received_pct == null ? '-' : fmtPct(asNumber(row.received_pct)),
+                row.pending_pct == null ? '-' : fmtPct(asNumber(row.pending_pct)),
+                fmtDate(row.expected_date as string | null | undefined),
+                asText(row.status),
+              ])}
+            />
+          )}
+        </div>
       </div>
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Delivery Performance</h3>
-          <MetricTable rows={[
-            ['On-time Delivery', delivery.onTimeDeliveryPct == null ? '-' : fmtPct(asNumber(delivery.onTimeDeliveryPct))],
-            ['Delayed Deliveries', fmt(asNumber(delivery.delayedDeliveries))],
-            ['Average Lead Time', delivery.averageLeadTimeDays == null ? '-' : `${fmt(asNumber(delivery.averageLeadTimeDays), 1)} Days`],
-            ['Best Delivery Time', delivery.bestDeliveryTimeDays == null ? '-' : `${fmt(asNumber(delivery.bestDeliveryTimeDays), 1)} Days`],
-            ['Short Supply %', delivery.shortSupplyPct == null ? '-' : fmtPct(asNumber(delivery.shortSupplyPct))],
-            ['Status', asText(delivery.status)],
-          ]} />
-        </Card>
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Quality & Rejection</h3>
-          <MetricTable rows={[
-            ['Rejection Rate', quality.rejectionRatePct == null ? '-' : fmtPct(asNumber(quality.rejectionRatePct))],
-            ['Short Supply Cases', fmt(asNumber(quality.shortSupplyCases))],
-            ['Damaged Qty', fmt(asNumber(quality.damagedQty))],
-            ['Last QC Issue', fmtDate(quality.lastQcIssueDate as string | null | undefined)],
-            ['Status', asText(quality.status)],
-          ]} />
-        </Card>
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Price Variance</h3>
-          <MetricTable rows={[
-            ['Avg Rate Increase', priceVariance.avgRateIncreasePct == null ? '-' : fmtPct(asNumber(priceVariance.avgRateIncreasePct))],
-            ['Items With Price Increase', fmt(asNumber(priceVariance.itemsWithPriceIncrease))],
-            ['Highest Variance Item', asText(priceVariance.highestVarianceItem)],
-            ['Variance Amount', fmtCurrency(asNumber(priceVariance.varianceAmount))],
-            ['Status', asText(priceVariance.status)],
-          ]} />
-        </Card>
-      </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <ContributionTable title="Top Items Supplied" rows={report.tables.topItems} showItemDetails />
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Top Items Purchase Contribution</h3>
-          <div className="mt-3">
-            <BarChart data={chartData(report.tables.topItems)} xAxisKey="name" bars={[{ dataKey: 'value', name: 'Purchase Value', color: '#7c3aed' }]} height={280} formatYAxis={fmtCurrency} formatTooltip={fmtCurrency} />
-          </div>
-        </Card>
-      </div>
-      <div className="grid gap-4">
-        <SimpleTable
-          title="Open Purchase Orders"
-          headers={['PO No', 'PO Date', 'PO Value', 'Received', 'Pending', 'Expected Date', 'Status']}
-          rows={report.tables.openOrders.map((row) => [
-            asText(row.order_number),
-            fmtDate(row.order_date as string | null | undefined),
-            fmtCurrency(asNumber(row.po_value)),
-            row.received_pct == null ? '-' : fmtPct(asNumber(row.received_pct)),
-            row.pending_pct == null ? '-' : fmtPct(asNumber(row.pending_pct)),
-            fmtDate(row.expected_date as string | null | undefined),
-            asText(row.status),
-          ])}
-        />
-      </div>
-    </>
+    </div>
   );
-}
+});
 
 function MetricTable({ rows }: { rows: Array<[string, ReactNode]> }) {
   return (
@@ -751,7 +938,7 @@ function MetricTable({ rows }: { rows: Array<[string, ReactNode]> }) {
   );
 }
 
-function DimensionReport({ report, periodLabel }: { report: DimensionSalesReport; periodLabel: string }) {
+const DimensionReport = React.memo(function DimensionReport({ report, periodLabel }: { report: DimensionSalesReport; periodLabel: string }) {
   const k = report.kpis;
   return (
     <>
@@ -788,19 +975,24 @@ function DimensionReport({ report, periodLabel }: { report: DimensionSalesReport
       </div>
     </>
   );
-}
+});
 
-function SalesTeamReport({ report, periodLabel }: { report: SalesTeam360Report; periodLabel: string }) {
+const SalesTeamReport = React.memo(function SalesTeamReport({ report, periodLabel }: { report: SalesTeam360Report; periodLabel: string }) {
   const k = report.kpis;
   const ageing = report.ageing ?? [];
   const outstanding = report.tables.customerOutstanding ?? [];
   const total = asNumber(k.outstandingAmount);
   const overduePct = total > 0 ? asNumber(k.overdueAmount) / total * 100 : null;
+  const [activeTab, setActiveTab] = useState<'overview' | 'ageing' | 'outstanding'>('overview');
+
+  const tabs = [
+    { key: 'overview', label: 'Overview & Charts' },
+    { key: 'ageing', label: 'Outstanding Ageing' },
+    { key: 'outstanding', label: 'Customer Dues List' },
+  ] as const;
 
   return (
-    <>
-      <DimensionReport report={report} periodLabel={periodLabel} />
-
+    <div className="space-y-6">
       <div className="rounded-lg border border-secondary-200 bg-secondary-50/60 px-4 py-3">
         <h2 className="text-lg font-bold text-secondary-950">Customer Outstanding (Salesman-wise)</h2>
         <p className="text-sm text-secondary-500">
@@ -828,49 +1020,79 @@ function SalesTeamReport({ report, periodLabel }: { report: SalesTeam360Report; 
         />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <AgeingTable title="Outstanding Ageing" rows={ageing} countHeader="Bill Count" />
-        <Card>
-          <h3 className="text-base font-semibold text-secondary-950">Outstanding Ageing Chart</h3>
-          <div className="mt-3">
-            <BarChart
-              data={chartData(ageing)}
-              xAxisKey="bucket"
-              bars={[{ dataKey: 'amount', name: 'Outstanding', color: '#dc2626' }]}
-              height={280}
-              formatYAxis={fmtCurrency}
-              formatTooltip={fmtCurrency}
-            />
-          </div>
-        </Card>
+      <div className="mt-8">
+        <div className="border-b border-secondary-200">
+          <nav className="-mb-px flex gap-6" aria-label="Sales Team Tabs">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`whitespace-nowrap border-b-2 py-2 px-1 text-sm font-medium transition-colors ${
+                  activeTab === tab.key
+                    ? 'border-primary-500 text-primary-600'
+                    : 'border-transparent text-secondary-500 hover:border-secondary-300 hover:text-secondary-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        <div className="pt-6">
+          {activeTab === 'overview' && (
+            <DimensionReport report={report} periodLabel={periodLabel} />
+          )}
+
+          {activeTab === 'ageing' && (
+            <div className="grid gap-4 xl:grid-cols-2">
+              <AgeingTable title="Outstanding Ageing" rows={ageing} countHeader="Bill Count" />
+              <Card>
+                <h3 className="text-base font-semibold text-secondary-950">Outstanding Ageing Chart</h3>
+                <div className="mt-3">
+                  <BarChart
+                    data={chartData(ageing)}
+                    xAxisKey="bucket"
+                    bars={[{ dataKey: 'amount', name: 'Outstanding', color: '#dc2626' }]}
+                    height={280}
+                    formatYAxis={fmtCurrency}
+                    formatTooltip={fmtCurrency}
+                  />
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeTab === 'outstanding' && (
+            <Card>
+              <h3 className="text-base font-semibold text-secondary-950">Customer Outstanding Detail</h3>
+              <DataTable
+                minWidthClass="min-w-[920px]"
+                maxHeightClass="max-h-[32rem]"
+                headers={['Rank', 'Customer', 'Code', '0-30', '31-60', '61-90', '91+', 'Outstanding', 'Bills', 'Max Days', 'Share']}
+                rows={outstanding.map((row) => [
+                  fmt(row.rank),
+                  row.name,
+                  row.code || '-',
+                  fmtCurrency(asNumber(row.bucket_0_30)),
+                  fmtCurrency(asNumber(row.bucket_31_60)),
+                  fmtCurrency(asNumber(row.bucket_61_90)),
+                  fmtCurrency(asNumber(row.bucket_91_plus)),
+                  fmtCurrency(asNumber(row.value)),
+                  fmt(asNumber(row.open_bill_count)),
+                  row.max_age_days == null ? '-' : fmt(asNumber(row.max_age_days)),
+                  fmtPct(asNumber(row.share)),
+                ])}
+              />
+            </Card>
+          )}
+        </div>
       </div>
-
-      <Card>
-        <h3 className="text-base font-semibold text-secondary-950">Customer Outstanding Detail</h3>
-        <DataTable
-          minWidthClass="min-w-[920px]"
-          maxHeightClass="max-h-[32rem]"
-          headers={['Rank', 'Customer', 'Code', '0-30', '31-60', '61-90', '91+', 'Outstanding', 'Bills', 'Max Days', 'Share']}
-          rows={outstanding.map((row) => [
-            fmt(row.rank),
-            row.name,
-            row.code || '-',
-            fmtCurrency(asNumber(row.bucket_0_30)),
-            fmtCurrency(asNumber(row.bucket_31_60)),
-            fmtCurrency(asNumber(row.bucket_61_90)),
-            fmtCurrency(asNumber(row.bucket_91_plus)),
-            fmtCurrency(asNumber(row.value)),
-            fmt(asNumber(row.open_bill_count)),
-            row.max_age_days == null ? '-' : fmt(asNumber(row.max_age_days)),
-            fmtPct(asNumber(row.share)),
-          ])}
-        />
-      </Card>
-    </>
+    </div>
   );
-}
+});
 
-function ScoreCard({ title, score }: { title: string; score: number }) {
+const ScoreCard = React.memo(function ScoreCard({ title, score }: { title: string; score: number }) {
   const label = score >= 85 ? 'A Grade' : score >= 70 ? 'Monitor' : 'High Risk';
   return (
     <Card>
@@ -884,9 +1106,9 @@ function ScoreCard({ title, score }: { title: string; score: number }) {
       </div>
     </Card>
   );
-}
+});
 
-function ChartGrid({
+const ChartGrid = React.memo(function ChartGrid({
   leftTitle,
   left,
   rightTitle,
@@ -909,9 +1131,9 @@ function ChartGrid({
       </Card>
     </div>
   );
-}
+});
 
-function MappingDiagnostics({ diagnostics }: { diagnostics: ThreeSixtyItemMappingDiagnostic[] }) {
+const MappingDiagnostics = React.memo(function MappingDiagnostics({ diagnostics }: { diagnostics: ThreeSixtyItemMappingDiagnostic[] }) {
   if (!diagnostics.length) return null;
 
   return (
@@ -929,9 +1151,9 @@ function MappingDiagnostics({ diagnostics }: { diagnostics: ThreeSixtyItemMappin
       ])}
     />
   );
-}
+});
 
-function ContributionTable({
+const ContributionTable = React.memo(function ContributionTable({
   title,
   rows,
   compact = false,
@@ -996,18 +1218,18 @@ function ContributionTable({
   );
   if (compact) return table;
   return <Card><h3 className="text-base font-semibold text-secondary-950">{title}</h3>{table}</Card>;
-}
+});
 
-function SimpleTable({ title, headers, rows }: { title: string; headers: string[]; rows: ReactNode[][] }) {
+const SimpleTable = React.memo(function SimpleTable({ title, headers, rows }: { title: string; headers: string[]; rows: ReactNode[][] }) {
   return (
     <Card>
       <h3 className="text-base font-semibold text-secondary-950">{title}</h3>
       <DataTable headers={headers} rows={rows} />
     </Card>
   );
-}
+});
 
-function AgeingTable({ title, rows, countHeader }: { title: string; rows: Array<{ bucket: string; count?: number; amount: number; status: string }>; countHeader: string }) {
+const AgeingTable = React.memo(function AgeingTable({ title, rows, countHeader }: { title: string; rows: Array<{ bucket: string; count?: number; amount: number; status: string }>; countHeader: string }) {
   return (
     <SimpleTable
       title={title}
@@ -1020,9 +1242,9 @@ function AgeingTable({ title, rows, countHeader }: { title: string; rows: Array<
       ])}
     />
   );
-}
+});
 
-function DataTable({
+const DataTable = React.memo(function DataTable({
   headers,
   rows,
   minWidthClass = 'min-w-[560px]',
@@ -1080,9 +1302,9 @@ function DataTable({
       </table>
     </div>
   );
-}
+});
 
-function InsightCard({ insights }: { insights: string[] }) {
+const InsightCard = React.memo(function InsightCard({ insights }: { insights: string[] }) {
   return (
     <Card>
       <h3 className="text-base font-semibold text-secondary-950">System Generated Insights</h3>
@@ -1095,7 +1317,7 @@ function InsightCard({ insights }: { insights: string[] }) {
       </ul>
     </Card>
   );
-}
+});
 
 export default function ThreeSixtyReportsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('item');
@@ -1170,50 +1392,54 @@ export default function ThreeSixtyReportsPage() {
 
   return (
     <div className="space-y-4 lg:space-y-6">
-      <div className="rounded-lg border border-primary-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-secondary-950">360 Reports</h1>
-            <p className="mt-1 text-sm text-secondary-500">Entity-wise intelligence for items, customers, suppliers, routes, cities, and sales team from Marg EDE and operational data.</p>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-secondary-950">360 Reports</h1>
+        <p className="mt-1 text-sm text-secondary-500">Entity-wise intelligence for items, customers, suppliers, routes, cities, and sales team.</p>
+      </div>
+
+      <div className="border-b border-secondary-200 overflow-x-auto">
+        <nav className="-mb-px flex gap-6 min-w-max" role="tablist" aria-label="360 report entity">
+          {tabs.map((tab, index) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              id={`threesixty-tab-${tab.key}`}
+              aria-selected={activeTab === tab.key}
+              aria-controls="threesixty-panel"
+              tabIndex={activeTab === tab.key ? 0 : -1}
+              onClick={() => selectTab(tab.key)}
+              onKeyDown={(event) => onTabKeyDown(event, index)}
+              className={`whitespace-nowrap border-b-2 py-3 px-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1 ${
+                activeTab === tab.key
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-secondary-500 hover:border-secondary-300 hover:text-secondary-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      <div className="rounded-lg border border-secondary-200 bg-secondary-50/50 p-4">
+        <form onSubmit={submit} className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <div className="flex-1">
+            <EntitySearchSelect
+              type={activeTab}
+              value={draftSearch}
+              onInputChange={(value) => {
+                setDraftSearch(value);
+                setSelectedSearchValue('');
+              }}
+              onSelect={(option) => {
+                setDraftSearch(option.value ? `${option.label}${option.code ? ` (${option.code})` : ''}` : '');
+                setSelectedSearchValue(option.value);
+                setSearch(option.value);
+              }}
+              placeholder={activeMeta.placeholder}
+            />
           </div>
-          <div className="flex flex-wrap gap-2" role="tablist" aria-label="360 report entity">
-            {tabs.map((tab, index) => (
-              <button
-                key={tab.key}
-                type="button"
-                role="tab"
-                id={`threesixty-tab-${tab.key}`}
-                aria-selected={activeTab === tab.key}
-                aria-controls="threesixty-panel"
-                tabIndex={activeTab === tab.key ? 0 : -1}
-                onClick={() => selectTab(tab.key)}
-                onKeyDown={(event) => onTabKeyDown(event, index)}
-                className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1 ${
-                  activeTab === tab.key
-                    ? 'bg-primary-600 text-white'
-                    : 'bg-secondary-100 text-secondary-700 hover:bg-secondary-200'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <form onSubmit={submit} className="mt-5 flex flex-col gap-3 lg:flex-row">
-          <EntitySearchSelect
-            type={activeTab}
-            value={draftSearch}
-            onInputChange={(value) => {
-              setDraftSearch(value);
-              setSelectedSearchValue('');
-            }}
-            onSelect={(option) => {
-              setDraftSearch(option.value ? `${option.label}${option.code ? ` (${option.code})` : ''}` : '');
-              setSelectedSearchValue(option.value);
-              setSearch(option.value);
-            }}
-            placeholder={activeMeta.placeholder}
-          />
           <select className="input lg:w-64" value={period} onChange={(event) => setPeriod(event.target.value as ThreeSixtyPeriod)}>
             {periodOptions.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>

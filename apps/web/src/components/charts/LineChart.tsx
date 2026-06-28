@@ -1,3 +1,4 @@
+import React from 'react';
 import {
     CartesianGrid,
     Legend,
@@ -48,7 +49,7 @@ const defaultColors = [
   '#84CC16', // lime
 ];
 
-export function LineChart({
+export const LineChart = React.memo(function LineChart({
   data,
   lines,
   xAxisKey,
@@ -137,4 +138,4 @@ export function LineChart({
       </RechartsLineChart>
     </ResponsiveContainer>
   );
-}
+});
