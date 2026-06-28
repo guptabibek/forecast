@@ -8,8 +8,10 @@ import {
     FunnelIcon,
     XMarkIcon,
 } from '@heroicons/react/20/solid';
+import { TableCellsIcon } from '@heroicons/react/24/outline';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ColumnFilter, FilterOperator } from '../../hooks/useTableFilters';
+import { TableSkeleton } from './TableSkeleton';
 
 export type { ColumnFilter, FilterOperator };
 
@@ -50,6 +52,7 @@ interface DataTableProps<T> {
   keyExtractor: (row: T) => string | number;
   isLoading?: boolean;
   emptyMessage?: string;
+  emptyIcon?: React.ReactNode;
   onRowClick?: (row: T) => void;
   selectedRows?: (string | number)[];
   onSelectionChange?: (selectedIds: (string | number)[]) => void;
@@ -67,6 +70,8 @@ interface DataTableProps<T> {
   };
   /** When provided, a filter row is rendered below the headers. */
   filtering?: FilteringProps;
+  /** Number of skeleton rows to show while loading. Defaults to 8. */
+  skeletonRows?: number;
 }
 
 // ─── FilterCell ──────────────────────────────────────────────────────────────
@@ -78,7 +83,7 @@ interface FilterCellProps<T> {
   onClearFilter: (field: string) => void;
 }
 
-function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: FilterCellProps<T>) {
+const FilterCell = React.memo(function FilterCellInner<T>({ column, activeFilter, onFilterChange, onClearFilter }: FilterCellProps<T>) {
   const field = column.filterField ?? column.key;
   const isActive = !!activeFilter;
 
@@ -145,13 +150,13 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
     onClearFilter(field);
   };
 
-  const inputBase = `block w-full rounded border px-1.5 py-[3px] text-xs dark:bg-secondary-800 dark:text-secondary-100 focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400 ${
+  const inputBase = `block w-full rounded border px-1.5 py-[3px] text-xs dark:bg-secondary-800 dark:text-secondary-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary-400 focus-visible:border-primary-400 transition-colors ${
     isActive
       ? 'border-primary-400 bg-primary-50 dark:border-primary-600 dark:bg-primary-900/20'
       : 'border-secondary-300 dark:border-secondary-600'
   }`;
 
-  const selectBase = `rounded border px-1 py-[3px] text-xs dark:bg-secondary-800 dark:text-secondary-100 focus:outline-none focus:ring-1 focus:ring-primary-400 ${
+  const selectBase = `rounded border px-1 py-[3px] text-xs dark:bg-secondary-800 dark:text-secondary-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary-400 transition-colors ${
     isActive
       ? 'border-primary-400 dark:border-primary-600'
       : 'border-secondary-300 dark:border-secondary-600'
@@ -161,8 +166,9 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
     <button
       type="button"
       onClick={handleClear}
-      className="flex-shrink-0 rounded p-0.5 text-secondary-400 hover:text-secondary-600 dark:hover:text-secondary-200"
+      className="flex-shrink-0 rounded p-0.5 text-secondary-400 hover:text-secondary-600 dark:hover:text-secondary-200 transition-colors"
       title="Clear filter"
+      aria-label={`Clear ${column.header} filter`}
     >
       <XMarkIcon className="h-3 w-3" />
     </button>
@@ -178,6 +184,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
           value={textValue}
           onChange={(e) => { setTextValue(e.target.value); emitSingle(e.target.value, 'equals'); }}
           className={`${inputBase} cursor-pointer`}
+          aria-label={`Filter ${column.header}`}
         >
           <option value="">All</option>
           {column.filterOptions?.map((opt) => (
@@ -194,7 +201,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
     return (
       <div className="flex flex-col gap-0.5">
         {column.filterType === 'date' && (
-          <select value={operator} onChange={(e) => handleOperatorChange(e.target.value as FilterOperator)} className={selectBase}>
+          <select value={operator} onChange={(e) => handleOperatorChange(e.target.value as FilterOperator)} className={selectBase} aria-label={`${column.header} date operator`}>
             <option value="equals">On</option>
             <option value="gte">After</option>
             <option value="lte">Before</option>
@@ -207,6 +214,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
             value={rangeFrom}
             onChange={(e) => { setRangeFrom(e.target.value); emitRange(e.target.value, rangeTo); }}
             className={inputBase}
+            aria-label={`${column.header} from date`}
           />
           <span className="text-xs text-secondary-400">–</span>
           <input
@@ -214,6 +222,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
             value={rangeTo}
             onChange={(e) => { setRangeTo(e.target.value); emitRange(rangeFrom, e.target.value); }}
             className={inputBase}
+            aria-label={`${column.header} to date`}
           />
           {isActive && clearBtn}
         </div>
@@ -225,7 +234,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
   if (column.filterType === 'text') {
     return (
       <div className="flex flex-col gap-0.5">
-        <select value={operator} onChange={(e) => handleOperatorChange(e.target.value as FilterOperator)} className={selectBase}>
+        <select value={operator} onChange={(e) => handleOperatorChange(e.target.value as FilterOperator)} className={selectBase} aria-label={`${column.header} text operator`}>
           <option value="contains">Contains</option>
           <option value="startsWith">Starts with</option>
           <option value="equals">Equals</option>
@@ -237,6 +246,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
             onChange={(e) => { setTextValue(e.target.value); emitSingle(e.target.value); }}
             placeholder="Filter…"
             className={inputBase}
+            aria-label={`Filter ${column.header}`}
           />
           {isActive && clearBtn}
         </div>
@@ -248,7 +258,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
   if (column.filterType === 'number') {
     return (
       <div className="flex flex-col gap-0.5">
-        <select value={operator} onChange={(e) => handleOperatorChange(e.target.value as FilterOperator)} className={selectBase}>
+        <select value={operator} onChange={(e) => handleOperatorChange(e.target.value as FilterOperator)} className={selectBase} aria-label={`${column.header} number operator`}>
           <option value="equals">=</option>
           <option value="gt">&gt;</option>
           <option value="gte">≥</option>
@@ -264,6 +274,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
               onChange={(e) => { setRangeFrom(e.target.value); if (e.target.value && rangeTo) onFilterChange(field, 'between', [e.target.value, rangeTo]); else onClearFilter(field); }}
               placeholder="from"
               className={inputBase}
+              aria-label={`${column.header} from value`}
             />
             <span className="text-xs text-secondary-400">–</span>
             <input
@@ -272,6 +283,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
               onChange={(e) => { setRangeTo(e.target.value); if (rangeFrom && e.target.value) onFilterChange(field, 'between', [rangeFrom, e.target.value]); else onClearFilter(field); }}
               placeholder="to"
               className={inputBase}
+              aria-label={`${column.header} to value`}
             />
             {isActive && clearBtn}
           </div>
@@ -283,6 +295,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
               onChange={(e) => { setTextValue(e.target.value); emitSingle(e.target.value); }}
               placeholder="Value"
               className={inputBase}
+              aria-label={`Filter ${column.header}`}
             />
             {isActive && clearBtn}
           </div>
@@ -295,7 +308,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
   if (column.filterType === 'date') {
     return (
       <div className="flex flex-col gap-0.5">
-        <select value={operator} onChange={(e) => handleOperatorChange(e.target.value as FilterOperator)} className={selectBase}>
+        <select value={operator} onChange={(e) => handleOperatorChange(e.target.value as FilterOperator)} className={selectBase} aria-label={`${column.header} date operator`}>
           <option value="equals">On</option>
           <option value="gte">After</option>
           <option value="lte">Before</option>
@@ -307,6 +320,7 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
             value={textValue}
             onChange={(e) => { setTextValue(e.target.value); emitSingle(e.target.value); }}
             className={inputBase}
+            aria-label={`Filter ${column.header}`}
           />
           {isActive && clearBtn}
         </div>
@@ -315,28 +329,43 @@ function FilterCell<T>({ column, activeFilter, onFilterChange, onClearFilter }: 
   }
 
   return <div />;
-}
+}) as <T>(props: FilterCellProps<T>) => React.JSX.Element;
 
 // ─── DataTable ───────────────────────────────────────────────────────────────
 
-export function DataTable<T>({
+export const DataTable = React.memo(function DataTableInner<T>({
   data,
   columns,
   keyExtractor,
   isLoading = false,
   emptyMessage = 'No data available',
+  emptyIcon,
   onRowClick,
   selectedRows,
   onSelectionChange,
   pagination,
   sorting,
   filtering,
+  skeletonRows = 8,
 }: DataTableProps<T>) {
   const [internalSelectedRows, setInternalSelectedRows] = useState<Set<string | number>>(
     new Set(selectedRows || [])
   );
 
+  const [internalPage, setInternalPage] = useState(1);
+  const [internalPageSize, setInternalPageSize] = useState(50);
+
   const safeData = useMemo(() => data ?? [], [data]);
+
+  const useClientPagination = !pagination && safeData.length > 50;
+
+  const currentData = useMemo(() => {
+    if (useClientPagination) {
+      const start = (internalPage - 1) * internalPageSize;
+      return safeData.slice(start, start + internalPageSize);
+    }
+    return safeData;
+  }, [safeData, useClientPagination, internalPage, internalPageSize]);
   const hasFilters = useMemo(() => columns.some((c) => c.filterType), [columns]);
 
   const isAllSelected = useMemo(
@@ -349,7 +378,7 @@ export function DataTable<T>({
     [safeData, internalSelectedRows, isAllSelected, keyExtractor]
   );
 
-  const handleSelectAll = () => {
+  const handleSelectAll = useCallback(() => {
     if (isAllSelected) {
       setInternalSelectedRows(new Set());
       onSelectionChange?.([]);
@@ -358,9 +387,9 @@ export function DataTable<T>({
       setInternalSelectedRows(new Set(allIds));
       onSelectionChange?.(allIds);
     }
-  };
+  }, [isAllSelected, safeData, keyExtractor, onSelectionChange]);
 
-  const handleSelectRow = (rowId: string | number) => {
+  const handleSelectRow = useCallback((rowId: string | number) => {
     const newSelected = new Set(internalSelectedRows);
     if (newSelected.has(rowId)) {
       newSelected.delete(rowId);
@@ -369,26 +398,51 @@ export function DataTable<T>({
     }
     setInternalSelectedRows(newSelected);
     onSelectionChange?.(Array.from(newSelected));
-  };
+  }, [internalSelectedRows, onSelectionChange]);
 
-  const getCellValue = (row: T, accessor: Column<T>['accessor']): React.ReactNode => {
+  const getCellValue = useCallback((row: T, accessor: Column<T>['accessor']): React.ReactNode => {
     if (typeof accessor === 'function') return accessor(row);
     return row[accessor as keyof T] as React.ReactNode;
-  };
+  }, []);
 
-  const alignClasses = { left: 'text-left', center: 'text-center', right: 'text-right' };
-  const justifyClasses = { left: 'justify-start', center: 'justify-center', right: 'justify-end' };
+  const alignClasses = useMemo(() => ({ left: 'text-left', center: 'text-center', right: 'text-right' }), []);
+  const justifyClasses = useMemo(() => ({ left: 'justify-start', center: 'justify-center', right: 'justify-end' }), []);
 
   const selectionColSpan = onSelectionChange ? 1 : 0;
   const totalCols = columns.length + selectionColSpan;
 
-  const getActiveFilter = (col: Column<T>) =>
-    filtering?.filters.find((f) => f.field === (col.filterField ?? col.key));
+  const getActiveFilter = useCallback((col: Column<T>) =>
+    filtering?.filters.find((f) => f.field === (col.filterField ?? col.key)), [filtering?.filters]);
+
+  const activePagination = useMemo(() => {
+    if (pagination) return pagination;
+    if (useClientPagination) {
+      return {
+        page: internalPage,
+        pageSize: internalPageSize,
+        total: safeData.length,
+        onPageChange: setInternalPage,
+        onPageSizeChange: (size: number) => {
+          setInternalPageSize(size);
+          setInternalPage(1);
+        },
+      };
+    }
+    return undefined;
+  }, [pagination, useClientPagination, internalPage, internalPageSize, safeData.length]);
+
+  // Memoize total pages to avoid recalculation
+  const totalPages = useMemo(() =>
+    activePagination ? Math.ceil(activePagination.total / activePagination.pageSize) : 0,
+    [activePagination?.total, activePagination?.pageSize]
+  );
 
   return (
     <div
       className="overflow-hidden border border-secondary-200 dark:border-secondary-700 bg-white dark:bg-secondary-900"
       style={{ borderRadius: 'var(--radius)' }}
+      role="region"
+      aria-label="Data table"
     >
       {/* Active filter count + reset button */}
       {filtering && filtering.filters.length > 0 && (
@@ -400,7 +454,7 @@ export function DataTable<T>({
           <button
             type="button"
             onClick={filtering.onClearAll}
-            className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-secondary-500 hover:bg-secondary-200 dark:hover:bg-secondary-700 dark:text-secondary-400"
+            className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-secondary-500 hover:bg-secondary-200 dark:hover:bg-secondary-700 dark:text-secondary-400 transition-colors"
           >
             <XMarkIcon className="h-3 w-3" />
             Reset all
@@ -409,34 +463,42 @@ export function DataTable<T>({
       )}
 
       <div className="overflow-x-auto -webkit-overflow-scrolling-touch">
-        <table className="min-w-full divide-y divide-secondary-200 dark:divide-secondary-700">
+        <table className="min-w-full divide-y divide-secondary-200 dark:divide-secondary-700" role="grid">
           <thead className="bg-secondary-50 dark:bg-secondary-800 sticky top-0 z-10">
             {/* ── Header row ── */}
-            <tr>
+            <tr role="row">
               {onSelectionChange && (
-                <th className="w-12 px-4 py-3">
+                <th className="w-12 px-4 py-3" scope="col">
                   <input
                     type="checkbox"
                     checked={isAllSelected}
                     ref={(el) => { if (el) el.indeterminate = isSomeSelected; }}
                     onChange={handleSelectAll}
                     className="h-4 w-4 rounded border-secondary-300 dark:border-secondary-600 text-primary-600 focus:ring-primary-500"
+                    aria-label={isAllSelected ? 'Deselect all rows' : 'Select all rows'}
                   />
                 </th>
               )}
               {columns.map((column) => (
                 <th
                   key={column.key}
+                  scope="col"
                   className={`px-2 py-1.5 lg:px-3 lg:py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] ${
                     alignClasses[column.align || 'left']
                   } ${column.width ? `w-[${column.width}]` : ''} ${column.className || ''}`}
+                  aria-sort={
+                    sorting?.sortBy === column.key
+                      ? sorting.sortOrder === 'asc' ? 'ascending' : 'descending'
+                      : undefined
+                  }
                 >
                   {column.sortable && sorting ? (
                     <button
-                      className={`group inline-flex w-full items-center gap-1 hover:text-secondary-700 dark:hover:text-secondary-300 ${
+                      className={`group inline-flex w-full items-center gap-1 hover:text-secondary-700 dark:hover:text-secondary-300 transition-colors ${
                         justifyClasses[column.align || 'left']
                       }`}
                       onClick={() => sorting.onSort(column.key)}
+                      aria-label={`Sort by ${column.header}`}
                     >
                       <span>{column.header}</span>
                       <span className="flex flex-col">
@@ -476,7 +538,7 @@ export function DataTable<T>({
 
             {/* ── Filter row ── */}
             {filtering && hasFilters && (
-              <tr className="bg-white dark:bg-secondary-900 border-t border-secondary-200 dark:border-secondary-700">
+              <tr className="bg-white dark:bg-secondary-900 border-t border-secondary-200 dark:border-secondary-700" role="row">
                 {onSelectionChange && <th className="w-12 px-4 py-1.5" />}
                 {columns.map((column) => (
                   <th
@@ -500,35 +562,46 @@ export function DataTable<T>({
           <tbody className="divide-y divide-secondary-200 dark:divide-secondary-700 bg-white dark:bg-secondary-900">
             {isLoading ? (
               <tr>
-                <td colSpan={totalCols} className="px-4 py-12 text-center">
-                  <div className="flex justify-center">
-                    <svg className="h-8 w-8 animate-spin text-primary-600" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                  </div>
+                <td colSpan={totalCols} className="p-0">
+                  <TableSkeleton
+                    columns={Math.min(columns.length, 6)}
+                    rows={skeletonRows}
+                    showHeader={false}
+                  />
                 </td>
               </tr>
-            ) : safeData.length === 0 ? (
+            ) : currentData.length === 0 ? (
               <tr>
                 <td
                   colSpan={totalCols}
-                  className="px-4 py-12 text-center text-sm text-secondary-500 dark:text-secondary-400"
+                  className="px-4 py-12 text-center"
                 >
-                  {emptyMessage}
+                  <div className="flex flex-col items-center gap-2">
+                    {emptyIcon || <TableCellsIcon className="h-10 w-10 text-secondary-300 dark:text-secondary-600" />}
+                    <p className="text-sm text-secondary-500 dark:text-secondary-400">{emptyMessage}</p>
+                  </div>
                 </td>
               </tr>
             ) : (
-              safeData.map((row) => {
+              currentData.map((row) => {
                 const rowId = keyExtractor(row);
                 const isSelected = internalSelectedRows.has(rowId);
                 return (
                   <tr
                     key={rowId}
-                    className={`${onRowClick ? 'cursor-pointer hover:bg-secondary-50 dark:hover:bg-secondary-800' : ''} ${
+                    role="row"
+                    aria-selected={onSelectionChange ? isSelected : undefined}
+                    className={`transition-colors duration-150 ${onRowClick ? 'cursor-pointer hover:bg-secondary-50 dark:hover:bg-secondary-800' : ''} ${
                       isSelected ? 'bg-primary-50 dark:bg-primary-900/20' : ''
                     }`}
                     onClick={() => onRowClick?.(row)}
+                    tabIndex={onRowClick ? 0 : undefined}
+                    onKeyDown={onRowClick ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onRowClick(row);
+                      }
+                    } : undefined}
                   >
                     {onSelectionChange && (
                       <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
@@ -537,6 +610,7 @@ export function DataTable<T>({
                           checked={isSelected}
                           onChange={() => handleSelectRow(rowId)}
                           className="h-4 w-4 rounded border-secondary-300 dark:border-secondary-600 text-primary-600 focus:ring-primary-500"
+                          aria-label={`Select row ${rowId}`}
                         />
                       </td>
                     )}
@@ -558,60 +632,65 @@ export function DataTable<T>({
         </table>
       </div>
 
-      {pagination && (
+      {activePagination && (
         <div className="flex flex-col xs:flex-row items-start xs:items-center justify-between gap-1.5 border-t border-secondary-200 dark:border-secondary-700 bg-white dark:bg-secondary-900 px-2.5 py-1.5 lg:px-3 lg:py-2">
           <div className="flex items-center text-xs sm:text-sm text-secondary-500 dark:text-secondary-400">
             <span className="hidden sm:inline">Rows per page:</span>
             <select
-              value={pagination.pageSize}
-              onChange={(e) => pagination.onPageSizeChange(Number(e.target.value))}
+              value={activePagination.pageSize}
+              onChange={(e) => activePagination.onPageSizeChange(Number(e.target.value))}
               className="mx-1 sm:mx-2 rounded border-secondary-300 dark:border-secondary-600 dark:bg-secondary-800 dark:text-secondary-100 text-xs sm:text-sm focus:border-primary-500 focus:ring-primary-500 py-1"
+              aria-label="Rows per page"
             >
               {[10, 25, 50, 100].map((size) => (
                 <option key={size} value={size}>{size}</option>
               ))}
             </select>
             <span className="whitespace-nowrap">
-              {(pagination.page - 1) * pagination.pageSize + 1}–
-              {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total}
+              {(activePagination.page - 1) * activePagination.pageSize + 1}–
+              {Math.min(activePagination.page * activePagination.pageSize, activePagination.total)} of {activePagination.total}
             </span>
           </div>
 
-          <div className="flex items-center space-x-0.5 sm:space-x-1">
+          <nav className="flex items-center space-x-0.5 sm:space-x-1" aria-label="Table pagination">
             <button
-              onClick={() => pagination.onPageChange(1)}
-              disabled={pagination.page === 1}
-              className="rounded p-1 text-secondary-500 dark:text-secondary-400 hover:bg-secondary-100 dark:hover:bg-secondary-800 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => activePagination.onPageChange(1)}
+              disabled={activePagination.page === 1}
+              className="rounded p-1 text-secondary-500 dark:text-secondary-400 hover:bg-secondary-100 dark:hover:bg-secondary-800 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+              aria-label="First page"
             >
               <ChevronDoubleLeftIcon className="h-4 w-4 sm:h-5 sm:w-5" />
             </button>
             <button
-              onClick={() => pagination.onPageChange(pagination.page - 1)}
-              disabled={pagination.page === 1}
-              className="rounded p-1 text-secondary-500 dark:text-secondary-400 hover:bg-secondary-100 dark:hover:bg-secondary-800 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => activePagination.onPageChange(activePagination.page - 1)}
+              disabled={activePagination.page === 1}
+              className="rounded p-1 text-secondary-500 dark:text-secondary-400 hover:bg-secondary-100 dark:hover:bg-secondary-800 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+              aria-label="Previous page"
             >
               <ChevronLeftIcon className="h-4 w-4 sm:h-5 sm:w-5" />
             </button>
             <span className="px-1.5 sm:px-2 text-xs sm:text-sm text-secondary-700 dark:text-secondary-300 whitespace-nowrap">
-              {pagination.page}/{Math.ceil(pagination.total / pagination.pageSize)}
+              {activePagination.page}/{totalPages}
             </span>
             <button
-              onClick={() => pagination.onPageChange(pagination.page + 1)}
-              disabled={pagination.page >= Math.ceil(pagination.total / pagination.pageSize)}
-              className="rounded p-1 text-secondary-500 dark:text-secondary-400 hover:bg-secondary-100 dark:hover:bg-secondary-800 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => activePagination.onPageChange(activePagination.page + 1)}
+              disabled={activePagination.page >= totalPages}
+              className="rounded p-1 text-secondary-500 dark:text-secondary-400 hover:bg-secondary-100 dark:hover:bg-secondary-800 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+              aria-label="Next page"
             >
               <ChevronRightIcon className="h-4 w-4 sm:h-5 sm:w-5" />
             </button>
             <button
-              onClick={() => pagination.onPageChange(Math.ceil(pagination.total / pagination.pageSize))}
-              disabled={pagination.page >= Math.ceil(pagination.total / pagination.pageSize)}
-              className="rounded p-1 text-secondary-500 dark:text-secondary-400 hover:bg-secondary-100 dark:hover:bg-secondary-800 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => activePagination.onPageChange(totalPages)}
+              disabled={activePagination.page >= totalPages}
+              className="rounded p-1 text-secondary-500 dark:text-secondary-400 hover:bg-secondary-100 dark:hover:bg-secondary-800 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+              aria-label="Last page"
             >
               <ChevronDoubleRightIcon className="h-4 w-4 sm:h-5 sm:w-5" />
             </button>
-          </div>
+          </nav>
         </div>
       )}
     </div>
   );
-}
+}) as <T>(props: DataTableProps<T>) => React.JSX.Element;

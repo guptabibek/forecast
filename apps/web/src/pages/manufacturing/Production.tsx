@@ -21,6 +21,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
+import { ConfirmDialog } from '@components/common/ConfirmDialog';
 
 // ============================================================================
 // Helpers
@@ -55,6 +57,7 @@ const DOWNTIME_CATEGORIES = ['MECHANICAL', 'ELECTRICAL', 'CHANGEOVER', 'MATERIAL
 // ============================================================================
 
 function ProductionLinesTab() {
+  const confirmAction = useConfirmAction({ title: 'Confirm', message: 'Delete this line?', variant: 'danger' });
   const qc = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
@@ -82,7 +85,7 @@ function ProductionLinesTab() {
     { key: 'actions', header: '', accessor: (r: any) => (
       <div className="flex gap-1">
         <button onClick={() => openEdit(r)} className="p-1 hover:bg-gray-100 rounded"><PencilIcon className="h-4 w-4" /></button>
-        <button onClick={() => { if (confirm('Delete this line?')) deleteMut.mutate(r.id); }} className="p-1 hover:bg-red-100 rounded text-red-600"><TrashIcon className="h-4 w-4" /></button>
+        <button onClick={() => { confirmAction.confirm(() => deleteMut.mutate(r.id)) }} className="p-1 hover:bg-red-100 rounded text-red-600"><TrashIcon className="h-4 w-4" /></button>
       </div>
     )},
   ];
@@ -144,6 +147,7 @@ function ProductionLinesTab() {
           </div>
         </div>
       </Modal>
+      <ConfirmDialog open={confirmAction.confirmProps.isOpen} onCancel={confirmAction.confirmProps.onClose} onConfirm={confirmAction.confirmProps.onConfirm} title={confirmAction.confirmProps.title} message={confirmAction.confirmProps.message} variant={confirmAction.confirmProps.variant as any} confirmLabel={confirmAction.confirmProps.confirmText} />
     </>
   );
 }
@@ -153,6 +157,7 @@ function ProductionLinesTab() {
 // ============================================================================
 
 function DowntimeReasonsTab() {
+  const confirmAction = useConfirmAction({ title: 'Confirm', message: 'Delete this reason?', variant: 'danger' });
   const qc = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
@@ -178,7 +183,7 @@ function DowntimeReasonsTab() {
     { key: 'actions', header: '', accessor: (r: any) => (
       <div className="flex gap-1">
         <button onClick={() => openEdit(r)} className="p-1 hover:bg-gray-100 rounded"><PencilIcon className="h-4 w-4" /></button>
-        <button onClick={() => { if (confirm('Delete this reason?')) deleteMut.mutate(r.id); }} className="p-1 hover:bg-red-100 rounded text-red-600"><TrashIcon className="h-4 w-4" /></button>
+        <button onClick={() => { confirmAction.confirm(() => deleteMut.mutate(r.id)) }} className="p-1 hover:bg-red-100 rounded text-red-600"><TrashIcon className="h-4 w-4" /></button>
       </div>
     )},
   ];
@@ -223,6 +228,7 @@ function DowntimeReasonsTab() {
           </div>
         </div>
       </Modal>
+      <ConfirmDialog open={confirmAction.confirmProps.isOpen} onCancel={confirmAction.confirmProps.onClose} onConfirm={confirmAction.confirmProps.onConfirm} title={confirmAction.confirmProps.title} message={confirmAction.confirmProps.message} variant={confirmAction.confirmProps.variant as any} confirmLabel={confirmAction.confirmProps.confirmText} />
     </>
   );
 }
@@ -232,6 +238,7 @@ function DowntimeReasonsTab() {
 // ============================================================================
 
 function DowntimeRecordsTab() {
+  const confirmAction = useConfirmAction({ title: 'Confirm', message: 'Delete?', variant: 'danger' });
   const qc = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
@@ -277,7 +284,7 @@ function DowntimeRecordsTab() {
     { key: 'actions', header: '', accessor: (r: any) => (
       <div className="flex gap-1">
         <button onClick={() => openEdit(r)} className="p-1 hover:bg-gray-100 rounded"><PencilIcon className="h-4 w-4" /></button>
-        <button onClick={() => { if (confirm('Delete?')) deleteMut.mutate(r.id); }} className="p-1 hover:bg-red-100 rounded text-red-600"><TrashIcon className="h-4 w-4" /></button>
+        <button onClick={() => { confirmAction.confirm(() => deleteMut.mutate(r.id)) }} className="p-1 hover:bg-red-100 rounded text-red-600"><TrashIcon className="h-4 w-4" /></button>
       </div>
     )},
   ];
@@ -340,6 +347,7 @@ function DowntimeRecordsTab() {
           </div>
         </div>
       </Modal>
+      <ConfirmDialog open={confirmAction.confirmProps.isOpen} onCancel={confirmAction.confirmProps.onClose} onConfirm={confirmAction.confirmProps.onConfirm} title={confirmAction.confirmProps.title} message={confirmAction.confirmProps.message} variant={confirmAction.confirmProps.variant as any} confirmLabel={confirmAction.confirmProps.confirmText} />
     </>
   );
 }
@@ -349,6 +357,7 @@ function DowntimeRecordsTab() {
 // ============================================================================
 
 function ScrapReasonsTab() {
+  const confirmAction = useConfirmAction({ title: 'Confirm', message: 'Delete?', variant: 'danger' });
   const qc = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
@@ -375,7 +384,7 @@ function ScrapReasonsTab() {
     { key: 'actions', header: '', accessor: (r: any) => (
       <div className="flex gap-1">
         <button onClick={() => openEdit(r)} className="p-1 hover:bg-gray-100 rounded"><PencilIcon className="h-4 w-4" /></button>
-        <button onClick={() => { if (confirm('Delete?')) deleteMut.mutate(r.id); }} className="p-1 hover:bg-red-100 rounded text-red-600"><TrashIcon className="h-4 w-4" /></button>
+        <button onClick={() => { confirmAction.confirm(() => deleteMut.mutate(r.id)) }} className="p-1 hover:bg-red-100 rounded text-red-600"><TrashIcon className="h-4 w-4" /></button>
       </div>
     )},
   ];
@@ -415,6 +424,7 @@ function ScrapReasonsTab() {
           </div>
         </div>
       </Modal>
+      <ConfirmDialog open={confirmAction.confirmProps.isOpen} onCancel={confirmAction.confirmProps.onClose} onConfirm={confirmAction.confirmProps.onConfirm} title={confirmAction.confirmProps.title} message={confirmAction.confirmProps.message} variant={confirmAction.confirmProps.variant as any} confirmLabel={confirmAction.confirmProps.confirmText} />
     </>
   );
 }

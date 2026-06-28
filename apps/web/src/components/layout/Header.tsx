@@ -7,8 +7,6 @@ import {
     CheckIcon,
     Cog6ToothIcon,
     MagnifyingGlassIcon,
-    MoonIcon,
-    SunIcon,
     UserCircleIcon,
 } from '@heroicons/react/24/outline';
 import { useAuthStore } from '@stores/auth.store';
@@ -21,7 +19,6 @@ import {
     useNotifications,
     useUnreadCount,
 } from '../../hooks/useAuditNotifications';
-import { useBranding } from '../ThemeProvider';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -149,14 +146,7 @@ function NotificationBell() {
 export default function Header({ onMenuClick }: HeaderProps) {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
-  const { themeMode, toggleTheme } = useBranding();
   const [searchOpen, setSearchOpen] = useState(false);
-
-  const isDark = themeMode === 'dark';
-
-  const handleToggleTheme = () => {
-    toggleTheme();
-  };
 
   const handleLogout = async () => {
     await logout();
@@ -203,19 +193,6 @@ export default function Header({ onMenuClick }: HeaderProps) {
           {/* Mobile search button */}
           <button className="p-2 rounded-lg hover:bg-secondary-100 dark:hover:bg-secondary-700 sm:hidden">
             <MagnifyingGlassIcon className="w-5 h-5" />
-          </button>
-
-          {/* Theme toggle */}
-          <button
-            onClick={handleToggleTheme}
-            className="p-2 rounded-lg hover:bg-secondary-100 dark:hover:bg-secondary-700"
-            title="Toggle theme"
-          >
-            {isDark ? (
-              <SunIcon className="w-5 h-5" />
-            ) : (
-              <MoonIcon className="w-5 h-5" />
-            )}
           </button>
 
           {/* Notifications */}

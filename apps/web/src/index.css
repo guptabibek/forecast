@@ -43,19 +43,7 @@
     --header-text: #0f172a;
   }
 
-  .dark {
-    --color-primary: 96 165 250;
-    --color-background: 15 23 42;
-    --color-foreground: 248 250 252;
-    --color-muted: 148 163 184;
-    --text-muted: rgb(148 163 184);
-    --color-border: 51 65 85;
-    --sidebar-bg: #1e293b;
-    --sidebar-text: #f8fafc;
-    --header-bg: #1e293b;
-    --header-text: #f8fafc;
-  }
-
+  /* Dark mode removed per static enterprise theme requirements */
   * {
     @apply border-border;
   }
@@ -229,22 +217,48 @@
   }
 
   .animate-in {
-    animation: animateIn 0.2s ease-out forwards;
+    /* Removed for performance */
   }
 
-  @keyframes animateIn {
-    from {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+  /* Page enter transition */
+  .animate-page-enter {
+    /* Removed for performance */
+  }
+
+  /* Staggered entrance for cards/rows */
+  .animate-stagger-in {
+    /* Removed for performance */
+  }
+
+  /* Skeleton shimmer */
+  .animate-skeleton {
+    background: linear-gradient(
+      90deg,
+      theme('colors.secondary.100') 25%,
+      theme('colors.secondary.200') 50%,
+      theme('colors.secondary.100') 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  }
+
+  .dark .animate-skeleton {
+    background: linear-gradient(
+      90deg,
+      theme('colors.secondary.800') 25%,
+      theme('colors.secondary.700') 50%,
+      theme('colors.secondary.800') 75%
+    );
+    background-size: 200% 100%;
+  }
+
+  @keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 
   .glass {
-    @apply bg-white/80 dark:bg-secondary-900/80 backdrop-blur-lg;
+    @apply bg-white dark:bg-secondary-900 border border-secondary-200 dark:border-secondary-700;
   }
 
   .gradient-primary {
@@ -254,4 +268,22 @@
   .gradient-text {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-primary-400;
   }
+
+  /* Focus-visible ring for keyboard navigation */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-secondary-900;
+  }
+
+  /* Scroll shadow indicators */
+  .scroll-shadow-y {
+    background:
+      linear-gradient(white 30%, rgba(255,255,255,0)) center top,
+      linear-gradient(rgba(255,255,255,0), white 70%) center bottom,
+      radial-gradient(farthest-side at 50% 0, rgba(0,0,0,.08), transparent) center top,
+      radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,.08), transparent) center bottom;
+    background-repeat: no-repeat;
+    background-size: 100% 20px, 100% 20px, 100% 8px, 100% 8px;
+    background-attachment: local, local, scroll, scroll;
+  }
 }
+

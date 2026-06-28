@@ -20,19 +20,19 @@ export function Button({
   ...props
 }: ButtonProps) {
   const baseClasses =
-    'inline-flex items-center justify-center font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
+    'inline-flex items-center justify-center font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-secondary-900 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97]';
 
   const variantClasses = {
     primary:
-      'bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500 shadow-sm',
+      'bg-primary-600 text-white hover:bg-primary-700 focus-visible:ring-primary-500 shadow-sm',
     secondary:
-      'bg-secondary-100 text-secondary-900 hover:bg-secondary-200 focus:ring-secondary-500 dark:bg-secondary-700 dark:text-secondary-100 dark:hover:bg-secondary-600',
+      'bg-secondary-100 text-secondary-900 hover:bg-secondary-200 focus-visible:ring-secondary-500 dark:bg-secondary-700 dark:text-secondary-100 dark:hover:bg-secondary-600',
     outline:
-      'border border-secondary-300 bg-white text-secondary-700 hover:bg-secondary-50 focus:ring-primary-500 dark:bg-secondary-800 dark:border-secondary-600 dark:text-secondary-200 dark:hover:bg-secondary-700',
+      'border border-secondary-300 bg-white text-secondary-700 hover:bg-secondary-50 focus-visible:ring-primary-500 dark:bg-secondary-800 dark:border-secondary-600 dark:text-secondary-200 dark:hover:bg-secondary-700',
     ghost:
-      'text-secondary-700 hover:bg-secondary-100 focus:ring-secondary-500 dark:text-secondary-300 dark:hover:bg-secondary-800',
+      'text-secondary-700 hover:bg-secondary-100 focus-visible:ring-secondary-500 dark:text-secondary-300 dark:hover:bg-secondary-800',
     danger:
-      'bg-error-600 text-white hover:bg-error-700 focus:ring-error-500 shadow-sm',
+      'bg-error-600 text-white hover:bg-error-700 focus-visible:ring-error-500 shadow-sm',
   };
 
   const sizeClasses = {
@@ -53,6 +53,7 @@ export function Button({
           className="animate-spin -ml-1 mr-2 h-4 w-4"
           fill="none"
           viewBox="0 0 24 24"
+          aria-hidden="true"
         >
           <circle
             className="opacity-25"
@@ -69,9 +70,9 @@ export function Button({
           />
         </svg>
       )}
-      {!isLoading && leftIcon && <span className="mr-2">{leftIcon}</span>}
+      {!isLoading && leftIcon && <span className="mr-2 flex-shrink-0">{leftIcon}</span>}
       {children}
-      {!isLoading && rightIcon && <span className="ml-2">{rightIcon}</span>}
+      {!isLoading && rightIcon && <span className="ml-2 flex-shrink-0">{rightIcon}</span>}
     </button>
   );
 }
@@ -90,19 +91,19 @@ export function IconButton({
   ...props
 }: IconButtonProps) {
   const baseClasses =
-    'inline-flex items-center justify-center rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
+    'inline-flex items-center justify-center transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-secondary-900 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.95]';
 
   const variantClasses = {
     primary:
-      'bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500',
+      'bg-primary-600 text-white hover:bg-primary-700 focus-visible:ring-primary-500',
     secondary:
-      'bg-gray-100 text-gray-900 hover:bg-gray-200 focus:ring-gray-500',
+      'bg-secondary-100 text-secondary-900 hover:bg-secondary-200 focus-visible:ring-secondary-500 dark:bg-secondary-700 dark:text-secondary-100 dark:hover:bg-secondary-600',
     outline:
-      'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:ring-primary-500',
+      'border border-secondary-300 bg-white text-secondary-700 hover:bg-secondary-50 focus-visible:ring-primary-500 dark:bg-secondary-800 dark:border-secondary-600 dark:text-secondary-200 dark:hover:bg-secondary-700',
     ghost:
-      'text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus:ring-gray-500',
+      'text-secondary-500 hover:text-secondary-700 hover:bg-secondary-100 focus-visible:ring-secondary-500 dark:text-secondary-400 dark:hover:text-secondary-200 dark:hover:bg-secondary-800',
     danger:
-      'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
+      'bg-error-600 text-white hover:bg-error-700 focus-visible:ring-error-500 dark:bg-error-700 dark:hover:bg-error-600',
   };
 
   const sizeClasses = {
@@ -114,6 +115,7 @@ export function IconButton({
   return (
     <button
       className={`${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
+      style={{ borderRadius: 'var(--radius)' }}
       {...props}
     >
       {children}
@@ -128,7 +130,7 @@ interface ButtonGroupProps {
 
 export function ButtonGroup({ children, className = '' }: ButtonGroupProps) {
   return (
-    <div className={`inline-flex rounded-lg shadow-sm ${className}`}>
+    <div className={`inline-flex shadow-sm ${className}`} style={{ borderRadius: 'var(--radius)' }}>
       {React.Children.map(children, (child, index) => {
         if (!React.isValidElement(child)) return child;
         

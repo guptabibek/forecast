@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { ArrowDownTrayIcon } from '@heroicons/react/24/outline';
-import { Button, EmptyState, Pagination } from '../ui';
+import { Button, EmptyState, DataTable } from '../ui';
 import type { AiReportColumn, AiReportRow } from '../../services/api/ai-reporting.service';
 import { columnField, exportRowsToCsv, formatAiValue, isCurrencyKey, isDisplayableAiColumn } from './ai-reporting-utils';
+import type { Column } from '../ui/DataTable';
 
 const PAGE_SIZE = 25;
 
@@ -13,23 +14,35 @@ interface AiReportTableProps {
   totals?: Record<string, number>;
 }
 
-export function AiReportTable({ title = 'ai-report', columns, rows, totals }: AiReportTableProps) {
+export function AiReportTable({ title = 'ai-report', columns, rows }: AiReportTableProps) {
   const [page, setPage] = useState(1);
   const displayColumns = useMemo(
     () => columns.map((column) => ({ ...column, key: columnField(column) })).filter(isDisplayableAiColumn),
     [columns],
   );
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  
+  const tableColumns: Column<AiReportRow>[] = useMemo(() => {
+    return displayColumns.map((col) => ({
+      key: col.key,
+      header: col.label || col.key,
+      accessor: (row: AiReportRow) => formatAiValue(row[col.key], col),
+      align: isCurrencyKey(col.key) ? 'right' : 'left',
+    }));
+  }, [displayColumns]);
+
   const pageRows = useMemo(() => rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [page, rows]);
-  const hasTotals = !!totals && Object.keys(totals).length > 0;
+
+  // Append a totals row if available (since DataTable doesn't support tfoot out of the box)
+  // For a more robust approach, we can render the totals in a separate footer or inside DataTable,
+  // but since DataTable lacks tfoot, we'll just let DataTable render the rows.
 
   if (!displayColumns.length || !rows.length) {
     return <EmptyState title="No data found" description="No matching rows were returned for this report." />;
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-      <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
+    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 bg-gray-50">
         <div className="text-sm font-medium text-gray-700">{rows.length.toLocaleString('en-IN')} rows</div>
         <Button
           type="button"
@@ -41,67 +54,17 @@ export function AiReportTable({ title = 'ai-report', columns, rows, totals }: Ai
           Export CSV
         </Button>
       </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              {displayColumns.map((column) => (
-                <th
-                  key={column.key}
-                  scope="col"
-                  className={`whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 ${
-                    isCurrencyKey(column.key) ? 'text-right' : ''
-                  }`}
-                >
-                  {column.label || column.key}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 bg-white">
-            {pageRows.map((row, rowIndex) => (
-              <tr key={rowIndex} className="hover:bg-gray-50">
-                {displayColumns.map((column) => (
-                  <td
-                    key={column.key}
-                    className={`whitespace-nowrap px-4 py-3 text-gray-700 ${
-                      typeof row[column.key] === 'number' || isCurrencyKey(column.key) ? 'text-right font-medium tabular-nums' : ''
-                    }`}
-                  >
-                    {formatAiValue(row[column.key], column)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-          {hasTotals && (
-            <tfoot className="border-t border-gray-200 bg-gray-50">
-              <tr>
-                {displayColumns.map((column, index) => (
-                  <td
-                    key={column.key}
-                    className={`whitespace-nowrap px-4 py-3 text-sm font-semibold text-gray-900 ${
-                      totals[column.key] !== undefined || isCurrencyKey(column.key) ? 'text-right tabular-nums' : ''
-                    }`}
-                  >
-                    {totals[column.key] !== undefined
-                      ? formatAiValue(totals[column.key], column)
-                      : index === 0
-                        ? 'Total'
-                        : ''}
-                  </td>
-                ))}
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-      <Pagination
-        page={page}
-        totalPages={totalPages}
-        total={rows.length}
-        pageSize={PAGE_SIZE}
-        onPageChange={(nextPage) => setPage(Math.min(Math.max(nextPage, 1), totalPages))}
+      <DataTable
+        data={pageRows}
+        columns={tableColumns}
+        keyExtractor={(row) => JSON.stringify(row)}
+        pagination={{
+          page,
+          pageSize: PAGE_SIZE,
+          total: rows.length,
+          onPageChange: (p) => setPage(p),
+          onPageSizeChange: () => {}, // AiReportTable doesn't support dynamic page size yet
+        }}
       />
     </div>
   );

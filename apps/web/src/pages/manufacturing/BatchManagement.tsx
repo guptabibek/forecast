@@ -9,6 +9,8 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import type { Batch, BatchStatus } from '../../types';
 import { formatInr } from '@utils/number-format';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
+import { ConfirmDialog } from '@components/common/ConfirmDialog';
 
 const safeFormat = (dateVal: any, fmt: string, fallback = '—') => {
   try {
@@ -46,6 +48,12 @@ const emptyForm = {
 };
 
 export default function BatchManagementPage() {
+  
+  const confirmAction1 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete this batch?",
+    variant: 'danger',
+  });
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
@@ -254,7 +262,7 @@ export default function BatchManagementPage() {
             <EyeIcon className="h-4 w-4" />
           </button>
           {/* View-only mode: delete disabled.
-          <button onClick={() => { if (confirm('Delete this batch?')) deleteMut.mutate(r.id); }} className="p-1 text-red-600 hover:text-red-800">
+          <button onClick={() => { confirmAction1.confirm(() => deleteMut.mutate(r.id)) }} className="p-1 text-red-600 hover:text-red-800">
             <TrashIcon className="h-4 w-4" />
           </button>
           */}
@@ -443,6 +451,8 @@ export default function BatchManagementPage() {
           </div>
         )}
       </Modal>
+    
+      <ConfirmDialog open={confirmAction1.confirmProps.isOpen} onCancel={confirmAction1.confirmProps.onClose} onConfirm={confirmAction1.confirmProps.onConfirm} title={confirmAction1.confirmProps.title} message={confirmAction1.confirmProps.message} variant={confirmAction1.confirmProps.variant as any} confirmLabel={confirmAction1.confirmProps.confirmText} />
     </div>
   );
 }

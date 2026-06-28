@@ -11,7 +11,7 @@ export interface DetailField {
 
 export interface DetailTable {
   title?: string;
-  columns: Array<{ key: string; header: string; align?: 'left' | 'right' | 'center' }>;
+  columns: Array<{ key: string; header: string; align?: 'left' | 'right' | 'center'; excludeFromPdf?: boolean }>;
   rows: Array<Record<string, unknown>>;
 }
 
@@ -88,7 +88,10 @@ export function DetailPopupActions({
     title,
     documentNumber,
     fields: fields.filter((f) => f.value != null && String(f.value) !== '' && String(f.value) !== '-'),
-    tables,
+    tables: tables.map(t => ({
+      ...t,
+      columns: t.columns.filter(c => !c.excludeFromPdf)
+    })),
     totals,
     drilldownTitle,
     appliedFilters,

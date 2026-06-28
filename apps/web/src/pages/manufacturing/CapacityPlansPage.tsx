@@ -9,6 +9,8 @@ import { addDays, format } from 'date-fns';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import type { CapacityPlan, CapacityPlanBucket, CapacityPlanType } from '../../types';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
+import { ConfirmDialog } from '@components/common/ConfirmDialog';
 
 const safeFormat = (dateVal: any, fmt: string, fallback = '—') => {
   try {
@@ -200,6 +202,17 @@ const BucketFormFields = ({
 // --- Main Component ---
 
 export default function CapacityPlansPage() {
+  
+  const confirmAction1 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete this capacity plan?",
+    variant: 'danger',
+  });
+  const confirmAction2 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete this bucket?",
+    variant: 'danger',
+  });
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'plans' | 'utilization'>('utilization');
   const [showCreate, setShowCreate] = useState(false);
@@ -371,7 +384,7 @@ export default function CapacityPlansPage() {
       accessor: (r) => (
         <div className="flex gap-1">
           <button onClick={() => { setSelectedPlan(r); setShowDetail(true); }} className="p-1 text-blue-600 hover:text-blue-800"><EyeIcon className="h-4 w-4" /></button>
-          <button onClick={() => { if (confirm('Delete this capacity plan?')) deleteMut.mutate(r.id); }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
+          <button onClick={() => { confirmAction1.confirm(() => deleteMut.mutate(r.id)) }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
         </div>
       ),
     },
@@ -401,7 +414,7 @@ export default function CapacityPlansPage() {
     {
       key: 'actions', header: '',
       accessor: (r) => (
-        <button onClick={() => { if (confirm('Delete this bucket?')) deleteBucketMut.mutate(r.id); }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
+        <button onClick={() => { confirmAction2.confirm(() => deleteBucketMut.mutate(r.id)) }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
       ),
     },
   ];
@@ -632,6 +645,9 @@ export default function CapacityPlansPage() {
           <Button onClick={() => createBucketMut.mutate(bucketForm)} isLoading={createBucketMut.isPending} disabled={!bucketForm.workCenterId || !bucketForm.periodDate}>Add</Button>
         </div>
       </Modal>
+    
+      <ConfirmDialog open={confirmAction1.confirmProps.isOpen} onCancel={confirmAction1.confirmProps.onClose} onConfirm={confirmAction1.confirmProps.onConfirm} title={confirmAction1.confirmProps.title} message={confirmAction1.confirmProps.message} variant={confirmAction1.confirmProps.variant as any} confirmLabel={confirmAction1.confirmProps.confirmText} />
+      <ConfirmDialog open={confirmAction2.confirmProps.isOpen} onCancel={confirmAction2.confirmProps.onClose} onConfirm={confirmAction2.confirmProps.onConfirm} title={confirmAction2.confirmProps.title} message={confirmAction2.confirmProps.message} variant={confirmAction2.confirmProps.variant as any} confirmLabel={confirmAction2.confirmProps.confirmText} />
     </div>
   );
 }

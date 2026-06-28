@@ -19,40 +19,40 @@ interface AlertProps {
 
 const variantConfig = {
   info: {
-    bg: 'bg-blue-50',
-    border: 'border-blue-200',
+    bg: 'bg-info-50 dark:bg-info-900/20',
+    border: 'border-info-200 dark:border-info-800',
     icon: InformationCircleIcon,
-    iconColor: 'text-blue-400',
-    titleColor: 'text-blue-800',
-    textColor: 'text-blue-700',
-    closeColor: 'text-blue-500 hover:text-blue-600',
+    iconColor: 'text-info-400 dark:text-info-300',
+    titleColor: 'text-info-800 dark:text-info-200',
+    textColor: 'text-info-700 dark:text-info-300',
+    closeColor: 'text-info-500 hover:text-info-600 dark:text-info-400 dark:hover:text-info-300',
   },
   success: {
-    bg: 'bg-green-50',
-    border: 'border-green-200',
+    bg: 'bg-success-50 dark:bg-success-900/20',
+    border: 'border-success-200 dark:border-success-800',
     icon: CheckCircleIcon,
-    iconColor: 'text-green-400',
-    titleColor: 'text-green-800',
-    textColor: 'text-green-700',
-    closeColor: 'text-green-500 hover:text-green-600',
+    iconColor: 'text-success-400 dark:text-success-300',
+    titleColor: 'text-success-800 dark:text-success-200',
+    textColor: 'text-success-700 dark:text-success-300',
+    closeColor: 'text-success-500 hover:text-success-600 dark:text-success-400 dark:hover:text-success-300',
   },
   warning: {
-    bg: 'bg-yellow-50',
-    border: 'border-yellow-200',
+    bg: 'bg-warning-50 dark:bg-warning-900/20',
+    border: 'border-warning-200 dark:border-warning-800',
     icon: ExclamationTriangleIcon,
-    iconColor: 'text-yellow-400',
-    titleColor: 'text-yellow-800',
-    textColor: 'text-yellow-700',
-    closeColor: 'text-yellow-500 hover:text-yellow-600',
+    iconColor: 'text-warning-400 dark:text-warning-300',
+    titleColor: 'text-warning-800 dark:text-warning-200',
+    textColor: 'text-warning-700 dark:text-warning-300',
+    closeColor: 'text-warning-500 hover:text-warning-600 dark:text-warning-400 dark:hover:text-warning-300',
   },
   error: {
-    bg: 'bg-red-50',
-    border: 'border-red-200',
+    bg: 'bg-error-50 dark:bg-error-900/20',
+    border: 'border-error-200 dark:border-error-800',
     icon: ExclamationCircleIcon,
-    iconColor: 'text-red-400',
-    titleColor: 'text-red-800',
-    textColor: 'text-red-700',
-    closeColor: 'text-red-500 hover:text-red-600',
+    iconColor: 'text-error-400 dark:text-error-300',
+    titleColor: 'text-error-800 dark:text-error-200',
+    textColor: 'text-error-700 dark:text-error-300',
+    closeColor: 'text-error-500 hover:text-error-600 dark:text-error-400 dark:hover:text-error-300',
   },
 };
 
@@ -68,7 +68,8 @@ export function Alert({
 
   return (
     <div
-      className={`rounded-lg border p-4 ${config.bg} ${config.border} ${className}`}
+      className={`border p-4 ${config.bg} ${config.border} ${className}`}
+      style={{ borderRadius: 'var(--radius)' }}
       role="alert"
     >
       <div className="flex">
@@ -87,7 +88,7 @@ export function Alert({
           <div className="ml-auto pl-3">
             <button
               onClick={onDismiss}
-              className={`inline-flex rounded-md p-1.5 focus:outline-none focus:ring-2 focus:ring-offset-2 ${config.closeColor}`}
+              className={`inline-flex rounded-md p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary-500 ${config.closeColor}`}
             >
               <span className="sr-only">Dismiss</span>
               <XMarkIcon className="h-5 w-5" />
@@ -107,12 +108,12 @@ interface BadgeProps {
 }
 
 const badgeVariants = {
-  default: 'bg-gray-100 text-gray-800',
-  primary: 'bg-primary-100 text-primary-800',
-  secondary: 'bg-gray-100 text-gray-600',
-  success: 'bg-green-100 text-green-800',
-  warning: 'bg-yellow-100 text-yellow-800',
-  error: 'bg-red-100 text-red-800',
+  default: 'bg-secondary-100 text-secondary-800 dark:bg-secondary-700 dark:text-secondary-200',
+  primary: 'bg-primary-100 text-primary-800 dark:bg-primary-900/50 dark:text-primary-200',
+  secondary: 'bg-secondary-100 text-secondary-600 dark:bg-secondary-700 dark:text-secondary-300',
+  success: 'bg-success-100 text-success-800 dark:bg-success-900/50 dark:text-success-200',
+  warning: 'bg-warning-100 text-warning-800 dark:bg-warning-900/50 dark:text-warning-200',
+  error: 'bg-error-100 text-error-800 dark:bg-error-900/50 dark:text-error-200',
 };
 
 const badgeSizes = {
@@ -152,7 +153,8 @@ const paddingClasses = {
 export function Card({ children, className = '', padding = 'md' }: CardProps) {
   return (
     <div
-      className={`bg-white rounded-xl border border-gray-200 shadow-sm ${paddingClasses[padding]} ${className}`}
+      className={`bg-white dark:bg-secondary-800 border border-secondary-200 dark:border-secondary-700 shadow-sm ${paddingClasses[padding]} ${className}`}
+      style={{ borderRadius: 'var(--radius)' }}
     >
       {children}
     </div>
@@ -170,8 +172,8 @@ export function CardHeader({ title, description, actions, className = '' }: Card
   return (
     <div className={`flex items-start justify-between mb-4 ${className}`}>
       <div>
-        <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-        {description && <p className="mt-1 text-sm text-gray-500">{description}</p>}
+        <h3 className="text-lg font-semibold text-secondary-900 dark:text-secondary-100">{title}</h3>
+        {description && <p className="mt-1 text-sm text-secondary-500 dark:text-secondary-400">{description}</p>}
       </div>
       {actions && <div className="flex items-center space-x-2">{actions}</div>}
     </div>
@@ -196,6 +198,8 @@ export function LoadingSpinner({ size = 'md', className = '' }: LoadingSpinnerPr
       className={`animate-spin text-primary-600 ${spinnerSizes[size]} ${className}`}
       fill="none"
       viewBox="0 0 24 24"
+      role="status"
+      aria-label="Loading"
     >
       <circle
         className="opacity-25"
@@ -225,9 +229,9 @@ interface EmptyStateProps {
 export function EmptyState({ icon, title, description, action, className = '' }: EmptyStateProps) {
   return (
     <div className={`text-center py-12 ${className}`}>
-      {icon && <div className="mx-auto mb-4 text-gray-400">{icon}</div>}
-      <h3 className="text-sm font-medium text-gray-900">{title}</h3>
-      {description && <p className="mt-1 text-sm text-gray-500">{description}</p>}
+      {icon && <div className="mx-auto mb-4 text-secondary-400 dark:text-secondary-500">{icon}</div>}
+      <h3 className="text-sm font-medium text-secondary-900 dark:text-secondary-100">{title}</h3>
+      {description && <p className="mt-1 text-sm text-secondary-500 dark:text-secondary-400">{description}</p>}
       {action && <div className="mt-6">{action}</div>}
     </div>
   );
@@ -244,9 +248,9 @@ interface ProgressBarProps {
 
 const progressVariants = {
   primary: 'bg-primary-600',
-  success: 'bg-green-600',
-  warning: 'bg-yellow-600',
-  error: 'bg-red-600',
+  success: 'bg-success-600',
+  warning: 'bg-warning-600',
+  error: 'bg-error-600',
 };
 
 const progressSizes = {
@@ -266,14 +270,14 @@ export function ProgressBar({
   const percentage = Math.min(100, Math.max(0, (value / max) * 100));
 
   return (
-    <div className={className}>
+    <div className={className} role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={max}>
       {showLabel && (
         <div className="flex justify-between mb-1">
-          <span className="text-sm font-medium text-gray-700">Progress</span>
-          <span className="text-sm text-gray-500">{Math.round(percentage)}%</span>
+          <span className="text-sm font-medium text-secondary-700 dark:text-secondary-300">Progress</span>
+          <span className="text-sm text-secondary-500 dark:text-secondary-400">{Math.round(percentage)}%</span>
         </div>
       )}
-      <div className={`w-full bg-gray-200 rounded-full overflow-hidden ${progressSizes[size]}`}>
+      <div className={`w-full bg-secondary-200 dark:bg-secondary-700 rounded-full overflow-hidden ${progressSizes[size]}`}>
         <div
           className={`${progressVariants[variant]} ${progressSizes[size]} rounded-full transition-all duration-300`}
           style={{ width: `${percentage}%` }}
@@ -296,7 +300,6 @@ export function Skeleton({
   width,
   height,
 }: SkeletonProps) {
-  const baseClasses = 'animate-pulse bg-gray-200';
   const variantClasses = {
     text: 'rounded',
     circular: 'rounded-full',
@@ -308,7 +311,7 @@ export function Skeleton({
   if (height) style.height = typeof height === 'number' ? `${height}px` : height;
   if (variant === 'text' && !height) style.height = '1em';
 
-  return <div className={`${baseClasses} ${variantClasses[variant]} ${className}`} style={style} />;
+  return <div className={`animate-skeleton ${variantClasses[variant]} ${className}`} style={style} />;
 }
 
 // ============================================================================
@@ -329,7 +332,7 @@ export function QueryErrorBanner({ error, onRetry, className = '' }: QueryErrorB
       {onRetry && (
         <button
           onClick={onRetry}
-          className="mt-2 text-sm font-medium text-red-800 underline hover:text-red-900"
+          className="mt-2 text-sm font-medium text-error-800 dark:text-error-200 underline hover:text-error-900 dark:hover:text-error-100 transition-colors"
         >
           Try again
         </button>
@@ -358,9 +361,9 @@ export function Pagination({ page, totalPages, total, pageSize, onPageChange, cl
   const endItem = Math.min(page * pageSize, total);
 
   return (
-    <div className={`flex items-center justify-between border-t border-gray-200 px-4 py-3 sm:px-6 ${className}`}>
+    <div className={`flex items-center justify-between border-t border-secondary-200 dark:border-secondary-700 px-4 py-3 sm:px-6 ${className}`}>
       <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
-        <p className="text-sm text-gray-700">
+        <p className="text-sm text-secondary-700 dark:text-secondary-300">
           Showing <span className="font-medium">{startItem}</span> to{' '}
           <span className="font-medium">{endItem}</span> of{' '}
           <span className="font-medium">{total}</span> results
@@ -369,7 +372,8 @@ export function Pagination({ page, totalPages, total, pageSize, onPageChange, cl
           <button
             onClick={() => onPageChange(page - 1)}
             disabled={page <= 1}
-            className="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="relative inline-flex items-center rounded-l-md px-2 py-2 text-secondary-400 dark:text-secondary-500 ring-1 ring-inset ring-secondary-300 dark:ring-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            aria-label="Previous page"
           >
             <span className="sr-only">Previous</span>
             <ChevronLeftIcon className="h-5 w-5" aria-hidden="true" />
@@ -389,10 +393,11 @@ export function Pagination({ page, totalPages, total, pageSize, onPageChange, cl
               <button
                 key={pageNum}
                 onClick={() => onPageChange(pageNum)}
-                className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ring-1 ring-inset ring-gray-300 ${
+                aria-current={pageNum === page ? 'page' : undefined}
+                className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ring-1 ring-inset transition-colors ${
                   pageNum === page
                     ? 'z-10 bg-primary-600 text-white focus-visible:outline-primary-600'
-                    : 'text-gray-900 hover:bg-gray-50'
+                    : 'text-secondary-900 dark:text-secondary-200 ring-secondary-300 dark:ring-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-800'
                 }`}
               >
                 {pageNum}
@@ -402,7 +407,8 @@ export function Pagination({ page, totalPages, total, pageSize, onPageChange, cl
           <button
             onClick={() => onPageChange(page + 1)}
             disabled={page >= totalPages}
-            className="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="relative inline-flex items-center rounded-r-md px-2 py-2 text-secondary-400 dark:text-secondary-500 ring-1 ring-inset ring-secondary-300 dark:ring-secondary-600 hover:bg-secondary-50 dark:hover:bg-secondary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            aria-label="Next page"
           >
             <span className="sr-only">Next</span>
             <ChevronRightIcon className="h-5 w-5" aria-hidden="true" />
@@ -413,14 +419,16 @@ export function Pagination({ page, totalPages, total, pageSize, onPageChange, cl
         <button
           onClick={() => onPageChange(page - 1)}
           disabled={page <= 1}
-          className="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="relative inline-flex items-center border border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-800 px-4 py-2 text-sm font-medium text-secondary-700 dark:text-secondary-200 hover:bg-secondary-50 dark:hover:bg-secondary-700 disabled:opacity-50 transition-colors"
+          style={{ borderRadius: 'var(--radius)' }}
         >
           Previous
         </button>
         <button
           onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages}
-          className="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="relative ml-3 inline-flex items-center border border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-800 px-4 py-2 text-sm font-medium text-secondary-700 dark:text-secondary-200 hover:bg-secondary-50 dark:hover:bg-secondary-700 disabled:opacity-50 transition-colors"
+          style={{ borderRadius: 'var(--radius)' }}
         >
           Next
         </button>

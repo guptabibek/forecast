@@ -6,6 +6,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
+import { ConfirmDialog } from '@components/common/ConfirmDialog';
 
 const safeFormat = (dateVal: any, fmt: string, fallback = '—') => {
   try {
@@ -24,6 +26,17 @@ const statusVariant: Record<string, any> = { CONCEPT: 'secondary', DEVELOPMENT: 
 const emptyNPI = { sku: '', name: '', description: '', category: '', brand: '', launchDate: '', launchCurveType: 'S_CURVE', rampUpMonths: 6, peakMonthsSinceLaunch: 12, peakForecastUnits: 1000, initialPrice: 0, targetMargin: 0 };
 
 export default function NPIPage() {
+  
+  const confirmAction1 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Convert to product?",
+    variant: 'danger',
+  });
+  const confirmAction2 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete?",
+    variant: 'danger',
+  });
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -155,9 +168,9 @@ export default function NPIPage() {
             setShowEdit(true);
           }} className="p-1 text-amber-600 hover:text-amber-800"><PencilIcon className="h-4 w-4" /></button>
           {r.status === 'PRE_LAUNCH' && (
-            <button onClick={() => { if (confirm('Convert to product?')) convertMut.mutate(r.id); }} className="p-1 text-green-600 hover:text-green-800" title="Convert to Product"><RocketLaunchIcon className="h-4 w-4" /></button>
+            <button onClick={() => { confirmAction1.confirm(() => convertMut.mutate(r.id)) }} className="p-1 text-green-600 hover:text-green-800" title="Convert to Product"><RocketLaunchIcon className="h-4 w-4" /></button>
           )}
-          <button onClick={() => { if (confirm('Delete?')) deleteMut.mutate(r.id); }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
+          <button onClick={() => { confirmAction2.confirm(() => deleteMut.mutate(r.id)) }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
         </div>
       ),
     },
@@ -386,6 +399,9 @@ export default function NPIPage() {
           </div>
         )}
       </Modal>
+    
+      <ConfirmDialog open={confirmAction1.confirmProps.isOpen} onCancel={confirmAction1.confirmProps.onClose} onConfirm={confirmAction1.confirmProps.onConfirm} title={confirmAction1.confirmProps.title} message={confirmAction1.confirmProps.message} variant={confirmAction1.confirmProps.variant as any} confirmLabel={confirmAction1.confirmProps.confirmText} />
+      <ConfirmDialog open={confirmAction2.confirmProps.isOpen} onCancel={confirmAction2.confirmProps.onClose} onConfirm={confirmAction2.confirmProps.onConfirm} title={confirmAction2.confirmProps.title} message={confirmAction2.confirmProps.message} variant={confirmAction2.confirmProps.variant as any} confirmLabel={confirmAction2.confirmProps.confirmText} />
     </div>
   );
 }

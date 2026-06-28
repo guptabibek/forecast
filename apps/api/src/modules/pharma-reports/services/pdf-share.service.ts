@@ -45,6 +45,11 @@ export interface PdfShareResult {
   whatsappUrl: string;
 }
 
+function cleanText(text: unknown): string {
+  if (text === null || text === undefined || text === '') return '-';
+  return String(text).replace(/₹/g, 'Rs. ').replace(/—/g, '-');
+}
+
 @Injectable()
 export class PdfShareService {
   private readonly logger = new Logger(PdfShareService.name);
@@ -362,8 +367,8 @@ export class PdfShareService {
         x = 32;
         y += 20;
       }
-      doc.fontSize(5.5).font('Helvetica').fillColor('#6b7280').text(String(field.label).toUpperCase(), x, y, { width: colWidth - 8 });
-      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#111827').text(String(field.value ?? '-'), x, y + 7, { width: colWidth - 8 });
+      doc.fontSize(5.5).font('Helvetica').fillColor('#6b7280').text(cleanText(field.label).toUpperCase(), x, y, { width: colWidth - 8 });
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#111827').text(cleanText(field.value), x, y + 7, { width: colWidth - 8 });
       x += colWidth;
     });
 
@@ -449,7 +454,7 @@ export class PdfShareService {
       // Resolve display text for every cell in this row.
       const cellTexts = visibleCols.map((col) => {
         const v = row[col.key];
-        return v === null || v === undefined || v === '' ? '-' : String(v);
+        return cleanText(v);
       });
 
       // Measure each cell, then size the row to the tallest one so that no
@@ -503,8 +508,8 @@ export class PdfShareService {
 
     for (const t of totals) {
       doc.rect(startX, y, tableWidth, 12).strokeColor('#e5e7eb').lineWidth(0.25).stroke();
-      doc.fontSize(6.5).font('Helvetica').fillColor('#374151').text(String(t.label), startX + 6, y + 3, { width: 100 });
-      doc.fontSize(7).font('Helvetica-Bold').fillColor('#111827').text(String(t.value ?? '-'), startX + 110, y + 3, { width: 80, align: 'right' });
+      doc.fontSize(6.5).font('Helvetica').fillColor('#374151').text(cleanText(t.label), startX + 6, y + 3, { width: 100 });
+      doc.fontSize(7).font('Helvetica-Bold').fillColor('#111827').text(cleanText(t.value), startX + 110, y + 3, { width: 80, align: 'right' });
       y += 12;
     }
 
@@ -526,12 +531,16 @@ export class PdfShareService {
     for (let i = 0; i < totalPages; i++) {
       doc.switchToPage(i);
       const bottom = doc.page.height - 20;
+      const oldBottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
 
       doc.moveTo(28, bottom - 4).lineTo(doc.page.width - 28, bottom - 4).strokeColor('#e5e7eb').lineWidth(0.5).stroke();
       doc.fontSize(6).font('Helvetica').fillColor('#9ca3af')
-        .text(`${payload.title}`, 28, bottom, { width: 300, lineBreak: false });
+        .text(`${cleanText(payload.title)}`, 28, bottom, { width: 300, lineBreak: false });
       doc.fontSize(6).font('Helvetica').fillColor('#9ca3af')
         .text(`Generated: ${generatedAt}  |  Page ${i + 1} of ${totalPages}`, doc.page.width - 228, bottom, { width: 200, align: 'right', lineBreak: false });
+        
+      doc.page.margins.bottom = oldBottom;
     }
   }
 }

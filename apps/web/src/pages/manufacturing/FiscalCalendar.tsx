@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
+import { ConfirmDialog } from '@components/common/ConfirmDialog';
 
 const safeFormat = (dateVal: any, fmt: string, fallback = '—') => {
   try {
@@ -30,6 +32,17 @@ const emptyCalendar = { name: '', code: '', type: 'CALENDAR', yearStartMonth: 1,
 const emptyPeriod = { fiscalYear: new Date().getFullYear(), fiscalQuarter: 1, fiscalMonth: 1, periodName: '', startDate: '', endDate: '', workingDays: 20, isOpen: true };
 
 export default function FiscalCalendarPage() {
+  
+  const confirmAction1 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete this calendar and all its periods?",
+    variant: 'danger',
+  });
+  const confirmAction2 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete period?",
+    variant: 'danger',
+  });
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -141,7 +154,7 @@ export default function FiscalCalendarPage() {
             setShowEdit(true);
           }} className="p-1 text-amber-600 hover:text-amber-800"><PencilIcon className="h-4 w-4" /></button>
           {!r.isActive && <button onClick={() => setActiveCal.mutate(r.id)} className="p-1 text-yellow-600 hover:text-yellow-800" title="Set Active"><StarIcon className="h-4 w-4" /></button>}
-          <button onClick={() => { if (confirm('Delete this calendar and all its periods?')) deleteCal.mutate(r.id); }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
+          <button onClick={() => { confirmAction1.confirm(() => deleteCal.mutate(r.id)) }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
         </div>
       ),
     },
@@ -172,7 +185,7 @@ export default function FiscalCalendarPage() {
           <button onClick={() => togglePeriod.mutate(r.id)} className="p-1 text-indigo-600 hover:text-indigo-800">
             <Badge variant={r.isOpen ? 'warning' : 'success'} size="sm">{r.isOpen ? 'Close' : 'Open'}</Badge>
           </button>
-          <button onClick={() => { if (confirm('Delete period?')) deletePeriod.mutate(r.id); }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
+          <button onClick={() => { confirmAction2.confirm(() => deletePeriod.mutate(r.id)) }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
         </div>
       ),
     },
@@ -314,6 +327,9 @@ export default function FiscalCalendarPage() {
           </div>
         </div>
       </Modal>
+    
+      <ConfirmDialog open={confirmAction1.confirmProps.isOpen} onCancel={confirmAction1.confirmProps.onClose} onConfirm={confirmAction1.confirmProps.onConfirm} title={confirmAction1.confirmProps.title} message={confirmAction1.confirmProps.message} variant={confirmAction1.confirmProps.variant as any} confirmLabel={confirmAction1.confirmProps.confirmText} />
+      <ConfirmDialog open={confirmAction2.confirmProps.isOpen} onCancel={confirmAction2.confirmProps.onClose} onConfirm={confirmAction2.confirmProps.onConfirm} title={confirmAction2.confirmProps.title} message={confirmAction2.confirmProps.message} variant={confirmAction2.confirmProps.variant as any} confirmLabel={confirmAction2.confirmProps.confirmText} />
     </div>
   );
 }

@@ -8,6 +8,8 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import type { SOPGapAnalysis } from '../../types';
 import { formatInr } from '@utils/number-format';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
+import { ConfirmDialog } from '@components/common/ConfirmDialog';
 
 const safeFormat = (dateVal: any, fmt: string, fallback = '—') => {
   try {
@@ -46,6 +48,12 @@ const emptyForm = {
 };
 
 export default function SOPGapAnalysisPage() {
+  
+  const confirmAction1 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete this gap analysis?",
+    variant: 'danger',
+  });
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState<typeof emptyForm>(emptyForm);
@@ -125,7 +133,7 @@ export default function SOPGapAnalysisPage() {
       key: 'actions', header: 'Actions',
       accessor: (r) => (
         <div className="flex gap-1">
-          <button onClick={() => { if (confirm('Delete this gap analysis?')) deleteMut.mutate(r.id); }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
+          <button onClick={() => { confirmAction1.confirm(() => deleteMut.mutate(r.id)) }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
         </div>
       ),
     },
@@ -231,6 +239,8 @@ export default function SOPGapAnalysisPage() {
           <Button onClick={() => createMut.mutate(form)} isLoading={createMut.isPending} disabled={!form.cycleId || !form.periodDate}>Create</Button>
         </div>
       </Modal>
+    
+      <ConfirmDialog open={confirmAction1.confirmProps.isOpen} onCancel={confirmAction1.confirmProps.onClose} onConfirm={confirmAction1.confirmProps.onConfirm} title={confirmAction1.confirmProps.title} message={confirmAction1.confirmProps.message} variant={confirmAction1.confirmProps.variant as any} confirmLabel={confirmAction1.confirmProps.confirmText} />
     </div>
   );
 }

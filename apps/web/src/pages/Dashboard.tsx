@@ -44,6 +44,8 @@ import type { Dimension } from '../types';
 import { formatIndianCompactNumber, formatInr } from '../utils/number-format';
 import PharmaExecutiveOverview from './pharma-reports/PharmaExecutiveOverview';
 import { AiInsightsPreview } from '../components/insights-dashboard/AiInsightsPreview';
+import { SectionSkeleton } from '../components/ui/PageSkeleton';
+import React from 'react';
 
 // =====================
 // Types
@@ -131,7 +133,7 @@ const formatNumber = (value: number): string => {
 // Components
 // =====================
 
-const StatCard = ({
+const StatCard = React.memo(({
   title,
   value,
   change,
@@ -158,11 +160,7 @@ const StatCard = ({
     className="card p-5"
   >
     {isLoading ? (
-      <div className="animate-pulse">
-        <div className="h-4 bg-secondary-200 rounded w-24 mb-2" />
-        <div className="h-8 bg-secondary-200 rounded w-16 mb-2" />
-        <div className="h-3 bg-secondary-200 rounded w-32" />
-      </div>
+      <SectionSkeleton rows={3} />
     ) : (
       <div className="flex items-start justify-between">
         <div className="flex-1">
@@ -197,7 +195,7 @@ const StatCard = ({
       </div>
     )}
   </motion.div>
-);
+));
 
 
 const VarianceAlertCard = ({ alert }: { alert: VarianceAlert }) => {
@@ -230,7 +228,7 @@ const VarianceAlertCard = ({ alert }: { alert: VarianceAlert }) => {
 const CHART_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
 
 // Period Selector Component
-const PeriodSelector = ({
+const PeriodSelector = React.memo(({
   selectedGranularity,
   onGranularityChange,
 }: {
@@ -256,7 +254,7 @@ const PeriodSelector = ({
       ))}
     </div>
   </div>
-);
+));
 
 // Multi-Select Filter Dropdown Component
 interface FilterDropdownProps {
@@ -269,7 +267,7 @@ interface FilterDropdownProps {
   placeholder?: string;
 }
 
-const FilterDropdown = ({
+const FilterDropdown = React.memo(({
   label,
   icon: Icon,
   options,
@@ -431,7 +429,7 @@ const FilterDropdown = ({
       </AnimatePresence>
     </div>
   );
-};
+});
 
 // Filter Bar Component
 interface DashboardFilters {
@@ -585,6 +583,10 @@ const ABCClassificationSection = ({ filterParams }: ABCClassificationProps) => {
       value: mode === 'margin' ? d.margin : d.revenue,
     }));
   }, [abcData, mode]);
+
+  const topProductsList = useMemo(() => {
+    return abcData?.products?.slice(0, 20) || [];
+  }, [abcData?.products]);
 
   return (
     <motion.div
@@ -863,7 +865,7 @@ const ABCClassificationSection = ({ filterParams }: ABCClassificationProps) => {
                     </tr>
                   </thead>
                   <tbody>
-                    {abcData.products.slice(0, 20).map((product, idx) => (
+                    {topProductsList.map((product, idx) => (
                       <tr
                         key={product.id}
                         className={`border-b border-secondary-100 dark:border-secondary-800 hover:bg-secondary-50 dark:hover:bg-secondary-800/50 ${
@@ -1087,6 +1089,11 @@ export default function Dashboard() {
   const stateRegions = stateData as RegionalData[] | undefined;
   const cityRegions = cityData as RegionalData[] | undefined;
   const activeRegionalData = regionalTab === 'state' ? stateRegions : cityRegions;
+  
+  const topRegionalData = useMemo(() => {
+    return activeRegionalData?.slice(0, 6) || [];
+  }, [activeRegionalData]);
+
   const activeRegionalLoading = regionalTab === 'state' ? stateLoading : cityLoading;
   const alerts = varianceAlerts as VarianceAlert[] | undefined;
   const models = modelAccuracy as { model: string; mape: number }[] | undefined;
@@ -1448,7 +1455,7 @@ export default function Dashboard() {
                 <ResponsiveContainer width="100%" height={180}>
                   <PieChart>
                     <Pie
-                      data={activeRegionalData.slice(0, 6)}
+                      data={topRegionalData}
                       cx="50%"
                       cy="50%"
                       innerRadius={50}
@@ -1457,7 +1464,7 @@ export default function Dashboard() {
                       dataKey="revenue"
                       nameKey="name"
                     >
-                      {activeRegionalData.slice(0, 6).map((_, index) => (
+                      {topRegionalData.map((_, index) => (
                         <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                       ))}
                     </Pie>
@@ -1473,7 +1480,7 @@ export default function Dashboard() {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="grid grid-cols-2 gap-2 mt-2">
-                  {activeRegionalData.slice(0, 6).map((region, index) => (
+                  {topRegionalData.map((region, index) => (
                     <div key={region.id} className="flex items-center gap-2 text-xs">
                       <div
                         className="w-2 h-2 rounded-full"

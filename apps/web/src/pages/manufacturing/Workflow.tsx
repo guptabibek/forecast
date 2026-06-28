@@ -6,6 +6,8 @@ import { format } from 'date-fns';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { formatInr } from '@utils/number-format';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
+import { ConfirmDialog } from '@components/common/ConfirmDialog';
 
 const safeFormat = (dateVal: any, fmt: string, fallback = '—') => {
   try {
@@ -44,6 +46,17 @@ const emptyStep = { stepOrder: 1, name: '', approverType: 'ROLE', approverRole: 
 type Tab = 'templates' | 'instances' | 'pending';
 
 export default function WorkflowPage() {
+  
+  const confirmAction1 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete?",
+    variant: 'danger',
+  });
+  const confirmAction2 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete this step?",
+    variant: 'danger',
+  });
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>('templates');
   const [showCreateTemplate, setShowCreateTemplate] = useState(false);
@@ -189,7 +202,7 @@ export default function WorkflowPage() {
           <button onClick={() => toggleTemplate.mutate(r.id)} className="p-1 text-indigo-600 hover:text-indigo-800">
             <Badge variant={r.isActive ? 'warning' : 'success'} size="sm">{r.isActive ? 'Off' : 'On'}</Badge>
           </button>
-          <button onClick={() => { if (confirm('Delete?')) deleteTemplate.mutate(r.id); }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
+          <button onClick={() => { confirmAction1.confirm(() => deleteTemplate.mutate(r.id)) }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
         </div>
       ),
     },
@@ -355,7 +368,7 @@ export default function WorkflowPage() {
                         <td className="px-3 py-2">{s.approverType}</td>
                         <td className="px-3 py-2">{s.approverRole || '—'}</td>
                         <td className="px-3 py-2 text-right">{s.timeoutHours ?? '—'}</td>
-                        <td className="px-3 py-2"><button onClick={() => { if (confirm('Delete this step?')) deleteStepMut.mutate(s.id); }} className="text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button></td>
+                        <td className="px-3 py-2"><button onClick={() => { confirmAction2.confirm(() => deleteStepMut.mutate(s.id)) }} className="text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -464,6 +477,9 @@ export default function WorkflowPage() {
           </div>
         </div>
       </Modal>
+    
+      <ConfirmDialog open={confirmAction1.confirmProps.isOpen} onCancel={confirmAction1.confirmProps.onClose} onConfirm={confirmAction1.confirmProps.onConfirm} title={confirmAction1.confirmProps.title} message={confirmAction1.confirmProps.message} variant={confirmAction1.confirmProps.variant as any} confirmLabel={confirmAction1.confirmProps.confirmText} />
+      <ConfirmDialog open={confirmAction2.confirmProps.isOpen} onCancel={confirmAction2.confirmProps.onClose} onConfirm={confirmAction2.confirmProps.onConfirm} title={confirmAction2.confirmProps.title} message={confirmAction2.confirmProps.message} variant={confirmAction2.confirmProps.variant as any} confirmLabel={confirmAction2.confirmProps.confirmText} />
     </div>
   );
 }

@@ -8,6 +8,8 @@ import { format } from 'date-fns';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { formatInr } from '@utils/number-format';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
+import { ConfirmDialog } from '@components/common/ConfirmDialog';
 
 const safeFormat = (dateVal: any, fmt: string, fallback = '—') => {
   try {
@@ -27,6 +29,12 @@ const emptyPromo = { name: '', description: '', type: 'PRICE_DISCOUNT', startDat
 type Tab = 'all' | 'active' | 'upcoming';
 
 export default function PromotionsPage() {
+  
+  const confirmAction1 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete?",
+    variant: 'danger',
+  });
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>('all');
   const [showCreate, setShowCreate] = useState(false);
@@ -147,7 +155,7 @@ export default function PromotionsPage() {
             setShowEdit(true);
           }} className="p-1 text-amber-600 hover:text-amber-800"><PencilIcon className="h-4 w-4" /></button>
           <button onClick={() => { setSelected(r); setCopyForm({ code: `${r.code}-COPY`, name: `${r.name} (Copy)`, startDate: '', endDate: '', copyLiftFactors: true }); setShowCopy(true); }} className="p-1 text-indigo-600 hover:text-indigo-800"><DocumentDuplicateIcon className="h-4 w-4" /></button>
-          <button onClick={() => { if (confirm('Delete?')) deleteMut.mutate(r.id); }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
+          <button onClick={() => { confirmAction1.confirm(() => deleteMut.mutate(r.id)) }} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
         </div>
       ),
     },
@@ -365,6 +373,8 @@ export default function PromotionsPage() {
           </div>
         )}
       </Modal>
+    
+      <ConfirmDialog open={confirmAction1.confirmProps.isOpen} onCancel={confirmAction1.confirmProps.onClose} onConfirm={confirmAction1.confirmProps.onConfirm} title={confirmAction1.confirmProps.title} message={confirmAction1.confirmProps.message} variant={confirmAction1.confirmProps.variant as any} confirmLabel={confirmAction1.confirmProps.confirmText} />
     </div>
   );
 }

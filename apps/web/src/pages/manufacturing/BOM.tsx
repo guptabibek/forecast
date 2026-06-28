@@ -1,10 +1,12 @@
 import type { UnitOfMeasure } from '@/types';
-import { Badge, Button, Card, CardHeader, Column, DataTable, Modal, ProductSelector, QueryErrorBanner } from '@components/ui';
+import { Badge, Button, Card, CardHeader, Column, DataTable, Modal, ProductSelector, PromptModal, QueryErrorBanner } from '@components/ui';
 import { useGridState } from '@/hooks/useGridState';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
 import { DocumentDuplicateIcon, MagnifyingGlassIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { bomService, uomService, type BOM, type BOMComponent } from '@services/api';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
+import { ConfirmDialog } from '@components/common/ConfirmDialog';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { addBomComponentSchema, createBomSchema, flattenErrors } from './schemas';
@@ -44,8 +46,16 @@ export default function BOMPage() {
   const [selectedBOM, setSelectedBOM] = useState<BOM | null>(null);
   const [createProductId, setCreateProductId] = useState('');
   const [componentProductId, setComponentProductId] = useState('');
+  const [showCopyPrompt, setShowCopyPrompt] = useState(false);
+  const [bomToCopy, setBomToCopy] = useState<BOM | null>(null);
 
   const grid = useGridState({ initialSortBy: 'createdAt', initialSortOrder: 'desc' });
+  const confirmRemove = useConfirmAction({
+    title: 'Remove Component',
+    message: 'Are you sure you want to remove this component?',
+    variant: 'danger',
+    confirmText: 'Remove'
+  });
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['manufacturing', 'boms', grid.queryKey],
@@ -166,10 +176,8 @@ export default function BOMPage() {
   };
 
   const handleCopyBOM = (bom: BOM) => {
-    const newRevision = prompt('Enter new revision number:', `${bom.revision}-copy`);
-    if (newRevision) {
-      copyMutation.mutate({ id: bom.id, targetProductId: bom.productId, newRevision });
-    }
+    setBomToCopy(bom);
+    setShowCopyPrompt(true);
   };
 
   const columns: Column<BOM>[] = [
@@ -394,7 +402,7 @@ return (
                       <td className="py-2 text-center">{comp.isPhantom ? 'Yes' : 'No'}</td>
                       <td className="py-2">
                         <button
-                          onClick={() => { if (confirm('Remove this component?')) removeComponentMutation.mutate(comp.id); }}
+                          onClick={() => confirmRemove.confirm(() => removeComponentMutation.mutate(comp.id))}
                           className="p-1 hover:bg-red-100 text-red-600 rounded"
                         >
                           <TrashIcon className="w-4 h-4" />
@@ -540,6 +548,23 @@ return (
           )}
         </div>
       </Modal>
+          <PromptModal
+        isOpen={showCopyPrompt}
+        onClose={() => setShowCopyPrompt(false)}
+        title="Copy BOM"
+        message="Enter a new revision number for the copied BOM:"
+        initialValue={bomToCopy ? `${bomToCopy.revision}-copy` : ''}
+        inputLabel="Revision Number"
+        confirmText="Copy"
+        onConfirm={(val) => {
+          if (bomToCopy) {
+            copyMutation.mutate({ id: bomToCopy.id, targetProductId: bomToCopy.productId, newRevision: val });
+          }
+          setShowCopyPrompt(false);
+        }}
+        required
+      />
+      <ConfirmDialog open={confirmRemove.confirmProps.isOpen} onCancel={confirmRemove.confirmProps.onClose} onConfirm={confirmRemove.confirmProps.onConfirm} title={confirmRemove.confirmProps.title} message={confirmRemove.confirmProps.message} variant={confirmRemove.confirmProps.variant as any} confirmLabel={confirmRemove.confirmProps.confirmText} />
     </div>
   );
 }

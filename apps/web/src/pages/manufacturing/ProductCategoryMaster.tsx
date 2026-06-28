@@ -10,6 +10,8 @@ import { productCategoryService } from '@services/api';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
+import { ConfirmDialog } from '@components/common/ConfirmDialog';
 
 interface CategoryForm {
   code: string;
@@ -32,6 +34,12 @@ const emptyForm: CategoryForm = {
 };
 
 export default function ProductCategoryMaster() {
+  
+  const confirmAction1 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete category '${row.name}'?",
+    variant: 'danger',
+  });
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -173,7 +181,7 @@ export default function ProductCategoryMaster() {
           </button>
           <button
             onClick={() => {
-              if (confirm(`Delete category "${row.name}"?`)) deleteMut.mutate(row.id);
+              confirmAction1.confirm(() => deleteMut.mutate(row.id))
             }}
             className="p-1 text-gray-400 hover:text-red-500 transition-colors"
             title="Delete"
@@ -308,6 +316,8 @@ export default function ProductCategoryMaster() {
       <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title={`Edit Category — ${selected?.code}`}>
         {renderForm(true)}
       </Modal>
+    
+      <ConfirmDialog open={confirmAction1.confirmProps.isOpen} onCancel={confirmAction1.confirmProps.onClose} onConfirm={confirmAction1.confirmProps.onConfirm} title={confirmAction1.confirmProps.title} message={confirmAction1.confirmProps.message} variant={confirmAction1.confirmProps.variant as any} confirmLabel={confirmAction1.confirmProps.confirmText} />
     </div>
   );
 }

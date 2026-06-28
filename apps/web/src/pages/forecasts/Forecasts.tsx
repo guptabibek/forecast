@@ -43,6 +43,121 @@ import {
     YAxis,
 } from 'recharts';
 import { formatInr } from '@utils/number-format';
+import { PageSkeleton } from '@components/ui/PageSkeleton';
+import React from 'react';
+
+// Memoized Chart Component to prevent expensive re-renders
+const MemoizedForecastChart = React.memo(function MemoizedForecastChart({ 
+  chartData, 
+  availableModelsInChart, 
+  selectedModels, 
+  primaryForecastData, 
+  showConfidenceBands, 
+  showActuals, 
+  modelColors 
+}: { 
+  chartData: any[];
+  availableModelsInChart: Set<string>;
+  selectedModels: Set<string>;
+  primaryForecastData: any;
+  showConfidenceBands: boolean;
+  showActuals: boolean;
+  modelColors: Record<string, string>;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={400}>
+      <ComposedChart data={chartData}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+        <XAxis dataKey="period" stroke="#94a3b8" fontSize={12} />
+        <YAxis 
+          stroke="#94a3b8" 
+          fontSize={12}
+          tickFormatter={(value) => formatInr(value, 0)}
+        />
+        <Tooltip
+          contentStyle={{
+            backgroundColor: '#1e293b',
+            border: 'none',
+            borderRadius: '8px',
+            color: '#f8fafc',
+          }}
+          formatter={(value: number, name: string) => [
+            formatInr(value),
+            name.replace(/_/g, ' ').replace(' lower', ' (Lower)').replace(' upper', ' (Upper)')
+          ]}
+        />
+        <Legend />
+        {showConfidenceBands && Array.from(availableModelsInChart).map((model) => {
+          if (!selectedModels.has(model)) return null;
+          const hasConfidenceBands = chartData.some(d => d[`${model}_lower`] != null && d[`${model}_upper`] != null);
+          if (!hasConfidenceBands) return null;
+          return (
+            <Area
+              key={`${model}_band`}
+              type="monotone"
+              dataKey={`${model}_upper`}
+              stroke="none"
+              fill={modelColors[model] || '#888888'}
+              fillOpacity={0.1}
+              name={`${model.replace(/_/g, ' ')} (Upper)`}
+              connectNulls
+            />
+          );
+        })}
+        {showConfidenceBands && Array.from(availableModelsInChart).map((model) => {
+          if (!selectedModels.has(model)) return null;
+          const hasConfidenceBands = chartData.some(d => d[`${model}_lower`] != null);
+          if (!hasConfidenceBands) return null;
+          return (
+            <Area
+              key={`${model}_lower`}
+              type="monotone"
+              dataKey={`${model}_lower`}
+              stroke="none"
+              fill="white"
+              fillOpacity={1}
+              name={`${model.replace(/_/g, ' ')} (Lower)`}
+              legendType="none"
+              connectNulls
+            />
+          );
+        })}
+        {Array.from(availableModelsInChart).map((model) => {
+          if (!selectedModels.has(model)) return null;
+          const isPrimary = primaryForecastData?.primaryModel === model;
+          return (
+            <Line
+              key={model}
+              type="monotone"
+              dataKey={model}
+              stroke={modelColors[model] || '#888888'}
+              strokeWidth={isPrimary ? 3 : 2}
+              dot={{ 
+                fill: modelColors[model] || '#888888', 
+                strokeWidth: isPrimary ? 3 : 2,
+                r: isPrimary ? 5 : 4,
+              }}
+              name={`${model.replace(/_/g, ' ')}${isPrimary ? ' ★' : ''}`}
+              connectNulls
+            />
+          );
+        })}
+        {showActuals && chartData.some(d => d.Actuals != null) && (
+          <Line
+            type="monotone"
+            dataKey="Actuals"
+            stroke="#10b981"
+            strokeWidth={3}
+            strokeDasharray="8 4"
+            dot={{ fill: '#10b981', strokeWidth: 2, r: 5 }}
+            name="Actuals"
+            connectNulls
+          />
+        )}
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+});
 
 const modelColors: Record<string, string> = {
   MOVING_AVERAGE: '#3b82f6',
@@ -1022,18 +1137,7 @@ export default function Forecasts() {
           </p>
         </div>
       ) : isLoading || plansLoading ? (
-        <div className="space-y-6 animate-pulse">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="card p-4 space-y-3">
-                <div className="h-4 w-20 bg-secondary-200 dark:bg-secondary-700 rounded" />
-                <div className="h-8 w-24 bg-secondary-200 dark:bg-secondary-700 rounded" />
-                <div className="h-3 w-32 bg-secondary-200 dark:bg-secondary-700 rounded" />
-              </div>
-            ))}
-          </div>
-          <div className="card p-6 h-[400px] bg-secondary-100 dark:bg-secondary-800 rounded" />
-        </div>
+        <PageSkeleton />
       ) : !selectedScenarioId ? (
         <div className="card p-12 text-center">
           <ChartBarIcon className="w-16 h-16 text-secondary-300 mx-auto mb-4" />
@@ -1854,100 +1958,15 @@ export default function Forecasts() {
                 )}
               </div>
             </div>
-            <ResponsiveContainer width="100%" height={400}>
-              <ComposedChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="period" stroke="#94a3b8" fontSize={12} />
-                <YAxis 
-                  stroke="#94a3b8" 
-                  fontSize={12}
-                  tickFormatter={(value) => formatInr(value, 0)}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#1e293b',
-                    border: 'none',
-                    borderRadius: '8px',
-                    color: '#f8fafc',
-                  }}
-                  formatter={(value: number, name: string) => [
-                    formatInr(value),
-                    name.replace(/_/g, ' ').replace(' lower', ' (Lower)').replace(' upper', ' (Upper)')
-                  ]}
-                />
-                <Legend />
-                {/* Confidence Bands (rendered first so they appear behind lines) */}
-                {showConfidenceBands && Array.from(availableModelsInChart).map((model) => {
-                  if (!selectedModels.has(model)) return null;
-                  const hasConfidenceBands = chartData.some(d => d[`${model}_lower`] != null && d[`${model}_upper`] != null);
-                  if (!hasConfidenceBands) return null;
-                  return (
-                    <Area
-                      key={`${model}_band`}
-                      type="monotone"
-                      dataKey={`${model}_upper`}
-                      stroke="none"
-                      fill={modelColors[model] || '#888888'}
-                      fillOpacity={0.1}
-                      name={`${model.replace(/_/g, ' ')} (Upper)`}
-                      connectNulls
-                    />
-                  );
-                })}
-                {showConfidenceBands && Array.from(availableModelsInChart).map((model) => {
-                  if (!selectedModels.has(model)) return null;
-                  const hasConfidenceBands = chartData.some(d => d[`${model}_lower`] != null);
-                  if (!hasConfidenceBands) return null;
-                  return (
-                    <Area
-                      key={`${model}_lower`}
-                      type="monotone"
-                      dataKey={`${model}_lower`}
-                      stroke="none"
-                      fill="white"
-                      fillOpacity={1}
-                      name={`${model.replace(/_/g, ' ')} (Lower)`}
-                      legendType="none"
-                      connectNulls
-                    />
-                  );
-                })}
-                {/* Main forecast lines */}
-                {Array.from(availableModelsInChart).map((model) => {
-                  if (!selectedModels.has(model)) return null;
-                  const isPrimary = primaryForecastData?.primaryModel === model;
-                  return (
-                    <Line
-                      key={model}
-                      type="monotone"
-                      dataKey={model}
-                      stroke={modelColors[model] || '#888888'}
-                      strokeWidth={isPrimary ? 3 : 2}
-                      strokeDasharray={isPrimary ? undefined : undefined}
-                      dot={{ 
-                        fill: modelColors[model] || '#888888', 
-                        strokeWidth: isPrimary ? 3 : 2,
-                        r: isPrimary ? 5 : 4,
-                      }}
-                      name={`${model.replace(/_/g, ' ')}${isPrimary ? ' ★' : ''}`}
-                      connectNulls
-                    />
-                  );
-                })}
-                {showActuals && chartData.some(d => d.Actuals != null) && (
-                  <Line
-                    type="monotone"
-                    dataKey="Actuals"
-                    stroke="#10b981"
-                    strokeWidth={3}
-                    strokeDasharray="8 4"
-                    dot={{ fill: '#10b981', strokeWidth: 2, r: 5 }}
-                    name="Actuals"
-                    connectNulls
-                  />
-                )}
-              </ComposedChart>
-            </ResponsiveContainer>
+            <MemoizedForecastChart 
+              chartData={chartData}
+              availableModelsInChart={availableModelsInChart}
+              selectedModels={selectedModels}
+              primaryForecastData={primaryForecastData}
+              showConfidenceBands={showConfidenceBands}
+              showActuals={showActuals}
+              modelColors={modelColors}
+            />
             {availableModelsInChart.size === 0 && (
               <div className="text-center py-8 text-secondary-500">
                 <p>No forecast data to display. Click "Run Models" to generate forecasts.</p>

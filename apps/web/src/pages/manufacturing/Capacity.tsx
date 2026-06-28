@@ -7,6 +7,8 @@ import { format } from 'date-fns';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { formatInr } from '@utils/number-format';
+import { useConfirmAction } from '@/hooks/useConfirmAction';
+import { ConfirmDialog } from '@components/common/ConfirmDialog';
 
 const safeFormat = (dateVal: any, fmt: string, fallback = '—') => {
   try {
@@ -28,6 +30,22 @@ const emptyShift = { name: '', startTime: '06:00', endTime: '14:00', daysOfWeek:
 type Tab = 'work-centers' | 'utilization' | 'bottlenecks';
 
 export default function CapacityPage() {
+  
+  const confirmAction1 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete this work center?",
+    variant: 'danger',
+  });
+  const confirmAction2 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete this capacity record?",
+    variant: 'danger',
+  });
+  const confirmAction3 = useConfirmAction({
+    title: 'Confirm Action',
+    message: "Delete this shift?",
+    variant: 'danger',
+  });
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>('work-centers');
   const [showCreateWC, setShowCreateWC] = useState(false);
@@ -175,7 +193,7 @@ export default function CapacityPage() {
             <button onClick={() => toggleWC.mutate(r.id)} className="p-1 text-indigo-600 hover:text-indigo-800" title="Toggle">
               <Badge variant={active ? 'warning' : 'success'} size="sm">{active ? 'Off' : 'On'}</Badge>
             </button>
-            <button onClick={() => { if (confirm('Delete this work center?')) deleteWC.mutate(r.id); }} className="p-1 text-red-600 hover:text-red-800" title="Delete">
+            <button onClick={() => { confirmAction1.confirm(() => deleteWC.mutate(r.id)) }} className="p-1 text-red-600 hover:text-red-800" title="Delete">
               <TrashIcon className="h-4 w-4" />
             </button>
           </div>
@@ -407,7 +425,7 @@ export default function CapacityPage() {
                         <td className="px-3 py-2 text-right">{c.maxCapacityPerHour ?? '—'}</td>
                         <td className="px-3 py-2 text-right">{c.availableHoursPerDay ?? '—'}</td>
                         <td className="px-3 py-2 text-right">{c.availableDaysPerWeek ?? '—'}</td>
-                        <td className="px-3 py-2"><button onClick={() => { if (confirm('Delete this capacity record?')) deleteCapMut.mutate(c.id); }} className="text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button></td>
+                        <td className="px-3 py-2"><button onClick={() => { confirmAction2.confirm(() => deleteCapMut.mutate(c.id)) }} className="text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -437,7 +455,7 @@ export default function CapacityPage() {
                         <td className="px-3 py-2">{s.daysOfWeek?.map((d: number) => ['Su','Mo','Tu','We','Th','Fr','Sa'][d]).join(', ')}</td>
                         <td className="px-3 py-2 text-right">{s.breakMinutes ?? 0}m</td>
                         <td className="px-3 py-2">{safeFormat(s.effectiveDate, 'yyyy-MM-dd')}</td>
-                        <td className="px-3 py-2"><button onClick={() => { if (confirm('Delete this shift?')) deleteShiftMut.mutate(s.id); }} className="text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button></td>
+                        <td className="px-3 py-2"><button onClick={() => { confirmAction3.confirm(() => deleteShiftMut.mutate(s.id)) }} className="text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -529,6 +547,10 @@ export default function CapacityPage() {
           </div>
         </div>
       </Modal>
+    
+      <ConfirmDialog open={confirmAction1.confirmProps.isOpen} onCancel={confirmAction1.confirmProps.onClose} onConfirm={confirmAction1.confirmProps.onConfirm} title={confirmAction1.confirmProps.title} message={confirmAction1.confirmProps.message} variant={confirmAction1.confirmProps.variant as any} confirmLabel={confirmAction1.confirmProps.confirmText} />
+      <ConfirmDialog open={confirmAction2.confirmProps.isOpen} onCancel={confirmAction2.confirmProps.onClose} onConfirm={confirmAction2.confirmProps.onConfirm} title={confirmAction2.confirmProps.title} message={confirmAction2.confirmProps.message} variant={confirmAction2.confirmProps.variant as any} confirmLabel={confirmAction2.confirmProps.confirmText} />
+      <ConfirmDialog open={confirmAction3.confirmProps.isOpen} onCancel={confirmAction3.confirmProps.onClose} onConfirm={confirmAction3.confirmProps.onConfirm} title={confirmAction3.confirmProps.title} message={confirmAction3.confirmProps.message} variant={confirmAction3.confirmProps.variant as any} confirmLabel={confirmAction3.confirmProps.confirmText} />
     </div>
   );
 }

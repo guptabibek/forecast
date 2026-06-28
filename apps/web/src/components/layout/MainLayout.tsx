@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
+import { Breadcrumbs } from './Breadcrumbs';
 import { AiReportingAssistant } from '../reports/AiReportingAssistant';
 import Header from './Header';
 import Sidebar from './Sidebar';
@@ -10,6 +11,7 @@ export default function MainLayout() {
     const stored = localStorage.getItem('sidebar-collapsed');
     return stored === 'true';
   });
+  const location = useLocation();
 
   const handleToggleCollapse = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -30,6 +32,14 @@ export default function MainLayout() {
 
   return (
     <div className="min-h-screen bg-secondary-50 dark:bg-secondary-900">
+      {/* Skip to content link for accessibility */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:bg-primary-600 focus:text-white focus:rounded-lg focus:shadow-lg"
+      >
+        Skip to content
+      </a>
+
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
@@ -56,8 +66,12 @@ export default function MainLayout() {
           onMenuClick={() => setSidebarOpen(true)}
         />
 
-        <main className="flex-1 p-2.5 sm:p-3 lg:p-4 overflow-x-hidden">
-          <Outlet />
+        <main id="main-content" className="flex-1 p-2.5 sm:p-3 lg:p-4 overflow-x-hidden">
+          <Breadcrumbs />
+          {/* Page content with enter animation keyed by route */}
+          <div key={location.pathname} className="animate-page-enter">
+            <Outlet />
+          </div>
         </main>
         <AiReportingAssistant />
       </div>

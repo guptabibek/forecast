@@ -18,41 +18,43 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         {label && (
           <label
             htmlFor={inputId}
-            className="block text-sm font-medium text-gray-700 mb-1"
+            className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1"
           >
             {label}
-            {props.required && <span className="text-red-500 ml-1">*</span>}
+            {props.required && <span className="text-error-500 ml-1">*</span>}
           </label>
         )}
         <div className="relative rounded-md">
           {leftIcon && (
             <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-              <span className="text-gray-500 sm:text-sm">{leftIcon}</span>
+              <span className="text-secondary-500 dark:text-secondary-400 sm:text-sm">{leftIcon}</span>
             </div>
           )}
           <input
             ref={ref}
             id={inputId}
             className={`
-              block w-full rounded-lg border px-3 py-2 shadow-sm transition-colors
-              focus:outline-none focus:ring-2 focus:ring-offset-0
-              disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed
+              block w-full border px-3 py-2 shadow-sm transition-colors
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-0
+              disabled:bg-secondary-50 disabled:text-secondary-500 disabled:cursor-not-allowed
+              dark:disabled:bg-secondary-800/50 dark:disabled:text-secondary-500
               ${leftIcon ? 'pl-10' : ''}
               ${rightIcon || error ? 'pr-10' : ''}
               ${
                 error
-                  ? 'border-red-300 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500'
-                  : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500'
+                  ? 'border-error-300 dark:border-error-500 text-error-900 dark:text-error-300 placeholder-error-300 dark:placeholder-error-500/50 focus-visible:border-error-500 focus-visible:ring-error-500'
+                  : 'border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-800 text-secondary-900 dark:text-secondary-100 placeholder-secondary-400 dark:placeholder-secondary-500 focus-visible:border-primary-500 focus-visible:ring-primary-500'
               }
               ${className}
             `}
+            style={{ borderRadius: 'var(--radius)' }}
             aria-invalid={error ? 'true' : 'false'}
-            aria-describedby={error ? `${inputId}-error` : undefined}
+            aria-describedby={error ? `${inputId}-error` : helperText ? `${inputId}-helper` : undefined}
             {...props}
           />
           {error && (
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-              <ExclamationCircleIcon className="h-5 w-5 text-red-500" />
+              <ExclamationCircleIcon className="h-5 w-5 text-error-500" />
             </div>
           )}
           {rightIcon && !error && (
@@ -62,12 +64,14 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           )}
         </div>
         {error && (
-          <p className="mt-1 text-sm text-red-600" id={`${inputId}-error`}>
+          <p className="mt-1 text-sm text-error-600 dark:text-error-400" id={`${inputId}-error`} role="alert">
             {error}
           </p>
         )}
         {helperText && !error && (
-          <p className="mt-1 text-sm text-gray-500">{helperText}</p>
+          <p className="mt-1 text-sm text-secondary-500 dark:text-secondary-400" id={`${inputId}-helper`}>
+            {helperText}
+          </p>
         )}
       </div>
     );
@@ -93,28 +97,30 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
         {label && (
           <label
             htmlFor={selectId}
-            className="block text-sm font-medium text-gray-700 mb-1"
+            className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1"
           >
             {label}
-            {props.required && <span className="text-red-500 ml-1">*</span>}
+            {props.required && <span className="text-error-500 ml-1">*</span>}
           </label>
         )}
         <select
           ref={ref}
           id={selectId}
           className={`
-            block w-full rounded-lg border px-3 py-2 shadow-sm transition-colors
-            focus:outline-none focus:ring-2 focus:ring-offset-0
-            disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed
+            block w-full border px-3 py-2 shadow-sm transition-colors
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-0
+            disabled:bg-secondary-50 disabled:text-secondary-500 disabled:cursor-not-allowed
+            dark:disabled:bg-secondary-800/50 dark:disabled:text-secondary-500
             ${
               error
-                ? 'border-red-300 text-red-900 focus:border-red-500 focus:ring-red-500'
-                : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500'
+                ? 'border-error-300 dark:border-error-500 text-error-900 dark:text-error-300 focus-visible:border-error-500 focus-visible:ring-error-500'
+                : 'border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-800 text-secondary-900 dark:text-secondary-100 focus-visible:border-primary-500 focus-visible:ring-primary-500'
             }
             ${className}
           `}
+          style={{ borderRadius: 'var(--radius)' }}
           aria-invalid={error ? 'true' : 'false'}
-          aria-describedby={error ? `${selectId}-error` : undefined}
+          aria-describedby={error ? `${selectId}-error` : helperText ? `${selectId}-helper` : undefined}
           {...props}
         >
           {placeholder && (
@@ -129,12 +135,14 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           ))}
         </select>
         {error && (
-          <p className="mt-1 text-sm text-red-600" id={`${selectId}-error`}>
+          <p className="mt-1 text-sm text-error-600 dark:text-error-400" id={`${selectId}-error`} role="alert">
             {error}
           </p>
         )}
         {helperText && !error && (
-          <p className="mt-1 text-sm text-gray-500">{helperText}</p>
+          <p className="mt-1 text-sm text-secondary-500 dark:text-secondary-400" id={`${selectId}-helper`}>
+            {helperText}
+          </p>
         )}
       </div>
     );
@@ -158,37 +166,41 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         {label && (
           <label
             htmlFor={textareaId}
-            className="block text-sm font-medium text-gray-700 mb-1"
+            className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1"
           >
             {label}
-            {props.required && <span className="text-red-500 ml-1">*</span>}
+            {props.required && <span className="text-error-500 ml-1">*</span>}
           </label>
         )}
         <textarea
           ref={ref}
           id={textareaId}
           className={`
-            block w-full rounded-lg border px-3 py-2 shadow-sm transition-colors
-            focus:outline-none focus:ring-2 focus:ring-offset-0
-            disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed
+            block w-full border px-3 py-2 shadow-sm transition-colors
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-0
+            disabled:bg-secondary-50 disabled:text-secondary-500 disabled:cursor-not-allowed
+            dark:disabled:bg-secondary-800/50 dark:disabled:text-secondary-500
             ${
               error
-                ? 'border-red-300 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500'
-                : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500'
+                ? 'border-error-300 dark:border-error-500 text-error-900 dark:text-error-300 placeholder-error-300 dark:placeholder-error-500/50 focus-visible:border-error-500 focus-visible:ring-error-500'
+                : 'border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-800 text-secondary-900 dark:text-secondary-100 placeholder-secondary-400 dark:placeholder-secondary-500 focus-visible:border-primary-500 focus-visible:ring-primary-500'
             }
             ${className}
           `}
+          style={{ borderRadius: 'var(--radius)' }}
           aria-invalid={error ? 'true' : 'false'}
-          aria-describedby={error ? `${textareaId}-error` : undefined}
+          aria-describedby={error ? `${textareaId}-error` : helperText ? `${textareaId}-helper` : undefined}
           {...props}
         />
         {error && (
-          <p className="mt-1 text-sm text-red-600" id={`${textareaId}-error`}>
+          <p className="mt-1 text-sm text-error-600 dark:text-error-400" id={`${textareaId}-error`} role="alert">
             {error}
           </p>
         )}
         {helperText && !error && (
-          <p className="mt-1 text-sm text-gray-500">{helperText}</p>
+          <p className="mt-1 text-sm text-secondary-500 dark:text-secondary-400" id={`${textareaId}-helper`}>
+            {helperText}
+          </p>
         )}
       </div>
     );
@@ -214,7 +226,8 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
             id={checkboxId}
             type="checkbox"
             className={`
-              h-4 w-4 rounded border-gray-300 text-primary-600
+              h-4 w-4 rounded border-secondary-300 dark:border-secondary-600
+              text-primary-600 bg-white dark:bg-secondary-800
               focus:ring-primary-600 cursor-pointer
               disabled:cursor-not-allowed disabled:opacity-50
               ${className}
@@ -225,11 +238,11 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
         <div className="ml-3 text-sm leading-6">
           <label
             htmlFor={checkboxId}
-            className="font-medium text-gray-900 cursor-pointer"
+            className="font-medium text-secondary-900 dark:text-secondary-100 cursor-pointer"
           >
             {label}
           </label>
-          {description && <p className="text-gray-500">{description}</p>}
+          {description && <p className="text-secondary-500 dark:text-secondary-400">{description}</p>}
         </div>
       </div>
     );

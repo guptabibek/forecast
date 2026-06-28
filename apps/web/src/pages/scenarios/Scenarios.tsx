@@ -17,9 +17,94 @@ import clsx from 'clsx';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
 import { Fragment, useState } from 'react';
+import React from 'react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { z } from 'zod';
+
+const MemoizedScenarioCard = React.memo(function MemoizedScenarioCard({ 
+  scenario, 
+  config, 
+  isSelected, 
+  onToggle, 
+  onEdit, 
+  onDelete, 
+  index 
+}: {
+  scenario: Scenario;
+  config: { label: string; color: string; description: string };
+  isSelected: boolean;
+  onToggle: (id: string) => void;
+  onEdit: (scenario: Scenario) => void;
+  onDelete: (id: string) => void;
+  index: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.05 }}
+      className={clsx(
+        'card p-5 cursor-pointer transition-all hover:shadow-md',
+        isSelected && 'ring-2 ring-primary-500',
+      )}
+      onClick={() => onToggle(scenario.id)}
+    >
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggle(scenario.id)}
+            onClick={(e) => e.stopPropagation()}
+            className="rounded"
+          />
+          <span className={clsx('badge', config.color)}>{config.label}</span>
+          {scenario.isBaseline && (
+            <span className="badge bg-primary-100 text-primary-700">Baseline</span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(scenario);
+            }}
+            className="p-1.5 rounded-lg hover:bg-secondary-100 dark:hover:bg-secondary-700"
+          >
+            <PencilSquareIcon className="w-4 h-4" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(scenario.id);
+            }}
+            className="p-1.5 rounded-lg hover:bg-error-50 text-error-600"
+          >
+            <TrashIcon className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      <h3 className="font-semibold mb-1">{scenario.name}</h3>
+      {scenario.description && (
+        <p className="text-sm text-secondary-500 mb-3 line-clamp-2">
+          {scenario.description}
+        </p>
+      )}
+
+      {scenario.planVersion && (
+        <div className="text-xs text-secondary-500 mb-2">
+          Plan: {scenario.planVersion.name} (v{scenario.planVersion.version})
+        </div>
+      )}
+
+      <div className="text-xs text-secondary-400">
+        Created {format(new Date(scenario.createdAt), 'MMM d, yyyy')}
+      </div>
+    </motion.div>
+  );
+});
 
 const scenarioSchema = z.object({
   name: z.string().min(3, 'Name must be at least 3 characters'),
@@ -232,8 +317,22 @@ export default function Scenarios() {
 
       {/* Scenarios Grid */}
       {isLoading ? (
-        <div className="card p-12 flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary-500" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="card p-5 space-y-3">
+              <div className="flex justify-between">
+                <div className="h-6 w-24 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
+                <div className="flex gap-1">
+                  <div className="h-7 w-7 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
+                  <div className="h-7 w-7 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
+                </div>
+              </div>
+              <div className="h-5 w-40 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
+              <div className="h-4 w-full bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse mt-2" />
+              <div className="h-4 w-3/4 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse" />
+              <div className="h-3 w-32 bg-secondary-200 dark:bg-secondary-700 rounded animate-pulse mt-4" />
+            </div>
+          ))}
         </div>
       ) : !scenarios || scenarios.length === 0 ? (
         <div className="card p-12 text-center">
@@ -258,70 +357,16 @@ export default function Scenarios() {
             const isSelected = selectedScenarios.has(scenario.id);
 
             return (
-              <motion.div
+              <MemoizedScenarioCard
                 key={scenario.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.05 }}
-                className={clsx(
-                  'card p-5 cursor-pointer transition-all hover:shadow-md',
-                  isSelected && 'ring-2 ring-primary-500',
-                )}
-                onClick={() => toggleScenarioSelection(scenario.id)}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleScenarioSelection(scenario.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="rounded"
-                    />
-                    <span className={clsx('badge', config.color)}>{config.label}</span>
-                    {scenario.isBaseline && (
-                      <span className="badge bg-primary-100 text-primary-700">Baseline</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openModal(scenario);
-                      }}
-                      className="p-1.5 rounded-lg hover:bg-secondary-100 dark:hover:bg-secondary-700"
-                    >
-                      <PencilSquareIcon className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(scenario.id);
-                      }}
-                      className="p-1.5 rounded-lg hover:bg-error-50 text-error-600"
-                    >
-                      <TrashIcon className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                <h3 className="font-semibold mb-1">{scenario.name}</h3>
-                {scenario.description && (
-                  <p className="text-sm text-secondary-500 mb-3 line-clamp-2">
-                    {scenario.description}
-                  </p>
-                )}
-
-                {scenario.planVersion && (
-                  <div className="text-xs text-secondary-500 mb-2">
-                    Plan: {scenario.planVersion.name} (v{scenario.planVersion.version})
-                  </div>
-                )}
-
-                <div className="text-xs text-secondary-400">
-                  Created {format(new Date(scenario.createdAt), 'MMM d, yyyy')}
-                </div>
-              </motion.div>
+                scenario={scenario}
+                config={config}
+                isSelected={isSelected}
+                onToggle={toggleScenarioSelection}
+                onEdit={openModal}
+                onDelete={handleDelete}
+                index={index}
+              />
             );
           })}
         </div>

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { settingsKeys } from '../hooks/useSettings';
 import { settingsService, type PublicTenantSettings, type TenantSettings } from '../services/api/settings.service';
 import { useAuthStore } from '../stores/auth.store';
@@ -83,7 +83,6 @@ function loadGoogleFont(family: string) {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { isAuthenticated } = useAuthStore();
-  const [themeKey, setThemeKey] = useState(0); // Used to trigger useEffect on theme change
   const publicWorkspaceHost = useMemo(() => {
     if (typeof window === 'undefined') return undefined;
 
@@ -117,29 +116,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const isLoading = isAuthenticated ? isAuthenticatedSettingsLoading : isPublicSettingsLoading;
 
   /* ─ Theme mode management ─ */
-  const resolveInitialTheme = useCallback((): 'light' | 'dark' => {
-    const stored = localStorage.getItem('themeMode');
-    if (stored === 'light' || stored === 'dark') return stored;
-    if (settings?.defaultTheme === 'dark') return 'dark';
-    if (settings?.defaultTheme === 'system') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    }
-    return 'light';
-  }, [settings?.defaultTheme]);
-
-  const themeMode = useMemo(resolveInitialTheme, [resolveInitialTheme]);
-
-  const setThemeMode = useCallback((mode: 'light' | 'dark') => {
-    localStorage.setItem('themeMode', mode);
-    document.documentElement.classList.toggle('dark', mode === 'dark');
-    // Trigger re-calculation of CSS variables
-    setThemeKey(k => k + 1);
-  }, []);
-
-  const toggleTheme = useCallback(() => {
-    const current = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-    setThemeMode(current === 'dark' ? 'light' : 'dark');
-  }, [setThemeMode]);
+  const themeMode = 'light';
+  const setThemeMode = useCallback((_mode: 'light' | 'dark') => {}, []);
+  const toggleTheme = useCallback(() => {}, []);
 
   const refresh = useCallback(() => {
     if (isAuthenticated) {
@@ -155,20 +134,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     const root = document.documentElement;
 
-    // Theme mode
-    const stored = localStorage.getItem('themeMode');
-    if (!stored) {
-      // Apply default from settings
-      if (settings.defaultTheme === 'dark') {
-        root.classList.add('dark');
-      } else if (settings.defaultTheme === 'system') {
-        root.classList.toggle('dark', window.matchMedia('(prefers-color-scheme: dark)').matches);
-      } else {
-        root.classList.remove('dark');
-      }
-    } else {
-      root.classList.toggle('dark', stored === 'dark');
-    }
+    // Force light mode for enterprise static theme
+    root.classList.remove('dark');
 
     // Primary color → CSS variables for full palette
     if (settings.primaryColor) {
@@ -235,21 +202,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       }
       link.href = settings.faviconUrl;
     }
-
-    // Custom CSS
-    const customStyleId = 'tenant-custom-css';
-    let customStyle = document.getElementById(customStyleId) as HTMLStyleElement | null;
-    if (settings.customCss) {
-      if (!customStyle) {
-        customStyle = document.createElement('style');
-        customStyle.id = customStyleId;
-        document.head.appendChild(customStyle);
-      }
-      customStyle.textContent = settings.customCss;
-    } else if (customStyle) {
-      customStyle.remove();
-    }
-  }, [settings, themeKey]);
+  }, [settings]);
 
   const ctx = useMemo<BrandingContext>(
     () => ({

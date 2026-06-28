@@ -1,6 +1,7 @@
 import { getFallbackPathForRole, isForecastViewerRole, isManufacturingBlockedRole, isPlanningVisibleManufacturingPath, isSuperAdmin } from '@/permissions';
 import { ErrorBoundary } from '@components/common/ErrorBoundary';
 import { SessionRenewalPrompt } from '@components/common/SessionRenewalPrompt';
+import { PageSkeleton } from '@components/ui/PageSkeleton';
 import { useSettings } from '@hooks/useSettings';
 import { useAuthStore } from '@stores/auth.store';
 import { lazy, Suspense, useEffect } from 'react';
@@ -48,8 +49,8 @@ const AiBillingAdmin = lazy(() => import('@pages/platform/AiBillingAdmin'));
 
 function RouteFallback() {
   return (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-primary-500" />
+    <div className="min-h-screen bg-secondary-50 dark:bg-secondary-900 p-4">
+      <PageSkeleton />
     </div>
   );
 }
@@ -60,8 +61,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500" />
+      <div className="min-h-screen bg-secondary-50 dark:bg-secondary-900 p-4">
+        <PageSkeleton />
       </div>
     );
   }
